@@ -70,6 +70,10 @@ METRIC_MAPPINGS={
       "Ordinary Shares Number",
       "Share Issued",
       "Common Stock Shares Outstanding"
+  ],
+  "interest_expense":[
+    "Interest Expense",
+    "Interest Expense Non Operating"
   ]
 }
 
@@ -105,6 +109,7 @@ class FinancialStatementNormaliser:
         normalised_data["current_liabilities"]=(self.extract_metric(self.balance_sheet,METRIC_MAPPINGS["current_liabilities"]))
         normalised_data["cash"]=(self.extract_metric(self.balance_sheet,METRIC_MAPPINGS["cash"]))
         normalised_data["shares_outstanding"]=(self.extract_metric(self.balance_sheet,METRIC_MAPPINGS["shares_outstanding"]))
+        normalised_data["interest_expense"] = (self.extract_metric(self.income_statement,METRIC_MAPPINGS["interest_expense"]))
 
         normalised_df=pd.DataFrame(normalised_data)
         cleaned_df=self.align_and_clean(normalised_df)
