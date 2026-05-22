@@ -1,0 +1,9 @@
+pandas
+numpy
+yfinance
+streamlit
+scikit-learn
+langchain
+chromadb
+sentense-transformers
+openai
