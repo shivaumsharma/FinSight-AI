@@ -5,5 +5,7 @@ streamlit
 scikit-learn
 langchain
 chromadb
-sentense-transformers
-openai
+sentence-transformers
+transformers
+torch
+langchain-text-splitters
