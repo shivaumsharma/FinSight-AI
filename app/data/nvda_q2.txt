@@ -1,0 +1,29 @@
+Operator: Welcome to NVIDIA’s Q2 earnings conference call.
+
+CEO: Demand for accelerated computing and generative AI infrastructure continued to grow at unprecedented levels.
+
+CEO: Enterprise adoption of NVIDIA AI platforms expanded significantly across cloud providers, healthcare, automotive, and financial services industries.
+
+CEO: Data center revenue reached record highs driven by strong GPU demand for large language model training and inference workloads.
+
+CFO: Revenue increased 122% year-over-year, led primarily by AI infrastructure deployments and hyperscaler investments.
+
+CFO: Gross margins improved due to higher software and enterprise AI platform contributions.
+
+Analyst: What is driving the strongest demand currently?
+
+CEO: Generative AI and large-scale inference workloads remain the largest growth drivers.
+
+Analyst: Are supply chain conditions improving?
+
+CEO: Supply chain capacity improved substantially, though demand still exceeds supply in several high-performance GPU categories.
+
+Analyst: How do you view China demand trends?
+
+CEO: China remains an important market, though regulatory restrictions continue to create uncertainty in export dynamics.
+
+Analyst: What are your expectations for enterprise AI adoption?
+
+CEO: We believe enterprise AI adoption is still in the very early stages and represents a multi-year growth opportunity.
+
+Operator: This concludes NVIDIA’s Q2 earnings conference call.
