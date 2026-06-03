@@ -8,5 +8,5 @@ langchain
 langchain-text-splitters
 chromadb==0.4.24
 
-sentence-transformers==3.3.1
+sentence-transformers==2.7.0
 torch
