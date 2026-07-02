@@ -1,32 +1,39 @@
 import streamlit as st
 import pandas as pd
-
 from app.rag.rag_pipeline import RAGPipeline
 from app.rag.report_generator import ReportGenerator
-
 from app.valuation.valuation_pipeline import ValuationPipeline
-
-from app.data.financial_normalizer import (
-    FinancialStatementNormaliser
-)
-
-from app.data.market_data import (
-    MarketDataLoader
-)
-
-from app.analysis.investment_thesis import (
-    InvestmentThesisGenerator
-)
+from app.data.financial_normalizer import (FinancialStatementNormaliser)
+from app.data.market_data import (MarketDataLoader)
+from app.analysis.investment_thesis import (InvestmentThesisGenerator)
 
 # ---------------------------------------------------
 # PAGE CONFIG
 # ---------------------------------------------------
+
+
+if "analysis_complete" not in st.session_state:
+    st.session_state.analysis_complete = False
+
 
 st.set_page_config(
     page_title="Finsight AI",
     layout="wide"
 )
 
+DEFAULT_STATE={
+    "valuation_results":None,
+    "generated_response": None,
+    "retrieved_chunks": None,
+    "financial_df": None,
+    "company_info": None,
+    "market_cap": None,
+    "beta": None,
+    "transcript_text": None,
+}
+
+for key,value in DEFAULT_STATE.items():
+    st.session_state.setdefault(key,value)
 st.title("Finsight AI")
 st.subheader(
     "AI-Powered Financial Research Platform"
@@ -114,7 +121,7 @@ financial_df = normaliser.normalise()
 # VALIDATE REQUIRED COLUMNS
 # ---------------------------------------------------
 
-required_columns = [
+required_columns =[
     "revenue",
     "ebit",
     "tax_expense",
@@ -129,7 +136,7 @@ required_columns = [
     "shares_outstanding"
 ]
 
-missing_columns = [
+missing_columns =[
     col for col in required_columns
     if col not in financial_df.columns
 ]
@@ -143,12 +150,26 @@ if missing_columns:
 # ---------------------------------------------------
 # MAIN PIPELINE
 # ---------------------------------------------------
+with open(transcript_path,"r",encoding="utf-8") as file:
+        transcript_text = file.read()
+
+        if not st.session_state.analysis_complete:
+            st.text_area("Transcript Preview",transcript_text[:1000],height=300)
+        else:
+             with st.expander("View Transcript"):
+                  st.text_area(
+                       "TranscriptPreview",
+                               transcript_text[:1000],
+                               height=300
+                    )
+     
 
 if st.button("Run RAG Pipeline"):
 
     # -----------------------------------------------
     # RAG PIPELINE
     # -----------------------------------------------
+    st.session_state.analysis_complete = True
 
     with st.spinner("Processing Transcript..."):
 
@@ -180,16 +201,7 @@ if st.button("Run RAG Pipeline"):
     # AI ANALYSIS
     # -----------------------------------------------
 
-    st.subheader("Retrieved Context")
-
-    st.metric(
-        "Retrieved Chunks",
-        len(retrieved_chunks)
-    )
-
-    st.subheader(
-        "AI Generated Financial Analysis"
-    )
+    st.subheader("AI Generated Financial Analysis")
 
     st.write(generated_response)
 
@@ -198,148 +210,141 @@ if st.button("Run RAG Pipeline"):
     # -----------------------------------------------
     # DCF VALUATION
     # -----------------------------------------------
+    DCF_KEYWORDS=[
+        "dcf",
+        "valuation",
+        "intrinsic",
+        "fair value",
+        "undervalued",
+        "overvalued",
+        "equity value",
+        "enterprise value",
+        "wacc",
+        "fcff"
+    ]
+    query_lower=(query or "").lower()
+    run_dcf=any(keyword in query.lower()for keyword in DCF_KEYWORDS)
+    if run_dcf:
+        
+        with st.expander("DCF Valuation Analysis"):
 
-    st.subheader("DCF Valuation Analysis")
-
-    valuation_pipeline = ValuationPipeline(
-        financial_df=financial_df,
-        market_cap=market_cap,
-        beta=beta
-    )
-
-    valuation_results = (
-        valuation_pipeline.run_valuation()
-    )
-
-    
-    st.metric(
-        "Estimated Equity Value",
-        f"${valuation_results['equity_value']:,.0f}"
-    )
-
-    st.metric(
-        "Estimated Enterprise Value",
-        f"${valuation_results['enterprise_value']:,.0f}"
-    )
-
+            valuation_pipeline = ValuationPipeline(
+                financial_df=financial_df,
+                market_cap=market_cap,
+                beta=beta
+            )
+            valuation_results = (valuation_pipeline.run_valuation())
+            st.metric(
+                "Estimated Equity Value",
+                f"${valuation_results['equity_value']:,.0f}"
+            )
+            st.metric(
+                "Estimated Enterprise Value",
+                f"${valuation_results['enterprise_value']:,.0f}"
+            )
+        
+        
     # -----------------------------------------------
     # FCFF FORECASTS
     # -----------------------------------------------
 
-    st.subheader("Projected FCFF")
+        with st.expander("Projected FCFF"):
 
-    fcff_df = valuation_results[
-        "fcff_forecasts"
-    ]
+            fcff_df = valuation_results["fcff_forecasts"]
 
-    chart_df=pd.DataFrame({
-        "Year":[
-            f"Year {i}"
-            for i in range(1,len(fcff_df)+1)
-        ],
-        "FCFF":fcff_df["forecast_fcff"].values
-    })
+            chart_df=pd.DataFrame({"Year":[f"Year {i}"
+            for i in range(1,len(fcff_df)+1)],
+            "FCFF":fcff_df["forecast_fcff"].values
+            })
 
-    for year, fcff in enumerate(
-        fcff_df["forecast_fcff"],
-        start=1
-    ):
-        st.write(
-            f"Year {year}: ${fcff:,.0f}"
-        )
-        st.line_chart(
-            chart_df.set_index("Year")
-        )
+            for year, fcff in enumerate(fcff_df["forecast_fcff"],start=1):
+                st.write(f"Year {year}: ${fcff:,.0f}")
+                st.line_chart(chart_df.set_index("Year"))
 
-    st.markdown("---")
+            st.markdown("---")
 
-    # -----------------------------------------------
-    # INVESTMENT THESIS
-    # -----------------------------------------------
+        # -----------------------------------------------
+        # INVESTMENT THESIS
+        # -----------------------------------------------
 
-    thesis_generator = (
-        InvestmentThesisGenerator()
-    )
+            thesis_generator = (InvestmentThesisGenerator())
 
-    investment_thesis = (
-        thesis_generator.generate_thesis(
-            generated_response,
-            valuation_results
-        )
-    )
+            investment_thesis = (
+                thesis_generator.generate_thesis(
+                    generated_response,
+                     valuation_results
+                ))
 
-    st.subheader("Investment Thesis")
+            st.subheader("Investment Thesis")
 
-    st.markdown("### Bullish Signals")
+            st.markdown("### Bullish Signals")
 
-    for signal in investment_thesis[
-        "bullish_signals"
-    ]:
-        st.write(f"✅ {signal}")
+            for signal in investment_thesis["bullish_signals"]:
+                st.write(f"✅ {signal}")
 
-    st.markdown("### Bearish Signals")
+            st.markdown("### Bearish Signals")
 
-    for signal in investment_thesis[
-        "bearish_signals"
-    ]:
-        st.write(f"⚠️ {signal}")
+            for signal in investment_thesis["bearish_signals" ]:
+                st.write(f"⚠️ {signal}")
 
-    st.markdown("### Valuation Summary")
+            st.markdown("### Valuation Summary")
 
-    st.write(
-        investment_thesis[
-            "valuation_summary"
-        ]
-    )
+            st.write(investment_thesis["valuation_summary"])
 
-    st.markdown("### Recommendation")
+            st.markdown("### Recommendation")
 
-    st.success(
-        investment_thesis[
-            "recommendation"
-        ]
-    )
+            st.success(
+                investment_thesis[
+                    "recommendation"
+                ]
+            )
 
-    st.markdown("---")
+            st.markdown("---")
 
-    # -----------------------------------------------
-    # RETRIEVED CHUNKS
-    # -----------------------------------------------
+            # -----------------------------------------------
+            # RETRIEVED CHUNKS
+            # -----------------------------------------------
 
-    for i, chunk in enumerate(
-        retrieved_chunks
-    ):
+            for i, chunk in enumerate(
+                retrieved_chunks
+            ):
 
-        st.markdown(
-            f"### Chunk {i+1}"
-        )
+                st.markdown(
+                    f"### Chunk {i+1}"
+                )
 
-        st.write(chunk)
+                st.write(chunk)
+        
+        # -----------------------------------------------
+        # Sensitivity Analysis
+        # -----------------------------------------------
+        
+        with st.expander("DCF Sensitivity Analysis"):
 
-# ---------------------------------------------------
-# TRANSCRIPT PREVIEW
-# ---------------------------------------------------
+            st.dataframe(valuation_results.keys())
 
-with open(transcript_path,"r",encoding="utf-8") as file:
+            st.session_state["generated_response"] = generated_response
+            st.session_state["valuation_results"] = valuation_results
+            st.session_state["retrieved_chunks"] = retrieved_chunks
+            st.session_state["financial_df"] = financial_df
+            st.session_state["company_info"] = company_info
+            st.session_state["market_cap"] = market_cap
+            st.session_state["beta"] = beta
 
-    transcript_text = file.read()
+            st.write(type(valuation_results["sensitivity_analysis"]))
+            st.write(valuation_results["sensitivity_analysis"])
 
-st.text_area("Transcript Preview",transcript_text[:1000],height=300)
 
-# ---------------------------------------------------
-# FINANCIAL DATA
-# ---------------------------------------------------
+        # ---------------------------------------------------
+        # FINANCIAL DATA
+        # ---------------------------------------------------
 
-with st.expander("View Financial Data"):
-    st.dataframe(financial_df)
+        with st.expander("View Financial Data"):
+                st.dataframe(financial_df)
 
-# ---------------------------------------------------
-# FOOTER
-# ---------------------------------------------------
+            # ---------------------------------------------------
+            # FOOTER
+            # ---------------------------------------------------
 
-st.markdown("---")
 
 st.caption("Built using RAG, ChromaDB, FinBERT and DCF valuation models")
-st.subheader("DCF Sensitivity Analysis")
-
-st.dataframe(valuation_results.key)

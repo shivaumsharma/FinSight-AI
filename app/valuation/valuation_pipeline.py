@@ -22,7 +22,7 @@ class ValuationPipeline:
     enterprise_value=dcf_engine.calculate_enterprise_value()
 
     sensitvity_engine=(SensitivityEngine(enterprise_value))
-    sensivity_analysis=(sensitvity_engine.generate_matrix)
+    sensitivity_analysis=(sensitvity_engine.generate_matrix())
     equity_value=(dcf_engine.calculate_equity_value(total_debt=self.financial_df["total_debt"].iloc[-1],cash=self.financial_df["cash"].iloc[-1]))
     
     return {
@@ -30,5 +30,5 @@ class ValuationPipeline:
     "equity_value": equity_value,
     "fcff_forecasts": fcff_forecasts,
     "wacc": wacc,
-    "sensivity_analysis":sensivity_analysis
+    "sensitivity_analysis":sensitivity_analysis
     }
