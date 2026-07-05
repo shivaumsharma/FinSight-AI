@@ -6,6 +6,7 @@ from app.valuation.valuation_pipeline import ValuationPipeline
 from app.data.financial_normalizer import (FinancialStatementNormaliser)
 from app.data.market_data import (MarketDataLoader)
 from app.analysis.investment_thesis import (InvestmentThesisGenerator)
+from app.agents.research_agent import ResearchAgent
 
 # ---------------------------------------------------
 # PAGE CONFIG
@@ -166,6 +167,9 @@ with open(transcript_path,"r",encoding="utf-8") as file:
 
 if st.button("Run RAG Pipeline"):
 
+    agent = ResearchAgent()
+    results = agent.run(question=query,ticker=ticker,transcript_path=transcript_path)
+    st.write(results)
     # -----------------------------------------------
     # RAG PIPELINE
     # -----------------------------------------------
