@@ -16,7 +16,7 @@ if __name__=="__main__":
 
     # report_generator=(ReportGenerator(api_key="YOUR_OPENAI_API_KEY"))
 
-    # generated_response=(report_generator.generate_response(query=query,retrived_chunks=retrived_chunks))
+    # context.generated_answer=(report_generator.generate_response(query=query,retrived_chunks=retrived_chunks))
 
     # print("\n===Generated Response===\n")
-    # print(generated_response)
+    # print(context.generated_answer)

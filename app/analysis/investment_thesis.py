@@ -1,7 +1,7 @@
 class InvestmentThesisGenerator:
-  def generate_thesis(self,generated_analysis,valuation_results):
-    enterprise_value=valuation_results["enterprise_value"]
-    equity_value=valuation_results["equity_value"]
+  def generate_thesis(self,generated_analysis,context.valuation_results):
+    enterprise_value=context.valuation_results["enterprise_value"]
+    equity_value=context.valuation_results["equity_value"]
     bullish_signals=[
       "Strong AI demand trends",
       "Enterprise adoption expansion",

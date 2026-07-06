@@ -1,12 +1,12 @@
+import time
+from app.core.research_context import ResearchContext
+from app.core.evidence_builder import EvidenceBuilder
+from app.core.reasoning_engine import ReasoningEngine
+from app.core.evaluation_engine import EvaluationEngine
+from app.core.logger import ResearchLogger
 import streamlit as st
 import pandas as pd
-from app.rag.rag_pipeline import RAGPipeline
-from app.rag.report_generator import ReportGenerator
-from app.valuation.valuation_pipeline import ValuationPipeline
-from app.data.financial_normalizer import (FinancialStatementNormaliser)
-from app.data.market_data import (MarketDataLoader)
-from app.analysis.investment_thesis import (InvestmentThesisGenerator)
-from app.agents.research_agent import ResearchAgent
+
 
 # ---------------------------------------------------
 # PAGE CONFIG
@@ -22,17 +22,25 @@ st.set_page_config(
     layout="wide"
 )
 
-DEFAULT_STATE={
-    "valuation_results":None,
-    "generated_response": None,
-    "retrieved_chunks": None,
-    "financial_df": None,
-    "company_info": None,
-    "market_cap": None,
-    "beta": None,
-    "transcript_text": None,
-}
+DEFAULT_STATE = {
 
+    "context.valuation_results":None,
+
+    "generated_answer":None,
+
+    "retrieved_chunks":None,
+
+    "financial_df":None,
+
+    "company_info":None,
+
+    "market_cap":None,
+
+    "beta":None,
+
+    "transcript_text":None
+
+}
 for key,value in DEFAULT_STATE.items():
     st.session_state.setdefault(key,value)
 st.title("Finsight AI")
@@ -89,66 +97,6 @@ query = st.text_input(
 )
 
 # ---------------------------------------------------
-# LOAD MARKET DATA
-# ---------------------------------------------------
-
-loader = MarketDataLoader(ticker)
-
-income_stmt = loader.get_income_statement()
-
-balance_sheet = loader.get_balance_sheet()
-
-cash_flow = loader.get_cash_flow()
-
-company_info = loader.get_company_info()
-
-market_cap = company_info["market_cap"]
-
-beta = 1.2
-
-# ---------------------------------------------------
-# NORMALIZE FINANCIALS
-# ---------------------------------------------------
-
-normaliser = FinancialStatementNormaliser(
-    income_stmt,
-    balance_sheet,
-    cash_flow
-)
-
-financial_df = normaliser.normalise()
-
-# ---------------------------------------------------
-# VALIDATE REQUIRED COLUMNS
-# ---------------------------------------------------
-
-required_columns =[
-    "revenue",
-    "ebit",
-    "tax_expense",
-    "pretax_income",
-    "depreciation",
-    "capex",
-    "current_assets",
-    "current_liabilities",
-    "interest_expense",
-    "total_debt",
-    "cash",
-    "shares_outstanding"
-]
-
-missing_columns =[
-    col for col in required_columns
-    if col not in financial_df.columns
-]
-
-if missing_columns:
-    st.error(
-        f"Missing financial metrics: {missing_columns}"
-    )
-    st.stop()
-
-# ---------------------------------------------------
 # MAIN PIPELINE
 # ---------------------------------------------------
 with open(transcript_path,"r",encoding="utf-8") as file:
@@ -166,189 +114,38 @@ with open(transcript_path,"r",encoding="utf-8") as file:
      
 
 if st.button("Run RAG Pipeline"):
+     start = time.time()
 
-    agent = ResearchAgent()
-    results = agent.run(question=query,ticker=ticker,transcript_path=transcript_path)
-    st.write(results)
-    # -----------------------------------------------
-    # RAG PIPELINE
-    # -----------------------------------------------
-    st.session_state.analysis_complete = True
+     context = ResearchContext(
 
-    with st.spinner("Processing Transcript..."):
+        ticker=ticker,
 
-        rag_pipeline = RAGPipeline()
+        question=query,
 
-        rag_pipeline.ingest_transcript(
-            transcript_path
-        )
+        transcript_path=transcript_path
 
-        retrieved_chunks = (
-            rag_pipeline.query_pipeline(
-                query=query,
-                n_results=3
-            )
-        )
+    )
 
-        report_generator = ReportGenerator()
+     context = EvidenceBuilder().build(context)
 
-        generated_response = (
-            report_generator.generate_response(
-                query=query,
-                retrieved_chunks=retrieved_chunks
-            )
-        )
+     context = ReasoningEngine().run(context)
 
-    st.success("Semantic retrieval completed")
+     end = time.time()
 
-    # -----------------------------------------------
-    # AI ANALYSIS
-    # -----------------------------------------------
+     context = EvaluationEngine().evaluate(
 
-    st.subheader("AI Generated Financial Analysis")
+        context,
 
-    st.write(generated_response)
+        start,
 
-    st.markdown("---")
+        end
 
-    # -----------------------------------------------
-    # DCF VALUATION
-    # -----------------------------------------------
-    DCF_KEYWORDS=[
-        "dcf",
-        "valuation",
-        "intrinsic",
-        "fair value",
-        "undervalued",
-        "overvalued",
-        "equity value",
-        "enterprise value",
-        "wacc",
-        "fcff"
-    ]
-    query_lower=(query or "").lower()
-    run_dcf=any(keyword in query.lower()for keyword in DCF_KEYWORDS)
-    if run_dcf:
-        
-        with st.expander("DCF Valuation Analysis"):
+    )
 
-            valuation_pipeline = ValuationPipeline(
-                financial_df=financial_df,
-                market_cap=market_cap,
-                beta=beta
-            )
-            valuation_results = (valuation_pipeline.run_valuation())
-            st.metric(
-                "Estimated Equity Value",
-                f"${valuation_results['equity_value']:,.0f}"
-            )
-            st.metric(
-                "Estimated Enterprise Value",
-                f"${valuation_results['enterprise_value']:,.0f}"
-            )
-        
-        
-    # -----------------------------------------------
-    # FCFF FORECASTS
-    # -----------------------------------------------
-
-        with st.expander("Projected FCFF"):
-
-            fcff_df = valuation_results["fcff_forecasts"]
-
-            chart_df=pd.DataFrame({"Year":[f"Year {i}"
-            for i in range(1,len(fcff_df)+1)],
-            "FCFF":fcff_df["forecast_fcff"].values
-            })
-
-            for year, fcff in enumerate(fcff_df["forecast_fcff"],start=1):
-                st.write(f"Year {year}: ${fcff:,.0f}")
-                st.line_chart(chart_df.set_index("Year"))
-
-            st.markdown("---")
-
-        # -----------------------------------------------
-        # INVESTMENT THESIS
-        # -----------------------------------------------
-
-            thesis_generator = (InvestmentThesisGenerator())
-
-            investment_thesis = (
-                thesis_generator.generate_thesis(
-                    generated_response,
-                     valuation_results
-                ))
-
-            st.subheader("Investment Thesis")
-
-            st.markdown("### Bullish Signals")
-
-            for signal in investment_thesis["bullish_signals"]:
-                st.write(f"✅ {signal}")
-
-            st.markdown("### Bearish Signals")
-
-            for signal in investment_thesis["bearish_signals" ]:
-                st.write(f"⚠️ {signal}")
-
-            st.markdown("### Valuation Summary")
-
-            st.write(investment_thesis["valuation_summary"])
-
-            st.markdown("### Recommendation")
-
-            st.success(
-                investment_thesis[
-                    "recommendation"
-                ]
-            )
-
-            st.markdown("---")
-
-            # -----------------------------------------------
-            # RETRIEVED CHUNKS
-            # -----------------------------------------------
-
-            for i, chunk in enumerate(
-                retrieved_chunks
-            ):
-
-                st.markdown(
-                    f"### Chunk {i+1}"
-                )
-
-                st.write(chunk)
-        
-        # -----------------------------------------------
-        # Sensitivity Analysis
-        # -----------------------------------------------
-        
-        with st.expander("DCF Sensitivity Analysis"):
-
-            st.dataframe(valuation_results.keys())
-
-            st.session_state["generated_response"] = generated_response
-            st.session_state["valuation_results"] = valuation_results
-            st.session_state["retrieved_chunks"] = retrieved_chunks
-            st.session_state["financial_df"] = financial_df
-            st.session_state["company_info"] = company_info
-            st.session_state["market_cap"] = market_cap
-            st.session_state["beta"] = beta
-
-            st.write(type(valuation_results["sensitivity_analysis"]))
-            st.write(valuation_results["sensitivity_analysis"])
-
-
-        # ---------------------------------------------------
-        # FINANCIAL DATA
-        # ---------------------------------------------------
-
-        with st.expander("View Financial Data"):
-                st.dataframe(financial_df)
-
-            # ---------------------------------------------------
-            # FOOTER
-            # ---------------------------------------------------
-
+     ResearchLogger().save(context)
+     with st.expander("Pipeline Metrics"):
+        st.markdown("## AI Investment Analysis")
+        st.write(context.generated_answer)
+   
 
 st.caption("Built using RAG, ChromaDB, FinBERT and DCF valuation models")

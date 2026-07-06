@@ -1,0 +1,79 @@
+{
+    "timestamp": "2026-07-06T19:54:08.025260",
+    "ticker": "AAPL",
+    "question": "invest in apple ",
+    "company_info": {
+        "company_name": "Apple Inc.",
+        "sector": "Technology",
+        "industry": "Consumer Electronics",
+        "market_cap": 4593617469440,
+        "currency": "USD",
+        "country": "United States"
+    },
+    "market_cap": 4593617469440,
+    "beta": 1.2,
+    "sentiment": {
+        "label": "positive",
+        "score": 0.9503136873245239
+    },
+    "retrieved_chunks": [
+        "CEO: GPU-intensive creative and gaming workloads contributed positively to Mac demand during the quarter.\n\nCEO: AI-assisted content generation applications also supported higher-end hardware demand.",
+        "Operator: Welcome to Apple’s Q2 earnings conference call.\n\nCEO: We are pleased with our quarterly performance and continued ecosystem expansion across global markets.",
+        "CEO: Enterprise deployment of Apple silicon accelerated globally, especially among software development and AI engineering teams."
+    ],
+    "generated_answer": "1. Executive Summary 2. Business Overview 3. Bullish 4. Bearish 5. Financial Analysis 6. Valuation 7. Key Risks 8. Final Recommendation 9. Confidence Score (0-100)",
+    "context.valuation_results": {
+        "enterprise_value": 1290056429836.4404,
+        "equity_value": 1227333429836.4404,
+        "fcff_forecasts": {
+            "forecast_fcff": {
+                "Year_1": 107445713279.18184,
+                "Year_2": 109393205237.2034,
+                "Year_3": 111375996183.06548,
+                "Year_4": 113394725923.5398,
+                "Year_5": 115450045862.12445
+            }
+        },
+        "wacc": 0.11014315253800691,
+        "sensitivity_analysis": {
+            "8%": {
+                "1%": 1628696242669.0,
+                "2%": 1644821948041.0,
+                "3%": 1660947653414.0,
+                "4%": 1677073358787.0,
+                "5%": 1693199064160.0
+            },
+            "9%": {
+                "1%": 1447729993483.0,
+                "2%": 1462063953815.0,
+                "3%": 1476397914146.0,
+                "4%": 1490731874478.0,
+                "5%": 1505065834809.0
+            },
+            "10%": {
+                "1%": 1302956994135.0,
+                "2%": 1315857558433.0,
+                "3%": 1328758122732.0,
+                "4%": 1341658687030.0,
+                "5%": 1354559251328.0
+            },
+            "11%": {
+                "1%": 1184506358304.0,
+                "2%": 1196234144030.0,
+                "3%": 1207961929756.0,
+                "4%": 1219689715482.0,
+                "5%": 1231417501208.0
+            },
+            "12%": {
+                "1%": 1085797495112.0,
+                "2%": 1096547965361.0,
+                "3%": 1107298435610.0,
+                "4%": 1118048905858.0,
+                "5%": 1128799376107.0
+            }
+        }
+    },
+    "investment_thesis": {},
+    "evaluation": "1. Executive Summary 2. Business Overview 3. Bullish 4. Bearish 5. Financial Analysis 6. Valuation 7. Key Risks 8. Final Recommendation 9. Confidence Score (0-100)",
+    "metadata": {}
+}

@@ -14,11 +14,11 @@ class ThesisTool(BaseTool):
     def run(
         self,
         generated_analysis,
-        valuation_results,
+        context.valuation_results,
         **kwargs
     ):
 
         return self.generator.generate_thesis(
             generated_analysis,
-            valuation_results
+            context.valuation_results
         )
