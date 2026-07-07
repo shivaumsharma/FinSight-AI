@@ -62,19 +62,29 @@ class ResearchContext:
     historical_prices: Optional[pd.DataFrame] = None
 
     market_cap: Optional[float] = None
-    beta: Optional[float] = None
+    beta: Optional[float] = None 
+    
+    # Raw Data
 
+    financial_metrics: Dict[str, Any] = field(default_factory=dict)
+    valuation_metrics: Dict[str, Any] = field(default_factory=dict)
+    sentiment_metrics: Dict[str, Any] = field(default_factory=dict)
+
+    # Human Readable Summaries
+
+    financial_summary: str = ""
+    valuation_summary: str = ""
+    sentiment_summary: str = ""
+    research_summary: str = ""
     # ==========================================================
     # RAG Pipeline
     # ==========================================================
 
     transcript_path: Optional[str] = None
-
     transcript_text: Optional[str] = None
-
     transcript_chunks: List[str] = field(default_factory=list)
-
     retrieved_chunks: List[str] = field(default_factory=list)
+    citations: List[Dict[str, str]] = field(default_factory=list)
 
     # ==========================================================
     # NLP

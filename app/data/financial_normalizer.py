@@ -1,81 +1,5 @@
 import pandas as pd 
-
-METRIC_MAPPINGS={
-  "revenue":[
-    "Total Revenue",
-    "Operating Revenue",
-    "Revenue"
-
-  ],
-
-  "ebit":[
-    "EBIT",
-    "Operating Income",
-    "Operating Income Loss"
-  ],
-
-  "net_income":[
-    "Net Income",
-    "Net Income Common Stockholders"
-  ],
-
-  "cash_from_operations":[
-    "Operating Cash Flow",
-    "Cash Flow From Continuing Operating Activities"
-  ],
-
-  "capex":[
-    "Capital Expenditure",
-    "Capital Expenditures",
-    "Purchase Of PPE",
-    "Net PPE Purchase And Sale"
-  ],
-
-  "total_debt":[
-    "Total Debt",
-    "Long Term Debt"
-  ],
-
-  "tax_expense":[
-      "Tax Provision",
-      "Provision For Income Taxes"
-  ],
-  
-  "pretax_income":[
-      "Pretax Income",
-      "Pre Tax Income"
-  ],
-
-  "depreciation":[
-      "Depreciation",
-      "Depreciation And Amortization",
-      "Depreciation Ammortizations Depletion"
-
-  ],
-
-  "current_assets":[
-      "Current Assets"
-  ],
-
-  "current_liabilities":[
-    "Current Liabilities"
-  ],
-
-  "cash":[
-      "Cash And Cash Equivalents",
-      "Cash Cash Equivalents And Short Term Investments"
-  ],
-
-  "shares_outstanding":[
-      "Ordinary Shares Number",
-      "Share Issued",
-      "Common Stock Shares Outstanding"
-  ],
-  "interest_expense":[
-    "Interest Expense",
-    "Interest Expense Non Operating"
-  ]
-}
+from app.data.metric_mappings import METRIC_MAPPINGS
 
 class FinancialStatementNormaliser:
     def __init__(self,income_statement,balance_sheet,cash_flow):
@@ -110,6 +34,10 @@ class FinancialStatementNormaliser:
         normalised_data["cash"]=(self.extract_metric(self.balance_sheet,METRIC_MAPPINGS["cash"]))
         normalised_data["shares_outstanding"]=(self.extract_metric(self.balance_sheet,METRIC_MAPPINGS["shares_outstanding"]))
         normalised_data["interest_expense"] = (self.extract_metric(self.income_statement,METRIC_MAPPINGS["interest_expense"]))
+        normalised_data["total_equity"] = self.extract_metric(
+    self.balance_sheet,
+    METRIC_MAPPINGS["total_equity"]
+)
 
         normalised_df=pd.DataFrame(normalised_data)
         cleaned_df=self.align_and_clean(normalised_df)

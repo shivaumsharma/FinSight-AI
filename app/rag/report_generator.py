@@ -1,4 +1,5 @@
 from transformers import pipeline
+import time 
 
 
 class ReportGenerator:
@@ -11,17 +12,13 @@ class ReportGenerator:
             return_full_text=False
         )
 
-    def generate(
-        self,
-        prompt: str
-    ) -> str:
-
+    def generate(self,prompt: str)-> str:
+        start = time.perf_counter()
         response = self.generator(
             prompt,
-            max_new_tokens=220,
+            max_new_tokens=250,
             do_sample=False,
-            temperature=0.2,
-            repetition_penalty=1.15,
+            repetition_penalty=1.2,
             return_full_text=False
         )
 

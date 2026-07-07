@@ -1,0 +1,17 @@
+{
+  "ticker": "AMZN",
+
+  "question": "Should I invest in Amazon?",
+
+  "expected_sentiment": "positive",
+
+  "expected_recommendation": "Buy",
+
+  "expected_topics": [
+    "AWS",
+    "Cloud",
+    "AI",
+    "Advertising",
+    "Margins"
+  ]
+}

@@ -4,7 +4,7 @@ from .company_tool import CompanyTool
 from .valuation_tool import ValuationTool
 from .rag_tool import RAGTool
 from .sentiment_tool import SentimentTool
-from .thesis_tool import ThesisTool
+
 
 
 class ToolRegistry:

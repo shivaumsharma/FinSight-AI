@@ -1,0 +1,79 @@
+{
+    "timestamp": "2026-07-07T14:54:12.953540",
+    "ticker": "AAPL",
+    "question": "Apple",
+    "company_info": {
+        "company_name": "Apple Inc.",
+        "sector": "Technology",
+        "industry": "Consumer Electronics",
+        "market_cap": 4588403425280,
+        "currency": "USD",
+        "country": "United States"
+    },
+    "market_cap": 4588403425280,
+    "beta": 1.2,
+    "sentiment": {
+        "label": "positive",
+        "score": 0.9439504146575928
+    },
+    "retrieved_chunks": [
+        "CEO: Enterprise customers increasingly adopted Apple silicon infrastructure for machine learning and creative workloads.",
+        "CEO: Enterprise deployment of Apple silicon accelerated globally, especially among software development and AI engineering teams.",
+        "Operator: Welcome to Apple’s Q2 earnings conference call.\n\nCEO: We are pleased with our quarterly performance and continued ecosystem expansion across global markets."
+    ],
+    "generated_answer": " What was CEO's statement about enterprise adoption of their products? \n     Please provide specific details including any relevant data or metrics mentioned by the CEO regarding this topic. \n\nINSUFFICIENT EVIDENCE",
+    "context.valuation_results": {
+        "enterprise_value": 1290089455479.2368,
+        "equity_value": 1227366455479.2368,
+        "fcff_forecasts": {
+            "forecast_fcff": {
+                "Year_1": 107445713279.18184,
+                "Year_2": 109393205237.2034,
+                "Year_3": 111375996183.06548,
+                "Year_4": 113394725923.5398,
+                "Year_5": 115450045862.12445
+            }
+        },
+        "wacc": 0.11014108691823957,
+        "sensitivity_analysis": {
+            "8%": {
+                "1%": 1628737937543.0,
+                "2%": 1644864055736.0,
+                "3%": 1660990173930.0,
+                "4%": 1677116292123.0,
+                "5%": 1693242410316.0
+            },
+            "9%": {
+                "1%": 1447767055593.0,
+                "2%": 1462101382876.0,
+                "3%": 1476435710160.0,
+                "4%": 1490770037443.0,
+                "5%": 1505104364726.0
+            },
+            "10%": {
+                "1%": 1302990350034.0,
+                "2%": 1315891244589.0,
+                "3%": 1328792139144.0,
+                "4%": 1341693033698.0,
+                "5%": 1354593928253.0
+            },
+            "11%": {
+                "1%": 1184536681849.0,
+                "2%": 1196264767808.0,
+                "3%": 1207992853767.0,
+                "4%": 1219720939726.0,
+                "5%": 1231449025685.0
+            },
+            "12%": {
+                "1%": 1085825291695.0,
+                "2%": 1096576037157.0,
+                "3%": 1107326782620.0,
+                "4%": 1118077528082.0,
+                "5%": 1128828273544.0
+            }
+        }
+    },
+    "investment_thesis": {},
+    "evaluation": " What was CEO's statement about enterprise adoption of their products? \n     Please provide specific details including any relevant data or metrics mentioned by the CEO regarding this topic. \n\nINSUFFICIENT EVIDENCE",
+    "metadata": {}
+}

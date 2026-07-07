@@ -54,7 +54,15 @@ class MarketDataLoader:
           return statement_df.loc[metric_name]
       return None
 
-
+  def get_all_data(self):
+    return{
+        "company_info": self.get_company_info(),
+        "income_statement": self.get_income_statement(),
+        "balance_sheet": self.get_balance_sheet(),
+        "cash_flow": self.get_cash_flow(),
+        "historical_prices": self.get_historical_prices()
+    }
+  
 if __name__=="__main__":
    loader=MarketDataLoader("AAPL")
    income_stml=loader.get_income_statement()

@@ -11,7 +11,7 @@ class RAGService:
     def __init__(
         self,
         collection_name="financial_transcripts",
-        embedding_model="all-MiniLM-L6-v2",
+        embedding_model="BAAI/bge-large-en-v1.5",
     ):
 
         self.embedding_model = SentenceTransformer(embedding_model)

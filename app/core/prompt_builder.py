@@ -24,17 +24,17 @@ class PromptBuilder:
 
     def build(self, context: ResearchContext) -> str:
 
-        sections = [
-            self._system_prompt(),
-            self._question(context),
-            self._company(context),
-            self._valuation(context),
-            self._sentiment(context),
-            self._evidence(context),
-            self._instructions(),
-        ]
+        return f"""
+    {self._system_prompt()}
 
-        return "\n\n".join(sections)
+    RESEARCH CONTEXT
+
+    {context.research_summary}
+
+    QUESTION
+
+    {context.question}
+    """
 
     # ==========================================================
     # System Prompt
@@ -43,140 +43,81 @@ class PromptBuilder:
     def _system_prompt(self):
 
         return """
-You are a CFA Level III Equity Research Analyst.
+You are a retrieval-grounded CFA Level III Equity Research Analyst.
 
-You analyze companies using ONLY the supplied information.
+You have NO knowledge of the company beyond the supplied research context.
 
-Never invent facts.
+The supplied research context is the ONLY source of truth.
 
-If information is missing, explicitly state that.
+Never use prior knowledge.
 
-Write concise, professional equity research reports.
-"""
+Never use information learned during pretraining.
 
-    # ==========================================================
-    # User Question
-    # ==========================================================
+Never complete missing information from memory.
 
-    def _question(self, context):
+If a fact is not explicitly present in the supplied context:
 
-        return f"""
-QUESTION
+- Do NOT mention it.
+- Do NOT infer it.
+- Do NOT estimate it.
+- Do NOT guess it.
 
-{context.question}
-"""
+If evidence is insufficient, write exactly:
 
-    # ==========================================================
-    # Company
-    # ==========================================================
+"Insufficient evidence."
 
-    def _company(self, context):
+You may ONLY use:
 
-        info = context.company_info or {}
+- Company Information
+- Financial Summary
+- Valuation Summary
+- Sentiment Summary
+- Earnings Call Evidence
 
-        return f"""
-COMPANY
+Never mention:
 
-Name: {info.get("longName", "Unknown")}
+- Company history
+- Founders
+- Products
+- Competitors
+- Market share
+- Geography
+- Acquisitions
+- Industry facts
 
-Sector: {info.get("sector", "Unknown")}
+unless they explicitly appear in the supplied context.
 
-Industry: {info.get("industry", "Unknown")}
-
-Market Cap: {context.market_cap}
-
-Beta: {context.beta}
-"""
-
-    # ==========================================================
-    # Valuation
-    # ==========================================================
-
-    def _valuation(self, context):
-
-        valuation = context.valuation_results or {}
-
-        return f"""
-VALUATION
-
-Intrinsic Value:
-{valuation.get("intrinsic_value", "Unavailable")}
-
-Enterprise Value:
-{context.enterprise_value}
-
-Equity Value:
-{context.equity_value}
-"""
-
-    # ==========================================================
-    # Sentiment
-    # ==========================================================
-
-    def _sentiment(self, context):
-
-        sentiment = context.sentiment or {}
-
-        return f"""
-MARKET SENTIMENT
-
-Overall Sentiment:
-{sentiment}
-"""
-
-    # ==========================================================
-    # Evidence
-    # ==========================================================
-
-    def _evidence(self, context):
-
-        if not context.retrieved_chunks:
-
-            evidence = "No evidence retrieved."
-
-        else:
-
-            # Use only the most relevant chunks
-            evidence = "\n\n".join(
-                context.retrieved_chunks[:2]
-            )
-
-        return f"""
-EARNINGS CALL EVIDENCE
-
-{evidence}
-"""
-
-    # ==========================================================
-    # Instructions
-    # ==========================================================
-
-    def _instructions(self):
-
-        return """
 TASK
 
-Based ONLY on the information above, answer the investment question.
+Write ONE professional equity research report.
 
-Your report should include:
+Use EXACTLY this structure:
 
-Executive Summary
+# Executive Summary
 
-Bull Case
+# Bull Case
 
-Bear Case
+# Bear Case
 
-Financial Outlook
+# Financial Outlook
 
-Major Risks
+# Investment Recommendation
 
-Investment Recommendation (Buy, Hold or Sell)
+Rules:
 
-Confidence Score (0-100)
+- Every statement must be supported by supplied evidence.
+- Never invent financial metrics.
+- Never invent risks.
+- Never invent competitors.
+- Never invent products.
+- Never invent management commentary.
+- Maximum length: 350 words.
 
-Do not repeat these instructions.
 
-Do not invent information.
 
-Keep the response under 400 words.
 """
+
+    
+  
+
+    

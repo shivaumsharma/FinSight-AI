@@ -1,0 +1,79 @@
+{
+    "timestamp": "2026-07-07T10:00:27.600120",
+    "ticker": "AAPL",
+    "question": "Invest in apple?",
+    "company_info": {
+        "company_name": "Apple Inc.",
+        "sector": "Technology",
+        "industry": "Consumer Electronics",
+        "market_cap": 4592148938752,
+        "currency": "USD",
+        "country": "United States"
+    },
+    "market_cap": 4592148938752,
+    "beta": 1.2,
+    "sentiment": {
+        "label": "positive",
+        "score": 0.9409736394882202
+    },
+    "retrieved_chunks": [
+        "CEO: Enterprise deployment of Apple silicon accelerated globally, especially among software development and AI engineering teams.",
+        "CEO: Enterprise customers increasingly adopted Apple silicon infrastructure for machine learning and creative workloads.",
+        "Operator: Welcome to Apple’s Q2 earnings conference call.\n\nCEO: We are pleased with our quarterly performance and continued ecosystem expansion across global markets."
+    ],
+    "generated_answer": null,
+    "context.valuation_results": {
+        "enterprise_value": 1290065723878.8733,
+        "equity_value": 1227342723878.8733,
+        "fcff_forecasts": {
+            "forecast_fcff": {
+                "Year_1": 107445713279.18184,
+                "Year_2": 109393205237.2034,
+                "Year_3": 111375996183.06548,
+                "Year_4": 113394725923.5398,
+                "Year_5": 115450045862.12445
+            }
+        },
+        "wacc": 0.11014257122266016,
+        "sensitivity_analysis": {
+            "8%": {
+                "1%": 1628707976397.0,
+                "2%": 1644833797946.0,
+                "3%": 1660959619494.0,
+                "4%": 1677085441043.0,
+                "5%": 1693211262591.0
+            },
+            "9%": {
+                "1%": 1447740423464.0,
+                "2%": 1462074487063.0,
+                "3%": 1476408550661.0,
+                "4%": 1490742614260.0,
+                "5%": 1505076677859.0
+            },
+            "10%": {
+                "1%": 1302966381118.0,
+                "2%": 1315867038356.0,
+                "3%": 1328767695595.0,
+                "4%": 1341668352834.0,
+                "5%": 1354569010073.0
+            },
+            "11%": {
+                "1%": 1184514891925.0,
+                "2%": 1196242762142.0,
+                "3%": 1207970632359.0,
+                "4%": 1219698502576.0,
+                "5%": 1231426372793.0
+            },
+            "12%": {
+                "1%": 1085805317598.0,
+                "2%": 1096555865297.0,
+                "3%": 1107306412996.0,
+                "4%": 1118056960695.0,
+                "5%": 1128807508394.0
+            }
+        }
+    },
+    "investment_thesis": {},
+    "evaluation": null,
+    "metadata": {}
+}
