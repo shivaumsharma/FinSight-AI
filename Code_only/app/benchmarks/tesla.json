@@ -1,0 +1,17 @@
+{
+  "ticker": "TSLA",
+
+  "question": "Should I invest in Tesla?",
+
+  "expected_sentiment": "neutral",
+
+  "expected_recommendation": "Hold",
+
+  "expected_topics": [
+    "EV",
+    "Energy",
+    "Autonomous Driving",
+    "Margins",
+    "Manufacturing"
+  ]
+}

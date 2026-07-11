@@ -17,7 +17,7 @@ class ResearchSummaryBuilder:
         lines.append("COMPANY")
         lines.append("=" * 60)
 
-        lines.append(f"Name: {info.get('longName','Unknown')}")
+        lines.append(f"Name: {info.get('company_name','Unknown')}")
         lines.append(f"Sector: {info.get('sector','Unknown')}")
         lines.append(f"Industry: {info.get('industry','Unknown')}")
         lines.append("")

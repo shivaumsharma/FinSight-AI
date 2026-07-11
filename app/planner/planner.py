@@ -1,31 +1,30 @@
-from .planner_rules import TOOL_RULES
+"""
+planner.py
+
+Public entry point used by ResearchAgent. Kept as a thin facade
+(same name/shape as the original rule-based Planner) so nothing
+downstream needs to change how it imports/uses the planner --
+only its internals changed, from a flat keyword table to an LLM
+planner with a deterministic rule-based safety net.
+"""
+
+from typing import List
+
+from .llm_planner import LLMPlanner
 
 
 class Planner:
     """
-    Rule-based planner.
+    Decides which tools are required to answer a user's question.
 
-    Takes a user question and determines which tools
-    are required to answer it.
+    Delegates to LLMPlanner, which itself falls back to
+    `apply_fallback_rules` (see planner_rules.py) whenever the LLM's
+    output can't be trusted. Callers only ever see a clean
+    List[str] of tool names.
     """
 
     def __init__(self):
-        self.rules = TOOL_RULES
+        self.llm_planner = LLMPlanner()
 
-    def create_plan(self, question: str) -> list[str]:
-        """
-        Returns an ordered list of tool names required
-        to answer the user's question.
-        """
-
-        question = question.lower()
-        selected_tools = []
-
-        for keywords, tools in self.rules:
-            if any(keyword in question for keyword in keywords):
-                for tool in tools:
-                    if tool not in selected_tools:
-                        selected_tools.append(tool)
-
-        return selected_tools
-
+    def create_plan(self, question: str) -> List[str]:
+        return self.llm_planner.create_plan(question)

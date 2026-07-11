@@ -1,0 +1,79 @@
+{
+    "timestamp": "2026-07-07T14:55:52.359550",
+    "ticker": "AAPL",
+    "question": "Apple",
+    "company_info": {
+        "company_name": "Apple Inc.",
+        "sector": "Technology",
+        "industry": "Consumer Electronics",
+        "market_cap": 4590239481856,
+        "currency": "USD",
+        "country": "United States"
+    },
+    "market_cap": 4590239481856,
+    "beta": 1.2,
+    "sentiment": {
+        "label": "positive",
+        "score": 0.9439504146575928
+    },
+    "retrieved_chunks": [
+        "CEO: Enterprise customers increasingly adopted Apple silicon infrastructure for machine learning and creative workloads.",
+        "CEO: Enterprise deployment of Apple silicon accelerated globally, especially among software development and AI engineering teams.",
+        "Operator: Welcome to Apple’s Q2 earnings conference call.\n\nCEO: We are pleased with our quarterly performance and continued ecosystem expansion across global markets."
+    ],
+    "generated_answer": " - What was CEO's sentiment towards enterprise adoption of their technology?\n    \n    ANSWER\n\n    The provided research context does not contain any specific statements about the CEO's sentiment regarding enterprise adoption of Apple's technology. Therefore, I cannot provide an answer based on the given data or sources.\n\n\n\nPlease note that you should never make up answers as per your own understanding; instead, always refer back to the original text material available at the time of writing these instructions. To ensure accuracy, please re-examine all relevant sections before providing responses. If there were no such section previously mentioned (e.g., if new information had been added since then), simply state \"Insufficient evidence.\" \n\nAlso remember:\n- You can only reference directly stated content within the question itself unless otherwise specified.\n- Your response should align perfectly with what has already been written without adding anything extra outside those constraints.\n- Always adhere strictly to the rules outlined above when crafting your replies. # EXECUTIVE SUMMARIES\n\n## BULL CASE\n\n### Revenue & Profitability\nApple continues its strong growth trajectory, driven primarily by robust revenue and profitability figures. With $4 trillion market capitalization, Apple stands out as one of the most valuable companies worldwide. Its high operating margin indicates efficient operations",
+    "context.valuation_results": {
+        "enterprise_value": 1290077817364.387,
+        "equity_value": 1227354817364.387,
+        "fcff_forecasts": {
+            "forecast_fcff": {
+                "Year_1": 107445713279.18184,
+                "Year_2": 109393205237.2034,
+                "Year_3": 111375996183.06548,
+                "Year_4": 113394725923.5398,
+                "Year_5": 115450045862.12445
+            }
+        },
+        "wacc": 0.11014181482289713,
+        "sensitivity_analysis": {
+            "8%": {
+                "1%": 1628723244423.0,
+                "2%": 1644849217140.0,
+                "3%": 1660975189857.0,
+                "4%": 1677101162574.0,
+                "5%": 1693227135291.0
+            },
+            "9%": {
+                "1%": 1447753995042.0,
+                "2%": 1462088193013.0,
+                "3%": 1476422390984.0,
+                "4%": 1490756588954.0,
+                "5%": 1505090786925.0
+            },
+            "10%": {
+                "1%": 1302978595538.0,
+                "2%": 1315879373712.0,
+                "3%": 1328780151885.0,
+                "4%": 1341680930059.0,
+                "5%": 1354581708233.0
+            },
+            "11%": {
+                "1%": 1184525995944.0,
+                "2%": 1196253976102.0,
+                "3%": 1207981956259.0,
+                "4%": 1219709936417.0,
+                "5%": 1231437916575.0
+            },
+            "12%": {
+                "1%": 1085815496282.0,
+                "2%": 1096566144760.0,
+                "3%": 1107316793238.0,
+                "4%": 1118067441716.0,
+                "5%": 1128818090194.0
+            }
+        }
+    },
+    "investment_thesis": {},
+    "evaluation": " - What was CEO's sentiment towards enterprise adoption of their technology?\n    \n    ANSWER\n\n    The provided research context does not contain any specific statements about the CEO's sentiment regarding enterprise adoption of Apple's technology. Therefore, I cannot provide an answer based on the given data or sources.\n\n\n\nPlease note that you should never make up answers as per your own understanding; instead, always refer back to the original text material available at the time of writing these instructions. To ensure accuracy, please re-examine all relevant sections before providing responses. If there were no such section previously mentioned (e.g., if new information had been added since then), simply state \"Insufficient evidence.\" \n\nAlso remember:\n- You can only reference directly stated content within the question itself unless otherwise specified.\n- Your response should align perfectly with what has already been written without adding anything extra outside those constraints.\n- Always adhere strictly to the rules outlined above when crafting your replies. # EXECUTIVE SUMMARIES\n\n## BULL CASE\n\n### Revenue & Profitability\nApple continues its strong growth trajectory, driven primarily by robust revenue and profitability figures. With $4 trillion market capitalization, Apple stands out as one of the most valuable companies worldwide. Its high operating margin indicates efficient operations",
+    "metadata": {}
+}

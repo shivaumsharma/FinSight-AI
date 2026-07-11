@@ -1,90 +1,50 @@
+"""
+streamlit_app.py
+
+UI entry point. Previously this file called EvidenceBuilder and
+ReportGenerationEngine directly and hard-coded a transcript-path
+lookup that pointed at files that don't exist
+("app/data/apple_q2.txt" vs the real "app/data/transcripts/apple_q2.txt").
+
+It now delegates all orchestration to ResearchAgent, which:
+ - resolves ticker(s) from the free-text question,
+ - asks the LLM Planner which tools are needed,
+ - executes them,
+ - always finishes with report_tool + evaluation_tool.
+
+The UI's only job is to render whatever ends up on the returned
+ResearchContext -- it does not know or care which tools ran.
+"""
+
 import time
-from app.core.research_context import ResearchContext
-from app.core.ResearchPipeline import EvidenceBuilder
-from app.core.reasoning_engine import ReportGenerationEngine
-from app.evaluation.evaluation_engine import EvaluationEngine
-from app.core.logger import ResearchLogger
+
 import streamlit as st
-import pandas as pd
 
+from app.agents.research_agent import ResearchAgent
+from app.core.logger import ResearchLogger
 
-# ---------------------------------------------------
-# PAGE CONFIG
-# ---------------------------------------------------
-
+st.set_page_config(page_title="Finsight AI", layout="wide")
 
 if "analysis_complete" not in st.session_state:
     st.session_state.analysis_complete = False
 
-
-st.set_page_config(
-    page_title="Finsight AI",
-    layout="wide"
-)
-
-DEFAULT_STATE = {
-
-    "context.valuation_results":None,
-
-    "generated_answer":None,
-
-    "retrieved_chunks":None,
-
-    "financial_df":None,
-
-    "company_info":None,
-
-    "market_cap":None,
-
-    "beta":None,
-
-    "transcript_text":None
-
-}
-for key,value in DEFAULT_STATE.items():
-    st.session_state.setdefault(key,value)
 st.title("Finsight AI")
-st.subheader(
-    "AI-Powered Financial Research Platform"
-)
+st.subheader("Agentic Financial Research Platform")
 
 # ---------------------------------------------------
 # SIDEBAR
 # ---------------------------------------------------
 
-st.sidebar.header("Transcript Settings")
+st.sidebar.header("Settings")
 
-ticker = st.sidebar.text_input(
-    "Ticker Symbol",
-    value="AAPL"
-)
-
-TRANSCRIPT_MAPPING = {
-    "AAPL": "app/data/apple_q2.txt",
-    "NVDA": "app/data/nvda_q2.txt",
-    "MSFT": "app/data/msft_q2.txt"
-}
-
-transcript_path = TRANSCRIPT_MAPPING.get(
-    ticker.upper(),
-    "app/data/apple_q2.txt"
-)
-
-st.sidebar.success(
-    f"Loaded transcript for {ticker.upper()}"
-)
-
-st.sidebar.title("Finsight AI")
-
-st.sidebar.markdown(
-    "AI-Powered Equity Research Platform"
-)
+ticker = st.sidebar.text_input("Ticker Symbol", value="AAPL")
 
 st.sidebar.markdown("""
 ### Example Queries
 - What did management say about AI demand?
-- What drove margin expansion?
-- How is China performing?
+- Calculate Apple's intrinsic value
+- Compare Apple and Microsoft
+- Should I invest in Apple?
 """)
 
 # ---------------------------------------------------
@@ -93,88 +53,68 @@ st.sidebar.markdown("""
 
 query = st.text_input(
     "Ask Financial Question",
-    placeholder="What did management say about AI demand?"
+    placeholder="What did management say about AI demand?",
 )
 
 # ---------------------------------------------------
 # MAIN PIPELINE
 # ---------------------------------------------------
-with open(transcript_path,"r",encoding="utf-8") as file:
-        transcript_text = file.read()
 
-        if not st.session_state.analysis_complete:
-            st.text_area("Transcript Preview",transcript_text[:1000],height=300)
-        else:
-             with st.expander("View Transcript"):
-                  st.text_area(
-                       "TranscriptPreview",
-                               transcript_text[:1000],
-                               height=300
-                    )
-     
+if st.button("Run Research Agent") and query:
 
-if st.button("Run RAG Pipeline"):
-     start = time.time()
+    start = time.time()
 
-     context = ResearchContext(ticker=ticker,question=query,transcript_path=transcript_path)
+    with st.spinner("Planning and executing tools..."):
+        context = ResearchAgent().run(question=query, ticker=ticker)
 
-     context = EvidenceBuilder().build(context)
+    end = time.time()
 
-     with st.expander("Research Summary"):
+    ResearchLogger().save(context)
+
+    st.session_state.analysis_complete = True
+
+    with st.expander(f"Agent Plan (mode: {context.mode})", expanded=False):
+        st.write(context.metadata.get("plan", []))
+        st.caption(f"Tools actually executed: {context.tool_trace}")
+
+    if context.mode == "comparison":
+        st.info(f"Comparing {context.ticker} vs {context.metadata.get('peer_ticker')}")
+
+    with st.expander("Research Summary", expanded=False):
         st.text(context.research_summary)
-     context = ReportGenerationEngine().run(context)
 
-     end = time.time()
+    st.markdown("## AI Investment Analysis")
+    st.write(context.generated_answer)
 
-     evaluation = EvaluationEngine().evaluate(context=context,
-        generated_report=context.generated_answer,
-        latency=end - start,
-    )
+    if context.citations:
+        with st.expander("Retrieved Evidence"):
+            for citation in context.citations:
+                st.markdown(f"### {citation['id']}")
+                st.write(citation["text"])
 
-     ResearchLogger().save(context)
-     with st.expander("Pipeline Metrics"):
-        st.markdown("## AI Investment Analysis")
-        st.write(context.generated_answer)
-     
-     with st.expander("Retrieved Evidence"):
-        for citation in context.citations:
-            st.markdown(f"### {citation['id']}")
-            st.write(citation["text"])
+    if context.valuation_results:
+        with st.expander("Valuation Detail"):
+            st.json(context.valuation_summary)
 
-     st.subheader("AI Evaluation")
-     col1,col2,col3=st.columns(3)
-     with col1:
-         st.metric("Overall Score",f"{evaluation.overall_score:.1f}")
+    evaluation = context.evaluation or {}
 
-     with col2:
-         st.metric("Grounding",f"{evaluation.grounding_score:.1f}%")
+    if evaluation:
+        st.subheader("AI Evaluation")
 
-     with col3:
-         st.metric("Retrieval",f"{evaluation.retrieval_score:.1f}%")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Overall Score", f"{evaluation.get('overall_score', 0):.1f}")
+        with col2:
+            st.metric("Grounding", f"{evaluation.get('grounding_score', 0):.1f}%")
+        with col3:
+            st.metric("Retrieval", f"{evaluation.get('retrieval_score', 0):.1f}%")
 
-     col4,col5,col6=st.columns(3)
-     with col4:
-         st.metric( "Citation Coverage",f"{evaluation.citation_score:.1f}%")
+        col4, col5, col6 = st.columns(3)
+        with col4:
+            st.metric("Citation Coverage", f"{evaluation.get('citation_score', 0):.1f}%")
+        with col5:
+            st.metric("Completeness", f"{evaluation.get('completeness_score', 0):.1f}%")
+        with col6:
+            st.metric("Latency", f"{end - start:.2f}s")
 
-     with col5:
-         st.metric("Completeness",f"{evaluation.completeness_score:.1f}%")
-
-     with col6:
-         st.metric("Latency",f"{evaluation.latency:.2f}s")
-    #  with st.expander("Evaluation Details"):
-
-        # st.write("Supported Claims:", evaluation.supported_claims)
-
-        # st.write("Unsupported Claims:", evaluation.unsupported_claims)
-
-        # st.write("Retrieved Chunks:", evaluation.retrieved_chunks)
-
-        # st.write("Reranked Chunks:", evaluation.reranked_chunks)
-
-        # st.write("Citations Used:", evaluation.citations_used)
-
-        # st.write("Available Citations:", evaluation.citations_available)
-
-        # st.write("Missing Sections:", evaluation.missing_sections)
-   
-st.caption("Built using RAG, ChromaDB, FinBERT and DCF valuation models")
+st.caption("Built using an LLM Planner + RAG, ChromaDB, FinBERT and DCF valuation tools")

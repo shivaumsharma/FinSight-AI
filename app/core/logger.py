@@ -71,7 +71,7 @@ class ResearchLogger:
 
             "investment_thesis": context.investment_thesis,
 
-            "evaluation": context.generated_answer,
+            "evaluation": context.evaluation,
 
             "metadata": context.metadata
 

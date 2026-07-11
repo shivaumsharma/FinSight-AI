@@ -1,0 +1,17 @@
+{
+  "ticker": "NVDA",
+
+  "question": "Should I invest in Nvidia?",
+
+  "expected_sentiment": "positive",
+
+  "expected_recommendation": "Buy",
+
+  "expected_topics": [
+    "AI",
+    "GPUs",
+    "Data Centers",
+    "CUDA",
+    "Enterprise"
+  ]
+}

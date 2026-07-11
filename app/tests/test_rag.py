@@ -1,22 +1,27 @@
-from app.rag.rag_pipeline import(RAGPipeline)
-from app.rag.report_generator import(ReportGenerator)
+"""
+Manual smoke test for the RAG pipeline.
 
-if __name__=="__main__":
-  rag_pipeline=(RAGPipeline())
-  transcript_path=("app/data/apple_q2.txt")
-  rag_pipeline.ingest_transcript(transcript_path)
-  query=("What did the management say about AI demand?")
-  retrieved_chunks=(rag_pipeline.query_pipeline(query=query,n_results=3))
+Fixed: the transcript path previously pointed at
+"app/data/apple_q2.txt", which does not exist (the real file lives
+at "app/data/transcripts/apple_q2.txt"), so this script raised
+FileNotFoundError before it could test anything. Now sourced from
+the same ticker_resolver mapping the rest of the app uses so the two
+can never drift apart again.
+"""
 
-  print("\n===Retrived Chunks===\n")
+from app.rag.rag_pipeline import RAGPipeline
+from app.core.ticker_resolver import get_transcript_path
 
-  for chunk in retrieved_chunks:
-    print(chunk)
-    print("\n--------\n")
+if __name__ == "__main__":
 
-    # report_generator=(ReportGenerator(api_key="YOUR_OPENAI_API_KEY"))
+    rag_pipeline = RAGPipeline()
+    transcript_path = get_transcript_path("AAPL")
+    rag_pipeline.ingest_transcript(transcript_path)
 
-    # context.generated_answer=(report_generator.generate_response(query=query,retrived_chunks=retrived_chunks))
+    query = "What did the management say about AI demand?"
+    retrieved_chunks = rag_pipeline.query_pipeline(query=query, n_results=3)
 
-    # print("\n===Generated Response===\n")
-    # print(context.generated_answer)
+    print("\n=== Retrieved Chunks ===\n")
+    for chunk in retrieved_chunks:
+        print(chunk)
+        print("\n--------\n")

@@ -128,6 +128,19 @@ class ResearchContext:
     # }
 
     # ==========================================================
+    # Agentic Execution (new)
+    # ==========================================================
+
+    # Ordered record of which tools actually ran against this
+    # context, populated by the ResearchAgent. Used for
+    # observability/debugging and shown in the UI trace panel.
+    tool_trace: List[str] = field(default_factory=list)
+
+    # "single" (one company) or "comparison" (two companies).
+    # Set by the ResearchAgent before tool execution begins.
+    mode: str = "single"
+
+    # ==========================================================
     # Metadata
     # ==========================================================
 
@@ -142,6 +155,10 @@ class ResearchContext:
 
     def add_evaluation_metric(self, metric: str, value: Any) -> None:
         self.evaluation[metric] = value
+
+    def record_tool(self, tool_name: str) -> None:
+        """Append a tool name to the execution trace (idempotent per call)."""
+        self.tool_trace.append(tool_name)
 
     def to_dict(self) -> Dict[str, Any]:
         """

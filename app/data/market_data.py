@@ -16,7 +16,9 @@ class MarketDataLoader:
         "industry":info.get("industry"),
         "market_cap":info.get("marketCap"),
         "currency":info.get("currency"),
-        "country":info.get("country")
+        "country":info.get("country"),
+        "beta":info.get("beta"),
+        "current_price":info.get("currentPrice") or info.get("regularMarketPrice"),
      }
   
   def get_historical_prices(self,period="5y"):
