@@ -106,6 +106,12 @@ class FinancialTranscriptChunker:
 
     # ---------------------------------------------------
 
+    # Chunks larger than this get split further by _split_paragraphs --
+    # SEC filing text has no speaker markers to split on, and without
+    # a size cap a whole press release would become a single chunk,
+    # silently truncated by the embedding model's ~512 token limit.
+    MAX_CHUNK_CHARS = 800
+
     def _split_by_speaker(self, transcript):
 
         pattern = re.compile(
@@ -122,17 +128,7 @@ class FinancialTranscriptChunker:
 
         if not matches:
 
-            return [
-
-                {
-
-                    "speaker": "Unknown",
-
-                    "text": transcript.strip()
-
-                }
-
-            ]
+            return self._split_paragraphs(transcript)
 
         for i, match in enumerate(matches):
 
@@ -167,6 +163,52 @@ class FinancialTranscriptChunker:
                 )
 
         return blocks
+
+    # ---------------------------------------------------
+
+    _ATTRIBUTION_PATTERN = re.compile(
+        r"said\s+[^,\.]+,\s*[^,\.]*?\b(CEO|CFO|Chief Executive Officer|Chief Financial Officer|President)\b",
+        re.IGNORECASE,
+    )
+
+    def _split_paragraphs(self, text):
+        """
+        Fallback for text with no "Speaker:" markers -- e.g. an SEC
+        8-K earnings-release exhibit or a 10-Q/10-K MD&A section.
+        Groups paragraphs into chunks up to MAX_CHUNK_CHARS, and
+        tags a chunk's speaker as CEO/CFO/President when it contains
+        an attribution like "...said Tim Cook, Apple's CEO" -- the
+        pattern management quotes actually take in a press release --
+        falling back to "Management" otherwise.
+        """
+
+        paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+
+        blocks = []
+        current = ""
+
+        for paragraph in paragraphs:
+
+            candidate = f"{current}\n{paragraph}" if current else paragraph
+
+            if len(candidate) > self.MAX_CHUNK_CHARS and current:
+                blocks.append(self._paragraph_block(current))
+                current = paragraph
+            else:
+                current = candidate
+
+        if current:
+            blocks.append(self._paragraph_block(current))
+
+        return blocks
+
+    def _paragraph_block(self, text):
+
+        match = self._ATTRIBUTION_PATTERN.search(text)
+
+        speaker = match.group(1).upper() if match and match.group(1).upper() in ("CEO", "CFO") else "Management"
+
+        return {"speaker": speaker, "text": text}
 
     # ---------------------------------------------------
 

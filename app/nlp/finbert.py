@@ -29,7 +29,11 @@ class FinBERT:
 
     def analyze(self, text: str):
 
-        result = self.model(text)[0]
+        # truncation=True: joined evidence from real SEC filings
+        # routinely exceeds BERT's 512-token limit (unlike the old
+        # hand-authored demo transcripts, which never did) -- without
+        # this, transformers raises instead of truncating.
+        result = self.model(text, truncation=True)[0]
 
         return {
             "label": result["label"],
@@ -38,4 +42,4 @@ class FinBERT:
 
     def analyze_many(self, texts):
 
-        return self.model(texts)
+        return self.model(texts, truncation=True)

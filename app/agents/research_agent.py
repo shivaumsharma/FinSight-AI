@@ -11,10 +11,13 @@ and ToolRegistry() itself raised NameError on construction
 (ThisisTool), so this class could never actually run.
 
 The rewritten agent:
- 1. Builds one ResearchContext for the request.
- 2. Resolves ticker(s) deterministically (see ticker_resolver.py) --
-    NOT via the LLM -- and, for comparison questions, stashes the
-    peer ticker in context.metadata for ComparisonTool.
+ 1. Resolves the company/companies mentioned in the question
+    deterministically (see company_resolver.py) -- NOT via a sidebar
+    ticker default (there isn't one anymore: FinSight only researches
+    companies actually named in the question) and NOT via the LLM,
+    and for comparison questions, stashes the peer ticker in
+    context.metadata for ComparisonTool.
+ 2. Builds one ResearchContext for the request.
  3. Asks the Planner (LLM-first, rule-based fallback) which
     evidence-gathering tools are needed.
  4. Executes each planned tool against the context in order.
@@ -25,15 +28,22 @@ The rewritten agent:
 """
 
 from app.core.research_context import ResearchContext
-from app.core.ticker_resolver import (
-    extract_companies,
-    get_transcript_path,
-    is_comparison_question,
-)
+from app.core.company_resolver import resolve_companies, is_comparison_question
 from app.planner import Planner
 from app.tools.tool_registry import ToolRegistry
 
-TRAILING_TOOLS = ["report_tool", "evaluation_tool"]
+TRAILING_TOOLS = ["institutional_consensus_tool", "news_tool", "report_tool", "evaluation_tool"]
+
+
+class NoCompanyDetectedError(Exception):
+    """
+    Raised when no publicly listed company can be identified in the
+    question. FinSight only performs company/investment research --
+    it never falls back to a default ticker or attempts to answer a
+    general finance question. The UI is expected to check
+    resolve_companies() itself before ever calling ResearchAgent, so
+    this mainly guards other/future callers that skip that check.
+    """
 
 
 class ResearchAgent:
@@ -49,15 +59,16 @@ class ResearchAgent:
         self.planner = Planner()
         self.registry = ToolRegistry()
 
-    def run(self, question: str, ticker: str) -> ResearchContext:
+    def run(self, question: str) -> ResearchContext:
 
-        companies = extract_companies(question, default_ticker=ticker)
-        primary_ticker = companies[0] if companies else ticker
+        companies = resolve_companies(question)
+
+        if not companies:
+            raise NoCompanyDetectedError(question)
 
         context = ResearchContext(
-            ticker=primary_ticker,
+            ticker=companies[0],
             question=question,
-            transcript_path=get_transcript_path(primary_ticker),
         )
 
         if is_comparison_question(question) and len(companies) >= 2:

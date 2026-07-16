@@ -4,6 +4,12 @@ pandas
 numpy==1.26.4
 yfinance
 streamlit
+matplotlib
+requests
+beautifulsoup4
+rapidfuzz
+reportlab
+python-dotenv
 scikit-learn
 chromadb==0.4.24
 sentence-transformers==2.7.0

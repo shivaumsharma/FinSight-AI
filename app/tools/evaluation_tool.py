@@ -9,6 +9,14 @@ from streamlit_app.py as it was before.
 Latency is derived from `context.request_time`, which
 `ResearchContext` already stamps at construction time via
 `datetime.utcnow()` -- no new bookkeeping needed.
+
+Confidence Scores is one of the report's own 13 sections, but the
+scores it shows can only be known after the report has already been
+written and evaluated -- report_tool builds context.report_data (with
+those scores) before this tool ever runs, so it necessarily bakes in
+placeholder "Unavailable" values. This tool patches the real scores
+into context.report_data and re-renders the PDF afterward, rather than
+leaving the report showing scores it never actually had.
 """
 
 from datetime import datetime
@@ -43,6 +51,29 @@ class EvaluationTool(BaseTool):
 
         context.evaluation = vars(metrics)
 
+        self._refresh_report(context)
+
         context.record_tool(self.name)
 
         return context
+
+    def _refresh_report(self, context: ResearchContext) -> None:
+        if not context.report_data:
+            return
+
+        evaluation = context.evaluation
+        context.report_data["confidence_scores"] = {
+            "Overall Score": evaluation.get("overall_score", "Unavailable"),
+            "Grounding (%)": evaluation.get("grounding_score", "Unavailable"),
+            "Retrieval (%)": evaluation.get("retrieval_score", "Unavailable"),
+            "Citation Coverage (%)": evaluation.get("citation_score", "Unavailable"),
+            "News Grounding Rate (%)": (
+                evaluation.get("news_grounding_rate", "Unavailable")
+                if context.news_selected
+                else "No news coverage available"
+            ),
+            "Completeness (%)": evaluation.get("completeness_score", "Unavailable"),
+        }
+
+        from app.reporting.pdf_report_builder import build_pdf_report
+        context.pdf_bytes = build_pdf_report(context.report_data)

@@ -16,13 +16,12 @@ ReportGenerator can produce a single comparative report with no
 changes to any of that code.
 
 The peer ticker is resolved once by the ResearchAgent (via
-ticker_resolver.extract_companies) and passed in through
+company_resolver.resolve_companies) and passed in through
 context.metadata["peer_ticker"] -- ComparisonTool itself does no
 entity extraction.
 """
 
 from app.core.research_context import ResearchContext
-from app.core.ticker_resolver import get_transcript_path
 from .base_tool import BaseTool
 from .market_data_tool import MarketDataTool
 from .valuation_tool import ValuationTool
@@ -49,13 +48,11 @@ class ComparisonTool(BaseTool):
         peer_context = ResearchContext(
             ticker=peer_ticker,
             question=context.question,
-            transcript_path=get_transcript_path(peer_ticker),
         )
 
         MarketDataTool().run(peer_context)
         ValuationTool().run(peer_context)
-        if peer_context.transcript_path:
-            RAGTool().run(peer_context)
+        RAGTool().run(peer_context)
 
         context.metadata["peer_financial_summary"] = peer_context.financial_summary
         context.metadata["peer_valuation_summary"] = peer_context.valuation_summary

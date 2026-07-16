@@ -27,9 +27,7 @@ from app.evaluation.scorer import ScoreAggregator
 from app.evaluation.metrics import EvaluationMetrics
 
 from app.core.research_context import ResearchContext
-print(EvaluationMetrics)
-print(EvaluationMetrics.__module__)
-print(EvaluationMetrics.__annotations__)
+
 
 class EvaluationEngine:
 
@@ -80,6 +78,16 @@ class EvaluationEngine:
         )
 
         # ============================================
+        # News Grounding (same mechanism as Citation Coverage,
+        # scoped to news articles/[News N] tags)
+        # ============================================
+
+        news = self.citation_evaluator.evaluate_news(
+            news_articles=context.news_selected,
+            generated_report=generated_report,
+        )
+
+        # ============================================
         # Report Validation
         # ============================================
 
@@ -119,6 +127,10 @@ class EvaluationEngine:
     citation_score=citations.citation_coverage,
     citations_used=citations.citations_used,
     citations_available=citations.citations_available,
+
+    news_grounding_rate=news.citation_coverage,
+    news_citations_used=news.citations_used,
+    news_citations_available=news.citations_available,
 
     completeness_score=report.completeness_score,
     missing_sections=report.missing_sections,

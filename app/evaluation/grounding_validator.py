@@ -170,13 +170,13 @@ class GroundingValidator:
 
             "executive summary",
 
-            "bull case",
+            "business analysis",
 
-            "bear case",
+            "market and earnings analysis",
 
-            "financial outlook",
+            "risk analysis",
 
-            "investment recommendation",
+            "investment thesis",
 
             "confidence score",
 

@@ -20,6 +20,14 @@ class EvaluationMetrics:
     citations_used: int
     citations_available: int
 
+    # Same mechanism as citation_score, scoped to news articles and
+    # "[News N]" tags instead of SEC evidence -- see
+    # citation_evaluator.py's evaluate_news(). 0 with news_available=0
+    # means "no news coverage to ground against", not "ungrounded".
+    news_grounding_rate: float
+    news_citations_used: int
+    news_citations_available: int
+
     completeness_score: float
     missing_sections: list
 
