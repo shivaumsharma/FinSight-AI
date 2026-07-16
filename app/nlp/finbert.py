@@ -1,5 +1,21 @@
 from transformers import pipeline
 
+# Process-wide singleton, mirroring app/core/llm_provider.py. FinBERT
+# is otherwise reconstructed (and its HF pipeline reloaded from disk)
+# on every single request, since ResearchAgent/ToolRegistry/SentimentTool
+# are all rebuilt fresh per Streamlit click.
+_shared_pipeline = None
+
+
+def _get_shared_pipeline():
+    global _shared_pipeline
+    if _shared_pipeline is None:
+        _shared_pipeline = pipeline(
+            "sentiment-analysis",
+            model="ProsusAI/finbert"
+        )
+    return _shared_pipeline
+
 
 class FinBERT:
 
@@ -9,10 +25,7 @@ class FinBERT:
 
     def __init__(self):
 
-        self.model = pipeline(
-            "sentiment-analysis",
-            model="ProsusAI/finbert"
-        )
+        self.model = _get_shared_pipeline()
 
     def analyze(self, text: str):
 

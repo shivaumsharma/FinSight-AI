@@ -19,6 +19,18 @@ import chromadb
 
 from sentence_transformers import SentenceTransformer
 
+# Process-wide singleton cache, mirroring app/core/llm_provider.py.
+# ChromaVectorStore is reconstructed fresh (via a new RAGPipeline())
+# inside RAGTool.run() on every single request, so without this the
+# embedding model gets reloaded from disk on every query.
+_shared_embedding_models = {}
+
+
+def _get_shared_embedding_model(name):
+    if name not in _shared_embedding_models:
+        _shared_embedding_models[name] = SentenceTransformer(name)
+    return _shared_embedding_models[name]
+
 
 class ChromaVectorStore:
 
@@ -29,7 +41,7 @@ class ChromaVectorStore:
         persist_directory="vector_db"
     ):
 
-        self.embedding_model = SentenceTransformer(
+        self.embedding_model = _get_shared_embedding_model(
             embedding_model
         )
 
