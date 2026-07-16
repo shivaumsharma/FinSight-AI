@@ -1,263 +1,145 @@
-# Financial Intelligence Research Agent
+---
+title: FinSight AI
+emoji: 📈
+colorFrom: blue
+colorTo: green
+sdk: streamlit
+sdk_version: "1.56.0"
+app_file: streamlit_app.py
+pinned: false
+python_version: "3.11"
+---
 
-An AI-powered Financial Research Assistant that combines Retrieval-Augmented Generation (RAG), financial valuation models, sentiment analysis, and structured financial reasoning to generate grounded equity research reports.
+# FinSight AI — Agentic Financial Research Platform
 
-The long-term objective of this project is to evolve into a domain-specific Financial Small Language Model (SLM) capable of performing reliable investment research with minimal hallucinations.
+**[Try the live demo →](https://huggingface.co/spaces/YOUR_HF_USERNAME/finsight-ai)** *(update this link once deployed — see [Deployment](#deployment))*
+
+An agentic research assistant that answers open-ended financial questions ("Should I invest in Apple?", "What did management say about AI demand?") by planning which tools to run, executing them against live market data and earnings-call transcripts, and synthesizing a cited, self-scored equity research report — entirely with local, open-weight models (no external LLM API keys required).
 
 ---
 
-## Features
+## What it actually does
 
-### Financial Statement Analysis
+Ask a question, get back a structured report — Executive Summary, Bull Case, Bear Case, Financial Outlook, and Investment Recommendation — grounded in:
 
-- Automatic financial statement normalization
-- Revenue, EBIT and Net Income growth analysis
-- Revenue CAGR calculation
-- Free Cash Flow analysis
-- Operating Margin
-- Net Margin
-- ROE
-- EPS
-- Debt-to-Equity
-- Financial health interpretation
+- **Live market data** pulled from yfinance (financial statements, market cap, beta, price history)
+- **A real DCF valuation** (WACC → FCFF → enterprise value → intrinsic value), not a canned number
+- **Retrieved earnings-call evidence**, reranked and cited, not paraphrased from the model's training data
+- **FinBERT sentiment scoring** of that retrieved evidence
+- **A self-evaluation pass** that scores the generated report's grounding, retrieval quality, citation coverage, and completeness before showing it to you
+
+The system doesn't run a fixed pipeline for every question — an LLM planner decides which tools a given question actually needs (a valuation question skips RAG; a "what did management say" question skips the DCF), with a deterministic rule-based fallback so the plan never silently drops a tool the question clearly requires.
 
 ---
 
-### Valuation Engine
+## Architecture
 
-- Discounted Cash Flow (DCF)
-- FCFF Valuation
-- WACC Calculation
-- Enterprise Value
-- Equity Value
-- Intrinsic Value Estimation
+```mermaid
+flowchart TD
+    UI["Streamlit UI"] --> Agent["ResearchAgent"]
+    Agent --> Resolver["Ticker Resolver\n(deterministic company/ticker lookup)"]
+    Agent --> Planner["Planner\n(LLM proposal ∪ rule-based fallback)"]
+    Planner --> Plan["Ordered tool plan"]
 
----
+    Plan --> MarketTool["market_data_tool\n(yfinance + statement normalization)"]
+    Plan --> ValuationTool["valuation_tool\n(WACC → FCFF → DCF)"]
+    Plan --> RAGTool["rag_tool\n(chunk → embed → ChromaDB → rerank → cite)"]
+    Plan --> SentimentTool["sentiment_tool\n(FinBERT over retrieved evidence)"]
+    Plan --> ComparisonTool["comparison_tool\n(two-company side-by-side)"]
 
-### AI Research Pipeline
+    MarketTool --> Context["Shared ResearchContext"]
+    ValuationTool --> Context
+    RAGTool --> Context
+    SentimentTool --> Context
+    ComparisonTool --> Context
 
-- Retrieval-Augmented Generation (RAG)
-- ChromaDB Vector Database
-- Cross-Encoder Reranking
-- Query Intent Classification
-- Intelligent Retrieval Planning
-- Structured Prompt Generation
-- Context-aware Report Generation
-
----
-
-### Earnings Call Intelligence
-
-- Transcript Ingestion
-- Semantic Chunking
-- Financial Section Detection
-- Speaker Identification
-- Evidence Extraction
-- Citation-ready Context Building
-
----
-
-### Sentiment Analysis
-
-- FinBERT-based Financial Sentiment Analysis
-- Confidence Scoring
-- Earnings Call Sentiment Summary
-
----
-
-### Evaluation Framework
-
-- Retrieval Accuracy
-- Grounding Score
-- Citation Coverage
-- Completeness
-- Latency Tracking
-- Benchmark Dataset Support
-
----
-
-## Current Architecture
-
+    Context --> ReportTool["report_tool\n(Qwen2.5-1.5B-Instruct synthesis)"]
+    ReportTool --> EvalTool["evaluation_tool\n(grounding / retrieval / citation / completeness scoring)"]
+    EvalTool --> UI
 ```
-User Query
-     │
-     ▼
-Query Classifier
-     │
-     ▼
-Retrieval Planner
-     │
-     ▼
-Financial Analysis Engine
-     │
-     ▼
-Vector Retrieval (ChromaDB)
-     │
-     ▼
-Cross Encoder Reranker
-     │
-     ▼
-Evidence Builder
-     │
-     ▼
-Prompt Builder
-     │
-     ▼
-LLM
-     │
-     ▼
-Investment Research Report
-```
+
+Every tool reads from and writes to one shared `ResearchContext` object, so `report_tool` and `evaluation_tool` always run last regardless of which evidence-gathering tools the planner chose.
 
 ---
 
 ## Tech Stack
 
-### AI
-
-- Qwen 2.5
-- LangChain
-- ChromaDB
-- SentenceTransformers
-- Cross Encoder Reranker
-- FinBERT
-
-### Financial Analytics
-
-- Discounted Cash Flow (DCF)
-- FCFF
-- WACC
-- Financial Ratio Analysis
-
-### Backend
-
-- Python
-- Pandas
-- NumPy
-- yFinance
-
-### Interface
-
-- Streamlit
+| Layer | Tools |
+|---|---|
+| LLM (planning + report generation) | Qwen2.5-1.5B-Instruct (local, via 🤗 Transformers) |
+| Retrieval | ChromaDB, `BAAI/bge-base-en-v1.5` embeddings, `cross-encoder/ms-marco-MiniLM-L-6-v2` reranker |
+| Sentiment | FinBERT (`ProsusAI/finbert`) |
+| Financial data | yfinance |
+| Valuation | Custom WACC / FCFF / DCF engines (`app/valuation/`) |
+| Interface | Streamlit |
 
 ---
 
-## Repository Structure
+## Supported companies
 
+`market_data_tool` and `valuation_tool` work for **any valid yfinance ticker** — financial statement analysis and DCF valuation aren't limited to a fixed list.
+
+Earnings-call **RAG and sentiment analysis** are grounded in transcripts currently shipped for **Apple (AAPL), Microsoft (MSFT), and NVIDIA (NVDA)** — see `app/data/transcripts/`. Asking about a company outside that set still returns financials/valuation, just without cited call evidence.
+
+---
+
+## Evaluation framework
+
+Every generated report is scored, not just produced — `evaluation_tool` runs after every request and reports:
+
+- **Grounding score** — how much of the answer is actually supported by retrieved evidence
+- **Retrieval score** — relevance of the reranked chunks to the question
+- **Citation coverage** — how much of the report cites its sources
+- **Completeness** — whether all five required report sections were actually generated
+- **Latency** — end-to-end wall-clock time
+
+`app/evaluation/benchmark_runner.py` runs this scoring against a fixed benchmark set (`app/benchmarks/*.json`) so changes to prompts/retrieval/models can be compared against a baseline instead of eyeballed.
+
+---
+
+## Notable engineering decisions
+
+A few things that were broken and got deliberately fixed, not just left alone:
+
+- **The LLM planner could silently starve tools.** A small local model returning a *valid but wrong* plan (e.g. only `["rag_tool"]` for an investment question) meant the fallback rules never ran. Fixed by *unioning* the LLM's plan with the deterministic rule-based plan — the LLM can add tools, never omit ones the rules say are required.
+- **Every tool run reloaded its models from disk.** `ResearchAgent`/`ToolRegistry` are rebuilt fresh on every Streamlit click, which meant the reranker, embedding model, and FinBERT were being reconstructed (and reloaded from disk) on every single query. Fixed with process-wide singletons, mirroring the pattern already used for the shared Qwen generator — cut several seconds off every query after the first.
+- **Ticker resolution is deliberately not LLM-based.** Entity resolution over a known, closed set of companies is a lookup problem, not a reasoning problem — asking an LLM to "spell the ticker correctly" is an unnecessary source of hallucination.
+- **Report generation length is a tuned tradeoff, not a default.** The model reliably fills a 5-section report template but doesn't reliably stop — the token budget and a drift-detection trim step (`_trim_runaway_output` in `report_tool.py`) exist specifically to stop the model from wandering into meta-commentary that would otherwise get scored as part of the report.
+
+---
+
+## Running locally
+
+```bash
+git clone https://github.com/shivaumsharma/FinSight-AI.git
+cd FinSight-AI
+pip install -r requirements.txt
+streamlit run streamlit_app.py
 ```
-app/
 
-analysis/
-core/
-data/
-evaluation/
-nlp/
-rag/
-reasoning/
-valuation/
-
-benchmarks/
-
-streamlit_app.py
-```
+First run downloads ~4 models (Qwen2.5-1.5B, FinBERT, the embedding model, and the reranker) from Hugging Face — subsequent runs reuse the cached weights.
 
 ---
 
-## Current Capabilities
+## Deployment
 
-- Financial statement normalization
-- Company financial analysis
-- Intelligent evidence retrieval
-- Earnings call understanding
-- AI-powered investment reports
-- Valuation modelling
-- Financial sentiment analysis
-- Benchmark evaluation
+This app is deployed on **Hugging Face Spaces** rather than Streamlit Community Cloud: the local models loaded here (Qwen2.5-1.5B ≈ 6GB in fp32, plus FinBERT, the embedding model, and the reranker) exceed Streamlit Cloud's free-tier memory limit. HF Spaces' free CPU tier (16GB RAM) comfortably fits the full model set.
 
----
-
-## Benchmarked Companies
-
-- Apple
-- Microsoft
-- Amazon
-- NVIDIA
-- Tesla
-
----
-
-## Sample Research Output
-
-The system generates:
-
-- Executive Summary
-- Financial Intelligence
-- Valuation Summary
-- Sentiment Analysis
-- Earnings Call Evidence
-- AI Investment Analysis
+To deploy your own copy:
+1. Create a Space at [huggingface.co/new-space](https://huggingface.co/new-space) — SDK: **Streamlit**, Hardware: **CPU basic (free)**.
+2. Link it to this GitHub repo (Space Settings → "Link to a GitHub repository"), or push directly: `git remote add space https://huggingface.co/spaces/<you>/<space-name>` then `git push space main`.
+3. The `sdk`/`app_file` front matter at the top of this README configures the Space automatically.
 
 ---
 
 ## Roadmap
 
-### Completed
+**Completed:** financial statement normalization, DCF/FCFF/WACC engines, ChromaDB + cross-encoder retrieval, query intent classification, FinBERT sentiment, agentic LLM+rule-based tool planning, self-evaluation scoring, benchmark framework.
 
-- Financial Statement Normalization
-- Financial Analysis Engine
-- DCF Valuation
-- FCFF Engine
-- WACC Engine
-- ChromaDB Integration
-- Cross Encoder Reranking
-- Query Intent Classification
-- Retrieval Planner
-- FinBERT Integration
-- Benchmark Framework
-
----
-
-### In Progress
-
-- Prompt Optimization
-- Grounded Citation Generation
-- Latency Optimization
-- Multi-company Benchmark Expansion
-- Real Earnings Call Dataset
-
----
-
-### Planned
-
-- Hybrid Retrieval (Vector + BM25)
-- Multi-quarter Financial Reasoning
-- Automated Evaluation Dashboard
-- Portfolio Analysis
-- Financial Knowledge Graph
-- Financial SLM Fine-tuning
-- Autonomous Financial Research Agent
-
----
-
-## Long-Term Vision
-
-This project is being developed as a production-quality Financial AI system capable of evolving into a Financial Small Language Model (SLM).
-
-The focus is on:
-
-- High factual accuracy
-- Grounded reasoning
-- Explainable financial analysis
-- Minimal hallucinations
-- Modular AI architecture
-- Enterprise-ready financial intelligence
+**Planned:** hybrid retrieval (vector + BM25), multi-quarter financial reasoning, broader transcript/company coverage, an automated evaluation dashboard, portfolio-level analysis.
 
 ---
 
 ## Author
 
-**Shivaum Sharma**
-
-Computer Science Engineering (Data Science)
-
-Manipal Institute of Technology
+**Shivaum Sharma** — Computer Science Engineering (Data Science), Manipal Institute of Technology
