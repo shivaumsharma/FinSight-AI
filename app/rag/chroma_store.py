@@ -73,9 +73,17 @@ class ChromaVectorStore:
             normalize_embeddings=True
         ).tolist()
 
-        existing = set(
-            self.collection.get()["ids"]
-        )
+        # Scoped to this batch's own company rather than fetching
+        # every id in the whole collection -- as more tickers get
+        # ingested over a session's lifetime, a global fetch here
+        # gets steadily slower for no benefit, since chunk IDs are
+        # namespaced by company and can't collide across companies.
+        companies = {meta.get("company") for meta in metadatas}
+        existing = set()
+        for company in companies:
+            existing |= set(
+                self.collection.get(where={"company": company})["ids"]
+            )
 
         new_documents = []
         new_embeddings = []
@@ -149,6 +157,26 @@ class ChromaVectorStore:
     def count(self):
 
         return self.collection.count()
+
+    #############################################################
+
+    def company_has_documents(self, company):
+        """
+        Whether this specific company already has chunks stored --
+        NOT whether the collection as a whole is non-empty. Using a
+        global count() to decide "already ingested" caused chunk IDs
+        to collide across companies whenever company/quarter weren't
+        threaded through to the chunker (they previously weren't),
+        silently dropping every company's chunks after the first one
+        ever ingested.
+        """
+
+        existing = self.collection.get(
+            where={"company": company},
+            limit=1,
+        )
+
+        return len(existing.get("ids", [])) > 0
 
     #############################################################
 

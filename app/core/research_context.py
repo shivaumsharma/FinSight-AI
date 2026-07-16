@@ -80,11 +80,25 @@ class ResearchContext:
     # RAG Pipeline
     # ==========================================================
 
-    transcript_path: Optional[str] = None
-    transcript_text: Optional[str] = None
     transcript_chunks: List[str] = field(default_factory=list)
     retrieved_chunks: List[str] = field(default_factory=list)
     citations: List[Dict[str, str]] = field(default_factory=list)
+
+    # ==========================================================
+    # News (see app/reporting/news_client.py, news_sentiment.py)
+    # ==========================================================
+
+    # Every article retrieved, unfiltered -- shown in full in the
+    # "News Sources Used" transparency panel, not just the ones fed
+    # to the LLM or explicitly cited in prose.
+    news_articles: List[Dict[str, Any]] = field(default_factory=list)
+
+    # Capped, category-diverse subset actually fed to the narrative
+    # prompt (see news_client.select_for_analysis).
+    news_selected: List[Dict[str, Any]] = field(default_factory=list)
+
+    news_sentiment: Optional[Dict[str, Any]] = None
+    news_sentiment_summary: Dict[str, Any] = field(default_factory=dict)
 
     # ==========================================================
     # NLP
@@ -111,6 +125,23 @@ class ResearchContext:
     generated_answer: Optional[str] = None
 
     investment_thesis: Dict[str, Any] = field(default_factory=dict)
+
+    # Full structured report: deterministic sections (company overview,
+    # ratios, growth, valuation, confidence scores, references) plus
+    # narrative["<section name>"] for the five LLM-written sections --
+    # see app/reporting/report_data_builder.py and narrative_builder.py.
+    report_data: Optional[Dict[str, Any]] = None
+
+    # Rendered PDF bytes, built from report_data -- see
+    # app/reporting/pdf_report_builder.py.
+    pdf_bytes: Optional[bytes] = None
+
+    # Institutional Consensus Score: how closely FinSight's own
+    # recommendation agrees with real institutional analyst ratings.
+    # Evaluation/market-context only -- see
+    # app/reporting/consensus_score.py's module docstring. None if no
+    # institutional coverage exists for this ticker.
+    institutional_consensus: Optional[Dict[str, Any]] = None
 
     # ==========================================================
     # Evaluation

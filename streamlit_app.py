@@ -1,59 +1,69 @@
 """
 streamlit_app.py
 
-UI entry point. Previously this file called EvidenceBuilder and
-ReportGenerationEngine directly and hard-coded a transcript-path
-lookup that pointed at files that don't exist
-("app/data/apple_q2.txt" vs the real "app/data/transcripts/apple_q2.txt").
+UI entry point.
 
-It now delegates all orchestration to ResearchAgent, which:
- - resolves ticker(s) from the free-text question,
- - asks the LLM Planner which tools are needed,
- - executes them,
- - always finishes with report_tool + evaluation_tool.
-
-The UI's only job is to render whatever ends up on the returned
-ResearchContext -- it does not know or care which tools ran.
+FinSight AI is an Autonomous Financial Intelligence Platform, not a
+general-purpose financial chatbot. There is no ticker input box and no
+default company -- the user asks a question naming a real, publicly
+listed company, FinSight resolves the company itself (see
+app/core/company_resolver.py), and if none is found, no analysis
+begins at all. Validation happens before ResearchAgent.run() ever
+touches yfinance/SEC/the LLM -- NoCompanyDetectedError and
+TickerNotFoundError are the only two ways this can fail, and both are
+caught here with a plain-language message; no internal exception or
+raw data-provider error ever reaches the user.
 """
 
 import time
 
 import streamlit as st
 
-from app.agents.research_agent import ResearchAgent
+from app.agents.research_agent import ResearchAgent, NoCompanyDetectedError
 from app.core.logger import ResearchLogger
+from app.data.market_data import TickerNotFoundError
 
 st.set_page_config(page_title="Finsight AI", layout="wide")
 
-if "analysis_complete" not in st.session_state:
-    st.session_state.analysis_complete = False
+RATING_COLORS = {
+    "Buy": "green",
+    "Hold": "orange",
+    "Sell": "red",
+    "Insufficient Data": "gray",
+}
+
+# ---------------------------------------------------
+# INTRODUCTION
+# ---------------------------------------------------
 
 st.title("Finsight AI")
-st.subheader("Agentic Financial Research Platform")
+st.subheader("Autonomous Financial Intelligence Platform")
 
-# ---------------------------------------------------
-# SIDEBAR
-# ---------------------------------------------------
+st.markdown("""
+FinSight AI is an Autonomous Financial Intelligence Platform designed for
+institutional-style equity research and investment analysis. It specializes in:
 
-st.sidebar.header("Settings")
+- Financial Statement Analysis
+- Equity Research
+- Intrinsic Valuation
+- Earnings Call & Filing Analysis
+- Market Intelligence
+- Investment Thesis Generation
 
-ticker = st.sidebar.text_input("Ticker Symbol", value="AAPL")
+**FinSight AI is not a general-purpose financial chatbot.** Please include a
+publicly listed company as part of your query.
 
-st.sidebar.markdown("""
-### Example Queries
-- What did management say about AI demand?
-- Calculate Apple's intrinsic value
-- Compare Apple and Microsoft
-- Should I invest in Apple?
+Examples: *"Should I buy Apple?"* &nbsp;&middot;&nbsp; *"Analyze NVIDIA's financial health."*
+&nbsp;&middot;&nbsp; *"Generate a report on Microsoft."* &nbsp;&middot;&nbsp; *"Compare Google and Amazon."*
 """)
 
 # ---------------------------------------------------
-# USER INPUT
+# USER INPUT -- single field, no ticker box
 # ---------------------------------------------------
 
 query = st.text_input(
-    "Ask Financial Question",
-    placeholder="What did management say about AI demand?",
+    "Ask about a publicly listed company",
+    placeholder="Should I buy Apple?",
 )
 
 # ---------------------------------------------------
@@ -64,57 +74,101 @@ if st.button("Run Research Agent") and query:
 
     start = time.time()
 
-    with st.spinner("Planning and executing tools..."):
-        context = ResearchAgent().run(question=query, ticker=ticker)
+    try:
+        with st.spinner("Planning and executing research..."):
+            context = ResearchAgent().run(question=query)
+    except NoCompanyDetectedError:
+        st.error(
+            "FinSight AI specializes in company and investment research. No "
+            "publicly listed company was detected in your query. Please "
+            "provide a company name to begin the analysis."
+        )
+        st.stop()
+    except TickerNotFoundError as e:
+        st.error(
+            f"Couldn't find market data for '{e}'. The company may be "
+            "delisted, foreign-listed, or the name didn't resolve to a "
+            "real ticker -- please check the spelling and try again."
+        )
+        st.stop()
+    except Exception as e:
+        st.error(f"Something went wrong while researching this: {e}")
+        st.stop()
 
     end = time.time()
 
     ResearchLogger().save(context)
 
-    st.session_state.analysis_complete = True
-
-    with st.expander(f"Agent Plan (mode: {context.mode})", expanded=False):
-        st.write(context.metadata.get("plan", []))
-        st.caption(f"Tools actually executed: {context.tool_trace}")
+    report_data = context.report_data or {}
+    recommendation = report_data.get("recommendation", {})
+    rating = recommendation.get("rating", "Insufficient Data")
+    color = RATING_COLORS.get(rating, "gray")
 
     if context.mode == "comparison":
         st.info(f"Comparing {context.ticker} vs {context.metadata.get('peer_ticker')}")
 
-    with st.expander("Research Summary", expanded=False):
-        st.text(context.research_summary)
+    st.markdown("## Report Ready")
 
-    st.markdown("## AI Investment Analysis")
-    st.write(context.generated_answer)
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        st.markdown(f"### :{color}[{rating}]")
+        st.caption(recommendation.get("basis", ""))
+        if recommendation.get("confidence_flag"):
+            st.warning(f"**Low-confidence signal:** {recommendation['confidence_flag']}")
+    with col2:
+        confidence = report_data.get("confidence_scores", {})
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Overall Score", confidence.get("Overall Score", "N/A"))
+        c2.metric("Grounding", f"{confidence.get('Grounding (%)', 'N/A')}")
+        c3.metric("Latency", f"{end - start:.1f}s")
 
-    if context.citations:
-        with st.expander("Retrieved Evidence"):
-            for citation in context.citations:
-                st.markdown(f"### {citation['id']}")
-                st.write(citation["text"])
+    narrative = report_data.get("narrative", {})
+    if narrative.get("Executive Summary"):
+        with st.expander("Executive Summary preview", expanded=True):
+            st.write(narrative["Executive Summary"])
 
-    if context.valuation_results:
-        with st.expander("Valuation Detail"):
-            st.json(context.valuation_summary)
+    consensus = (report_data.get("institutional_consensus") or {}).get("recommendation_consensus")
+    if consensus:
+        with st.expander("Institutional Consensus Score", expanded=True):
+            st.markdown(f"### Institutional Consensus Score\n# {consensus['score']}%\n**{consensus['label']}**")
+            st.caption(consensus["methodology"])
 
-    evaluation = context.evaluation or {}
+            st.markdown("---")
+            st.markdown("**Market Consensus**")
+            for r in consensus["institutional_ratings"]:
+                r_color = RATING_COLORS.get(r["rating"].title(), "gray")
+                st.markdown(f"{r['firm']} &nbsp;&nbsp; :{r_color}[**{r['rating']}**]")
 
-    if evaluation:
-        st.subheader("AI Evaluation")
+            st.markdown("---")
+            st.markdown(f"**FinSight Recommendation**\n\n:{color}[**{consensus['finsight_rating']}**]")
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Overall Score", f"{evaluation.get('overall_score', 0):.1f}")
-        with col2:
-            st.metric("Grounding", f"{evaluation.get('grounding_score', 0):.1f}%")
-        with col3:
-            st.metric("Retrieval", f"{evaluation.get('retrieval_score', 0):.1f}%")
+            st.markdown("---")
+            st.markdown(f"**Market Summary**\n\n{consensus['summary']}")
 
-        col4, col5, col6 = st.columns(3)
-        with col4:
-            st.metric("Citation Coverage", f"{evaluation.get('citation_score', 0):.1f}%")
-        with col5:
-            st.metric("Completeness", f"{evaluation.get('completeness_score', 0):.1f}%")
-        with col6:
-            st.metric("Latency", f"{end - start:.2f}s")
+    news_sources = report_data.get("news_sources", {})
+    with st.expander(
+        f"News Sources Used in This Analysis ({news_sources.get('total_retrieved', 0)} retrieved, "
+        f"{news_sources.get('total_selected', 0)} used)",
+        expanded=False,
+    ):
+        if not news_sources.get("total_retrieved"):
+            st.caption("No recent news coverage was found for this company.")
+        else:
+            st.caption(
+                "Every article retrieved is shown here, not just the ones used in "
+                "the analysis above -- so you can judge whether the selection looks "
+                "reasonable, not only what the model chose to reference."
+            )
+            for article in news_sources["all_articles"]:
+                tag = "✅ Used" if article["used_in_analysis"] else "⬜ Retrieved, not used"
+                st.markdown(f"**{article['headline']}**  \n{article['source']} — {article['date']} — [{tag}]({article['url']})")
 
-st.caption("Built using an LLM Planner + RAG, ChromaDB, FinBERT and DCF valuation tools")
+    if context.pdf_bytes:
+        st.download_button(
+            label="Download Full Research Report (PDF)",
+            data=context.pdf_bytes,
+            file_name=f"{context.ticker}_FinSight_Research_Report.pdf",
+            mime="application/pdf",
+        )
+
+st.caption("Built using an LLM Planner + RAG over live SEC filings, ChromaDB, FinBERT and DCF valuation tools")

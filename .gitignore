@@ -14,5 +14,13 @@ env/
 
 models/
 
+# Disk cache for SEC EDGAR fetches (ticker->CIK map + fetched filings) --
+# regenerated on demand, not source.
+filings_cache/
+
 .idea/
 .vscode/
+
+# Local secrets (Finnhub API key, etc.) -- never commit real values.
+# Copy .env.example to .env and fill in your own key.
+.env

@@ -3,13 +3,13 @@ Production RAG Pipeline
 
 Responsibilities
 ----------------
-✓ Ingest transcript
-✓ Avoid duplicate ingestion
-✓ Query vector database
-✓ Return retrieved chunks
+- Fetch a real SEC disclosure for any ticker (via SECEdgarClient)
+- Avoid duplicate ingestion, scoped per company
+- Query vector database
+- Return retrieved chunks
 """
 
-from app.rag.transcript_loader import TranscriptLoader
+from app.data.sec_edgar_client import SECEdgarClient
 from app.rag.Text_chunker import FinancialTranscriptChunker
 from app.rag.chroma_store import ChromaVectorStore
 
@@ -19,43 +19,50 @@ class RAGPipeline:
     def __init__(self):
 
         self.vector_store = ChromaVectorStore()
+        self.sec_client = SECEdgarClient()
 
     # =========================================================
-    # Transcript Ingestion
+    # Disclosure Ingestion
     # =========================================================
 
-    def ingest_transcript(
-        self,
-        transcript_path,
-        company="",
-        quarter=""
-    ):
+    def ingest_company_disclosure(self, ticker):
+        """
+        Fetches this ticker's most useful recent SEC disclosure (an
+        8-K earnings-release exhibit, falling back to a 10-Q/10-K's
+        MD&A section) and ingests it into the vector store, unless
+        this company already has chunks stored.
 
-        loader = TranscriptLoader(transcript_path)
+        Returns (chunks, disclosure_metadata). disclosure_metadata is
+        None if SEC has no CIK / no qualifying filing for this ticker
+        (e.g. some foreign private issuers file 20-F/6-K instead) --
+        callers should treat that as "no evidence available" rather
+        than an error, the same way a missing transcript used to be
+        handled.
+        """
 
-        transcript = loader.load_transcript()
+        disclosure = self.sec_client.fetch_company_disclosure(ticker)
+
+        if not disclosure:
+            return [], None
+
+        if self.vector_store.company_has_documents(ticker):
+            # Already ingested in an earlier query -- skip re-chunking
+            # and re-embedding, but still return disclosure metadata
+            # (cheap: fetch_company_disclosure is disk-cached) so
+            # citations always have a source URL/filing date, not
+            # just on the first query for this ticker.
+            return [], disclosure
 
         chunker = FinancialTranscriptChunker(
-            company=company,
-            quarter=quarter
+            company=ticker,
+            quarter=disclosure["filing_date"],
         )
 
-        chunks = chunker.chunk_text(transcript)
+        chunks = chunker.chunk_text(disclosure["text"])
 
-        existing_docs = self.vector_store.count()
+        self.vector_store.add_documents(chunks)
 
-        if existing_docs == 0:
-
-            print("Creating Vector Database...")
-
-            self.vector_store.add_documents(chunks)
-
-        else:
-
-            print("Existing Vector Store Found")
-            print("Skipping Transcript Ingestion")
-
-        return chunks
+        return chunks, disclosure
 
     # =========================================================
     # Retrieval
@@ -64,18 +71,14 @@ class RAGPipeline:
     def query_pipeline(
         self,
         query,
+        ticker,
         n_results=20,
-        where=None
     ):
 
         results = self.vector_store.query_documents(
-
             query=query,
-
             n_results=n_results,
-
-            where=where
-
+            where={"company": ticker},
         )
 
         retrieved = []

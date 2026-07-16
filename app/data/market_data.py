@@ -1,5 +1,14 @@
 import yfinance as yf
-import pandas as pd 
+import pandas as pd
+
+
+class TickerNotFoundError(Exception):
+    """Raised when yfinance has no usable data for a ticker -- it
+    doesn't exist, is delisted, or was mistyped. Caught centrally in
+    streamlit_app.py to show a friendly message instead of a raw
+    traceback from whichever statement fetch happens to hit an empty
+    DataFrame first."""
+
 
 class MarketDataLoader:
   
@@ -19,6 +28,12 @@ class MarketDataLoader:
         "country":info.get("country"),
         "beta":info.get("beta"),
         "current_price":info.get("currentPrice") or info.get("regularMarketPrice"),
+        # Real, already-written business description -- used for the
+        # Company Overview report section instead of asking the LLM
+        # to invent one from scratch.
+        "business_summary":info.get("longBusinessSummary"),
+        "website":info.get("website"),
+        "employees":info.get("fullTimeEmployees"),
      }
   
   def get_historical_prices(self,period="5y"):

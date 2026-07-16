@@ -14,6 +14,8 @@ from .valuation_tool import ValuationTool
 from .rag_tool import RAGTool
 from .sentiment_tool import SentimentTool
 from .comparison_tool import ComparisonTool
+from .institutional_consensus_tool import InstitutionalConsensusTool
+from .news_tool import NewsTool
 from .report_tool import ReportTool
 from .evaluation_tool import EvaluationTool
 
@@ -32,6 +34,8 @@ class ToolRegistry:
             RAGTool,
             SentimentTool,
             ComparisonTool,
+            InstitutionalConsensusTool,
+            NewsTool,
             ReportTool,
             EvaluationTool,
         ):

@@ -59,26 +59,3 @@ class DCFEngine:
       equity_value=(self.calculate_equity_value(total_debt,cash))
       intrinsic_value=equity_value/shares_outstanding
       return intrinsic_value
-    
-  def sensitivity_analysis(self,wacc_range,growth_range):
-       results = []
-       for wacc in wacc_range:
-          row = []
-          for growth in growth_range:
-
-            original_wacc = self.wacc
-            original_growth = self.terminal_growth_rate
-            self.wacc = wacc
-            self.terminal_growth_rate = growth
-
-            enterprise_value = (self.calculate_enterprise_value())
-
-            row.append(round(enterprise_value / 1e9,2))
-
-            self.wacc = original_wacc
-            self.terminal_growth_rate = (original_growth)
-
-            results.append(row)
-            sensitivity_df = pd.DataFrame(results,index=[f"WACC {w:.0%}"for w in wacc_range],columns=[f"Growth {g:.0%}"for g in growth_range])
-
-       return sensitivity_df

@@ -24,13 +24,13 @@ class ReportValidator:
 
         "Executive Summary",
 
-        "Bull Case",
+        "Business Analysis",
 
-        "Bear Case",
+        "Market and Earnings Analysis",
 
-        "Financial Outlook",
+        "Risk Analysis",
 
-        "Investment Recommendation",
+        "Investment Thesis",
 
     ]
 

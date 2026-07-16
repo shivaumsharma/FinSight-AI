@@ -21,9 +21,10 @@ Design choices
   vocabulary (the registry's tool names). It is never asked to
   invent tool names, arguments, or company tickers -- ticker/company
   resolution is handled separately and deterministically
-  (see app/core/ticker_resolver.py) because that is a closed-set
-  lookup problem, not a reasoning problem, and LLMs are an
-  unnecessarily unreliable way to spell "AAPL".
+  (see app/core/company_resolver.py) because that is a lookup problem
+  against a real, enumerable universe of companies, not a reasoning
+  problem, and LLMs are an unnecessarily unreliable way to spell
+  "AAPL".
 - Every failure mode (model not available, malformed JSON, unknown
   tool name, empty plan) degrades to the deterministic
   `FALLBACK_RULES` planner rather than raising -- an agentic system

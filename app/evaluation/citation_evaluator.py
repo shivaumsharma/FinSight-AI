@@ -15,12 +15,15 @@ report actually was.
 
 v2 counts a citation as "used" if either:
   a) the report explicitly references it by its evidence number,
-     e.g. "[Evidence 3]" or "Evidence 3" (see the updated
-     prompt_builder.py, which now asks the model to tag sentences
-     this way), or
+     e.g. "[Evidence 3]" or "Evidence 3" (see narrative_builder.py,
+     which asks the model to tag sentences this way), or
   b) a meaningful fraction of the citation's own content words show
      up in the report (paraphrase detection), as a fallback for
      reports that don't use the explicit tag.
+
+v3 adds evaluate_news(), the same mechanism scoped to news articles
+and "[News N]" tags instead of SEC evidence -- this is what
+news_grounding_rate (evaluation_engine.py) is computed from.
 """
 
 import re
@@ -62,6 +65,26 @@ class CitationEvaluator:
         citations,
         generated_report: str,
     ) -> CitationResult:
+        return self._evaluate(citations, generated_report, tag="evidence")
+
+    def evaluate_news(
+        self,
+        news_articles,
+        generated_report: str,
+    ) -> CitationResult:
+        """
+        Same mechanism as evaluate(), scoped to news articles and
+        "[News N]" tags (1-based within `news_articles`, matching the
+        numbering narrative_builder.py's prompt uses) instead of SEC
+        evidence citations.
+        """
+        citations = [
+            {"text": f"{a['headline']} {a.get('summary', '')}"}
+            for a in news_articles
+        ]
+        return self._evaluate(citations, generated_report, tag="news")
+
+    def _evaluate(self, citations, generated_report: str, tag: str) -> CitationResult:
 
         report_norm = generated_report.lower()
 
@@ -69,7 +92,7 @@ class CitationEvaluator:
 
         for i, citation in enumerate(citations, start=1):
 
-            if self._explicitly_referenced(i, report_norm):
+            if self._explicitly_referenced(tag, i, report_norm):
                 used += 1
                 continue
 
@@ -100,11 +123,11 @@ class CitationEvaluator:
 
     # -----------------------------
 
-    def _explicitly_referenced(self, index: int, report_norm: str) -> bool:
+    def _explicitly_referenced(self, tag: str, index: int, report_norm: str) -> bool:
 
         patterns = [
-            f"[evidence {index}]",
-            f"evidence {index}",
+            f"[{tag} {index}]",
+            f"{tag} {index}",
         ]
 
         return any(pattern in report_norm for pattern in patterns)

@@ -81,17 +81,47 @@ class FCFFEngine:
         return aligned_df["fcff"]
 
 
-    def forecast_fcff(self,forecast_years=5):
+    def forecast_fcff(self,forecast_years=5,terminal_growth_rate=0.03):
        historical_fcff=(self.calculate_fcff().dropna())
-       latest_fcff=historical_fcff.iloc[-1]
+
+       # Base year is the average of all available historical FCFF,
+       # not just the single most recent year. FCFF is inherently
+       # lumpy (a year of elevated capex, e.g. a datacenter/AI buildout,
+       # can depress it well below the underlying run-rate) -- anchoring
+       # a 5-year forecast (and the terminal value, which dominates the
+       # DCF output) to one volatile data point means a temporary
+       # capex-heavy year gets mistaken for the company's new normal.
+       # Averaging over the available history is a standard way to
+       # normalize this without needing to model capex intensity
+       # explicitly.
+       base_fcff=historical_fcff.mean()
+
+       initial_growth_rate=(self.calculate_revenue_cagr())
+
+       # Two-stage, not flat: growth is linearly faded from the
+       # company's own historical CAGR down to terminal_growth_rate
+       # across the explicit forecast window, reaching the terminal
+       # rate exactly by the final year. A flat CAGR for all 5 years
+       # followed by an abrupt drop to terminal growth in year 6 (the
+       # old behavior) assumes a company keeps compounding at its full
+       # historical rate right up to a cliff -- overstating both the
+       # explicit-period cash flows and the terminal value (which is
+       # anchored to the final year's FCFF). Fading removes that
+       # discontinuity and is the more standard/defensible multi-stage
+       # construction.
        forecasted_fcff=[]
-       growth_rate=(self.calculate_revenue_cagr())
+       current_fcff=base_fcff
 
        for year in range(1,forecast_years+1):
-           future_fcff = ( latest_fcff *(1 + growth_rate) ** year)
-           forecasted_fcff.append(future_fcff)
-           forecast_index = [f"Year_{i}"for i in range(1,forecast_years + 1)]
+           fade_weight = year / forecast_years
+           year_growth_rate = (
+               initial_growth_rate
+               + (terminal_growth_rate - initial_growth_rate) * fade_weight
+           )
+           current_fcff = current_fcff * (1 + year_growth_rate)
+           forecasted_fcff.append(current_fcff)
 
+       forecast_index = [f"Year_{i}" for i in range(1,forecast_years + 1)]
        forecast_df = pd.DataFrame({"forecast_fcff":forecasted_fcff},index=forecast_index)
 
        return forecast_df

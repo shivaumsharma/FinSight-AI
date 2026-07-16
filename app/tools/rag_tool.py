@@ -1,10 +1,13 @@
 """
 rag_tool.py
 
-Retrieves grounded evidence from an earnings-call transcript.
+Retrieves grounded evidence from a real SEC disclosure (an 8-K
+earnings-release exhibit, or a 10-Q/10-K's MD&A section as fallback),
+fetched live for whatever ticker the question is about -- not from a
+handful of hand-authored transcript files for a fixed list of
+companies.
 
 Reuses, unchanged:
- - RAGPipeline            (ingestion + vector query)
  - QueryClassifier         (rule-based intent detection)
  - RetrievalPlanner        (expands the query per intent)
  - EvidenceReranker        (cross-encoder reranking)
@@ -29,38 +32,34 @@ class RAGTool(BaseTool):
 
     name = "rag_tool"
     description = (
-        "Retrieves and reranks relevant earnings-call transcript chunks for the "
-        "user's question, with citations. Required for questions about "
-        "management commentary, earnings calls, guidance, or transcripts. "
-        "Needs context.transcript_path to be set."
+        "Retrieves and reranks relevant evidence from the company's most recent "
+        "SEC disclosure (earnings release or filing), with citations. Required "
+        "for questions about management commentary, guidance, or recent results. "
+        "Works for any ticker SEC has a filing for."
     )
 
     def run(self, context: ResearchContext) -> ResearchContext:
 
-        if not context.transcript_path:
+        pipeline = RAGPipeline()
+
+        chunks_ingested, disclosure = pipeline.ingest_company_disclosure(context.ticker)
+
+        if not disclosure:
+            # SEC has no CIK / no qualifying filing for this ticker --
+            # degrade gracefully rather than error, same as a missing
+            # transcript used to be handled.
             context.record_tool(self.name)
             return context
 
-        pipeline = RAGPipeline()
-
-        context.transcript_chunks = pipeline.ingest_transcript(
-            context.transcript_path
-        )
+        context.add_metadata("disclosure_source", disclosure)
+        context.transcript_chunks = chunks_ingested
 
         intent = QueryClassifier().classify(context.question)
         context.add_metadata("query_intent", intent)
 
         retrieval_query = RetrievalPlanner().build(context.question, intent)
 
-        chunks = pipeline.query_pipeline(retrieval_query, n_results=20)
-
-        # Operator remarks ("welcome to the call...") are boilerplate
-        # and never carry investable information.
-        chunks = [
-            chunk
-            for chunk in chunks
-            if chunk.get("metadata", {}).get("speaker", "").lower() != "operator"
-        ]
+        chunks = pipeline.query_pipeline(retrieval_query, ticker=context.ticker, n_results=20)
 
         context.retrieved_chunks = EvidenceReranker().rerank(
             context.question, chunks, top_k=5
