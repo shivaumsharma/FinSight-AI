@@ -39,6 +39,7 @@ from typing import Dict
 from app.core.research_context import ResearchContext
 from app.core.llm_provider import get_shared_generator
 from app.reporting.news_client import RISK_CATEGORIES
+from app.reporting.narrative_debug_log import log_narrative_call
 
 NARRATIVE_SECTIONS = [
     "Executive Summary",
@@ -245,6 +246,44 @@ def _apply_contradiction_guardrail(sections: Dict[str, str], recommendation: dic
     return sections
 
 
+_HEADING_TOKEN_PATTERN = re.compile(
+    r"#{1,3}\s*\**\s*(?:" + "|".join(re.escape(s) for s in NARRATIVE_SECTIONS) + r")",
+    re.IGNORECASE,
+)
+
+
+def _ensure_headings_start_own_line(text: str) -> str:
+    """
+    Confirmed via raw-output inspection (narrative_debug_log.py, on
+    real GOOGL/PLTR failures): the model reliably produces the right
+    headings, in the right order, with real content -- it just
+    doesn't reliably insert a line break BEFORE "#", sometimes gluing
+    a heading onto the end of the prior sentence, e.g. "...for
+    further investment. # Business Analysis". _split_sections()'s
+    regex below requires a heading to be alone on its own line, so a
+    heading landing mid-line was silently left unmatched -- a parsing
+    assumption that didn't hold for the model's actual (consistent)
+    output shape, not a model-capability gap.
+
+    Runs before the line-anchored split: finds every recognized
+    heading token (with a literal "#" -- this doesn't touch bare
+    heading-name mentions in ordinary prose) anywhere in the text and
+    inserts a newline immediately before it if one isn't already
+    there. Deliberately loose -- if this over-fires on a heading-like
+    phrase that isn't really a heading, the existing line-anchored
+    regex below still requires the resulting line to consist of
+    nothing but the heading text, so a false positive here just fails
+    to match downstream instead of corrupting a real section.
+    """
+    def _prefix_newline(match):
+        start = match.start()
+        if start == 0 or match.string[start - 1] == "\n":
+            return match.group(0)
+        return "\n" + match.group(0)
+
+    return _HEADING_TOKEN_PATTERN.sub(_prefix_newline, text)
+
+
 def _split_sections(text: str) -> Dict[str, str]:
     """
     Splits `text` into {section_name: content} by heading markers
@@ -264,7 +303,13 @@ def _split_sections(text: str) -> Dict[str, str]:
     trailing "#", "*", ":" in any combination, while still requiring
     the line to consist of nothing else (so it can't match a heading
     name mentioned mid-sentence).
+
+    _ensure_headings_start_own_line() runs first so a heading that
+    landed mid-line in the raw output still satisfies the
+    "alone on its own line" requirement below.
     """
+    text = _ensure_headings_start_own_line(text)
+
     positions = []
     for section in NARRATIVE_SECTIONS:
         matches = list(re.finditer(
@@ -303,6 +348,22 @@ def build_narrative_sections(context: ResearchContext, report_data: dict) -> Dic
     raw = get_shared_generator().generate(prompt, max_new_tokens=700)
 
     sections = _split_sections(raw)
+
+    # Diagnostic-only logging (app/reporting/narrative_debug_log.py) --
+    # captures the raw model output and which headings actually
+    # matched BEFORE the placeholder below papers over a miss, so a
+    # recurring "Not available for this report" failure can be
+    # diagnosed from real output instead of guessed at. Not a fix.
+    try:
+        log_narrative_call(
+            ticker=context.ticker,
+            prompt=prompt,
+            raw_output=raw,
+            raw_sections=sections,
+            recommendation_rating=report_data.get("recommendation", {}).get("rating"),
+        )
+    except Exception:
+        pass
 
     for section in NARRATIVE_SECTIONS:
         sections.setdefault(section, "Not available for this report.")

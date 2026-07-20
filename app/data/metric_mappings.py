@@ -47,7 +47,8 @@ METRIC_MAPPINGS={
   "depreciation":[
       "Depreciation",
       "Depreciation And Amortization",
-      "Depreciation Ammortizations Depletion"
+      "Depreciation Amortization Depletion",
+      "Depletion Depreciation And Amortization"
 
   ],
 

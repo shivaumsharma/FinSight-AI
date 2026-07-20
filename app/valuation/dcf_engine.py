@@ -2,10 +2,43 @@ import pandas as pd
 import numpy as np 
 
 class DCFEngine:
+
+  # Minimum WACC-to-terminal-growth spread, in absolute terms (e.g.
+  # 0.04 = 4 percentage points). The Gordon-growth terminal value has
+  # a 1/(discount_rate - terminal_growth_rate) term -- once that
+  # spread gets small, terminal value (and therefore the whole DCF
+  # output) blows up non-linearly and becomes numerically unstable
+  # rather than reflecting a genuine valuation signal. Applied here,
+  # inside the engine itself, so every caller -- the primary DCF in
+  # ValuationPipeline AND every cell of the sensitivity grid (each of
+  # which constructs its own DCFEngine) -- gets identical treatment
+  # through the same code path, instead of two places independently
+  # reimplementing (and risking drifting from) the same stability rule.
+  MIN_WACC_TERMINAL_SPREAD = 0.04
+
   def __init__(self,forecast_fcff_df,discount_rate=0.10,terminal_growth_rate=0.03):
     self.forecast_fcff_df=(forecast_fcff_df)
-    self.discount_rate=(discount_rate)
     self.terminal_growth_rate=(terminal_growth_rate)
+
+    # The raw, beta-implied WACC is preserved (never silently
+    # discarded) so callers can report both what was actually
+    # computed and what was used for the calculation.
+    self.raw_discount_rate=(discount_rate)
+
+    floor=(terminal_growth_rate+self.MIN_WACC_TERMINAL_SPREAD)
+    if discount_rate-terminal_growth_rate<self.MIN_WACC_TERMINAL_SPREAD:
+        self.discount_rate=floor
+        self.wacc_floored=True
+    else:
+        self.discount_rate=discount_rate
+        self.wacc_floored=False
+
+  def wacc_floor_info(self):
+      return {
+          "raw_wacc":self.raw_discount_rate,
+          "wacc_used":self.discount_rate,
+          "floored":self.wacc_floored,
+      }
 
   def calculate_discount_factors(self):
       num_years=len(self.forecast_fcff_df)
