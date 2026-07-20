@@ -1,0 +1,212 @@
+{
+    "timestamp": "2026-07-17T07:18:52.249320",
+    "ticker": "AAPL",
+    "question": "invest in apple?",
+    "company_info": {
+        "company_name": "Apple Inc.",
+        "sector": "Technology",
+        "industry": "Consumer Electronics",
+        "market_cap": 4894708203520,
+        "currency": "USD",
+        "country": "United States",
+        "beta": 1.097,
+        "current_price": 333.26,
+        "business_summary": "Apple Inc. designs, manufactures, and markets smartphones, personal computers, tablets, wearables, and accessories worldwide. The company offers iPhone, a line of smartphones; Mac, a line of personal computers; iPad, a line of multi-purpose tablets; and wearables, home, and accessories comprising AirPods, Apple Vision Pro, Apple TV, Apple Watch, Beats products, and HomePod, as well as Apple branded and third-party accessories. It also provides AppleCare support and cloud services; and operates various platforms, including the App Store that allows customers to discover and download applications and digital content, such as books, music, video, games, and podcasts, as well as advertising services include third-party licensing arrangements and its own advertising platforms. In addition, the company offers various subscription-based services, such as Apple Arcade, a game subscription service; Apple Fitness+, a personalized fitness service; Apple Music, which offers users a curated listening experience with on-demand radio stations; Apple News+, a subscription news and magazine service; Apple TV, which offers original content and live sports; Apple Card, a co-branded credit card; and Apple Pay, a cashless payment service, as well as licenses its intellectual property. The company serves consumers, and small and mid-sized businesses; and the education, enterprise, and government markets. It distributes third-party applications for its products through the App Store. The company also sells its products through its retail and online stores, and direct sales force; and third-party cellular network carriers and resellers. The company was formerly known as Apple Computer, Inc. and changed its name to Apple Inc. in January 2007. Apple Inc. was founded in 1976 and is headquartered in Cupertino, California.",
+        "website": "https://www.apple.com",
+        "employees": 166000
+    },
+    "market_cap": 4894708203520,
+    "beta": 1.097,
+    "sentiment": {
+        "label": "positive",
+        "score": 0.926611065864563
+    },
+    "retrieved_chunks": [
+        {
+            "text": "Apple periodically provides information for investors on its corporate website, apple.com, and its investor relations website, investor.apple.com. This includes press releases and other information about financial performance, reports filed or furnished with the SEC, information on corporate governance, and details related to its annual meeting of shareholders.\nThis press release contains",
+            "metadata": {
+                "quarter": "2026-04-30",
+                "importance": 0.55,
+                "company": "AAPL",
+                "section": "AI",
+                "speaker": "Management"
+            }
+        },
+        {
+            "text": "Apple’s board of directors has declared a cash dividend of $0.27 per share of the Company’s common stock, an increase of 4 percent. The dividend is payable on May 14, 2026, to shareholders of record as of the close of business on May 11, 2026. The board of directors has also authorized an additional program to repurchase up to $100 billion of the Company’s common stock.\nApple will provide live streaming of its Q2 2026 financial results conference call beginning at 2:00 p.m. PT on April 30, 2026, at apple.com/investor/earnings-call. The webcast will be available for replay for approximately two weeks thereafter.",
+            "metadata": {
+                "section": "AI",
+                "importance": 0.55,
+                "speaker": "Management",
+                "company": "AAPL",
+                "quarter": "2026-04-30"
+            }
+        },
+        {
+            "text": "“Today Apple is proud to report our best March quarter ever, with revenue of $111.2 billion and double-digit growth across every geographic segment,” said Tim Cook, Apple’s CEO. “iPhone achieved a March quarter revenue record, fueled by such extraordinary demand for the iPhone 17 lineup. During the quarter, Services achieved yet another all-time record, and we were excited to introduce remarkable new products to our strongest lineup ever. That included the addition of the iPhone 17e and the M4-powered iPad Air, along with the launch of MacBook Neo, which is captivating customers all around the world.”",
+            "metadata": {
+                "speaker": "CEO",
+                "importance": 0.7,
+                "section": "Financial Performance",
+                "company": "AAPL",
+                "quarter": "2026-04-30"
+            }
+        },
+        {
+            "text": "EX-99.1\n2\na8-kex991q2202603282026.htm\nEX-99.1\nDocument\nExhibit 99.1\nApple reports second quarter results\nMarch quarter records for total company revenue, iPhone revenue, and EPS\nServices revenue reaches new all-time high\nCUPERTINO, CALIFORNIA — Apple\n®\ntoday announced financial results for its fiscal 2026 second quarter ended March 28, 2026. The Company posted quarterly revenue of $111.2 billion, up 17 percent year over year. Diluted earnings per share was $2.01, up 22 percent year over year.",
+            "metadata": {
+                "company": "AAPL",
+                "section": "Financial Performance",
+                "importance": 0.6,
+                "speaker": "Management",
+                "quarter": "2026-04-30"
+            }
+        },
+        {
+            "text": "“Our strong business performance during the March quarter generated over $28 billion in operating cash flow and drove new March quarter records for both operating cash flow and EPS,” said Kevan Parekh, Apple’s CFO. “Continued strong customer demand for our products and services once again helped us achieve a new all-time high for our installed base of active devices across all major product categories and geographic segments.”",
+            "metadata": {
+                "importance": 0.7,
+                "section": "Financial Performance",
+                "company": "AAPL",
+                "speaker": "CFO",
+                "quarter": "2026-04-30"
+            }
+        }
+    ],
+    "generated_answer": "# Executive Summary\nNot available for this report.\n\n# Business Analysis\nApple Inc.'s core competencies lie in designing innovative technologies tailored towards enhancing user experiences across diverse device types—ranging from cutting-edge smartphones to versatile tablets and powerful laptops. These offerings have consistently driven revenue growth, supported by robust profit margins and solid free cash flows. While the company demonstrates resilience against economic downturns, sustained innovation remains crucial for sustaining long-term success. Addressing emerging trends such as AI integration into everyday life underscores ongoing strategic importance. Additionally, diversifying into areas like healthcare solutions and smart homes expands reach and enhances brand appeal globally.\n\n# Market and Earnings Analysis\nMarket conditions favor Apple given its dominant position in global tech consumption. Recent developments highlight shifts toward sustainable practices and technological advancements, influencing purchasing decisions positively. Analyst consensus suggests continued momentum in key sectors like mobile computing and software development tools. Quarterly earnings forecasts indicate stability amid anticipated increases in operational efficiency and cost control strategies. However, scrutiny surrounding regulatory compliance and potential antitrust actions looms large, casting doubt on near-term prospects. Moreover, concerns regarding supply chain disruptions underscore vulnerabilities linked to international logistics and raw material sourcing.\n\n# Risk Analysis\n### Litigation Risks\nLitigation involving open-source projects and patent disputes pose threats to Apple's operations. Legal battles with entities like Samsung and Google raise questions about infringement claims affecting proprietary rights. Anticipated litigation stemming from allegations of unfair pricing tactics may further complicate existing legal landscapes. \n\n### Regulatory Risks\nRegulatory pressure from governments seeking greater oversight over tech giants amplifies uncertainties. Compliance issues associated with privacy regulations and environmental standards impose burdensome requirements. Potential legislative reforms targeting monopolistic practices threaten Apple's dominance in certain industries. \n\n### Competitive Risks\nCompetition intensifies from rivals offering similar functionalities at lower prices. Emerging players leveraging advanced AI capabilities challenge established positions. Strategic partnerships and acquisitions aim to enhance market presence but come with unknown outcomes impacting overall strategy. \n\n### Macro Economic Factors\nMacro-economic factors influence consumer behavior and purchasing power. Rising interest rates dampen discretionary spending, potentially reducing demand for luxury electronic gadgets. Currency fluctuations impact export revenues negatively.\n\n# Investment Thesis\nDespite promising fundamentals and resilient execution, Apple's valuation reflects considerable disparity versus comparable peers. The intrinsic value assessment indicates a steep discount off the current market price, underscoring the necessity for cautious investments. Given the prevailing macroeconomic environment and heightened regulatory scrutiny, the recommended course of action aligns with the determined recommendation of selling Apple Inc. at a threshold of less than $150-$155 per share. This decision prioritizes mitigating exposure to adverse market forces and safeguarding shareholder interests.",
+    "context.valuation_results": {
+        "dcf_available": true,
+        "dcf_unavailable_reason": null,
+        "enterprise_value": 1467174006638.6572,
+        "equity_value": 1404451006638.6572,
+        "fcff_forecasts": {
+            "forecast_fcff": {
+                "Year_1": 114201408461.58475,
+                "Year_2": 116271349809.50787,
+                "Year_3": 118378809584.23117,
+                "Year_4": 120700181077.03917,
+                "Year_5": 123246232878.46623,
+                "Year_6": 126028929262.98274,
+                "Year_7": 129061522896.93544,
+                "Year_8": 132422515432.73608,
+                "Year_9": 136133112555.9933,
+                "Year_10": 140217105932.6731
+            }
+        },
+        "wacc": 0.10419721909988831,
+        "raw_wacc": 0.10419721909988831,
+        "wacc_floored": false,
+        "wacc_floor_note": null,
+        "terminal_growth_rate": 0.03,
+        "sensitivity_analysis": {
+            "0.01": {
+                "0.0842": 108.50021152142487,
+                "0.0942": 94.74614614784,
+                "0.1042": 83.93405945080099,
+                "0.1142": 75.21535517843544,
+                "0.1242": 68.03879949674703
+            },
+            "0.02": {
+                "0.0842": 118.12521949637888,
+                "0.0942": 101.50290263255874,
+                "0.1042": 88.83785074557044,
+                "0.1142": 78.86909525639925,
+                "0.1242": 70.81978424061437
+            },
+            "0.03": {
+                "0.0842": 131.30189093072548,
+                "0.0942": 110.36456767949518,
+                "0.1042": 95.06341866965776,
+                "0.1142": 83.3907070868485,
+                "0.1242": 74.1912116052603
+            },
+            "0.04": {
+                "0.0842": 150.44085713174474,
+                "0.0942": 122.49621982862219,
+                "0.1042": 103.22841585358539,
+                "0.1142": 89.13108221391481,
+                "0.1242": 78.36345307077227
+            },
+            "0.05": {
+                "0.0842": 154.72638716397918,
+                "0.0942": 140.11730733934513,
+                "0.1042": 114.40632712752326,
+                "0.1142": 96.65973619676501,
+                "0.1242": 83.6602879232147
+            }
+        },
+        "intrinsic_value": 95.06710141422118,
+        "current_price": 333.26,
+        "upside_percent": -71.47,
+        "relative_valuation": {
+            "method": "Own trading history (no peer/sector multiple data source is wired into this pipeline)",
+            "metric": "EV/EBITDA",
+            "current_ev_ebitda": 34.25,
+            "historical_avg_ev_ebitda": 21.82,
+            "years_used": 3,
+            "vs_history_pct": 56.93,
+            "signal": "expensive",
+            "current_pfcf": 49.85,
+            "historical_avg_pfcf": 25.98
+        },
+        "monte_carlo": {
+            "mean": 98.00982182629421,
+            "median": 94.20581921890546,
+            "std_dev": 21.99395439824342,
+            "p25": 81.72645501612621,
+            "p75": 110.22755255398833,
+            "ci_lower": 68.90396526028414,
+            "ci_upper": 140.78397007883274,
+            "prob_undervalued": 0.0,
+            "n_samples": 1963
+        },
+        "ml_classifier": {
+            "verdict": "OVERVALUED",
+            "probabilities": {
+                "FAIRLY VALUED": 0.2806327504584006,
+                "OVERVALUED": 0.36371822146498733,
+                "UNDERVALUED": 0.35564902807661203
+            },
+            "model_name": "logistic_regression"
+        }
+    },
+    "investment_thesis": {},
+    "evaluation": {
+        "latency": 232.53,
+        "answer_length": 3550,
+        "grounding_score": 10.34,
+        "supported_claims": 3,
+        "unsupported_claims": 26,
+        "retrieval_score": 100.0,
+        "retrieved_chunks": 0,
+        "reranked_chunks": 5,
+        "citation_score": 0.0,
+        "citations_used": 0,
+        "citations_available": 5,
+        "news_grounding_rate": 10.0,
+        "news_citations_used": 1,
+        "news_citations_available": 10,
+        "completeness_score": 100.0,
+        "missing_sections": [],
+        "overall_score": 44.14
+    },
+    "metadata": {
+        "plan": [
+            "market_data_tool",
+            "valuation_tool",
+            "rag_tool",
+            "sentiment_tool",
+            "institutional_consensus_tool",
+            "news_tool",
+            "report_tool",
+            "evaluation_tool"
+        ],
+        "disclosure_source": {
+            "text": "EX-99.1\n2\na8-kex991q2202603282026.htm\nEX-99.1\nDocument\nExhibit 99.1\nApple reports second quarter results\nMarch quarter records for total company revenue, iPhone revenue, and EPS\nServices revenue reaches new all-time high\nCUPERTINO, CALIFORNIA — Apple\n®\ntoday announced financial results for its fiscal 2026 second quarter ended March 28, 2026. The Company posted quarterly revenue of $111.2 billion, up 17 percent year over year. Diluted earnings per share was $2.01, up 22 percent year over year.\n“Today Apple is proud to report our best March quarter ever, with revenue of $111.2 billion and double-digit growth across every geographic segment,” said Tim Cook, Apple’s CEO. “iPhone achieved a March quarter revenue record, fueled by such extraordinary demand for the iPhone 17 lineup. During the quarter, Services achieved yet another all-time record, and we were excited to introduce remarkable new products to our strongest lineup ever. That included the addition of the iPhone 17e and the M4-powered iPad Air, along with the launch of MacBook Neo, which is captivating customers all around the world.”\n“Our strong business performance during the March quarter generated over $28 billion in operating cash flow and drove new March quarter records for both operating cash flow and EPS,” said Kevan Parekh, Apple’s CFO. “Continued strong customer demand for our products and services once again helped us achieve a new all-time high for our installed base of active devices across all major product categories and geographic segments.”\nApple’s board of directors has declared a cash dividend of $0.27 per share of the Company’s common stock, an increase of 4 percent. The dividend is payable on May 14, 2026, to shareholders of record as of the close of business on May 11, 2026. The board of directors has also authorized an additional program to repurchase up to $100 billion of the Company’s common stock.\nApple will provide live streaming of its Q2 2026 financial results conference call beginning at 2:00 p.m. PT on April 30, 2026, at apple.com/investor/earnings-call. The webcast will be available for replay for approximately two weeks thereafter.\nApple periodically provides information for investors on its corporate website, apple.com, and its investor relations website, investor.apple.com. This includes press releases and other information about financial performance, reports filed or furnished with the SEC, information on corporate governance, and details related to its annual meeting of shareholders.\nThis press release contains",
+            "form": "8-K",
+            "filing_date": "2026-04-30",
+            "source_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000011/a8-kex991q2202603282026.htm"
+        },
+        "query_intent": "investment"
+    }
+}

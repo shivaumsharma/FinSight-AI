@@ -1,0 +1,146 @@
+{
+  "n_rows": 39,
+  "warning": "Only 39 labeled rows -- below the 40-row floor for stable cross-validation. Metrics below are noisy; treat as directional evidence, not a benchmark, until the training set grows.",
+  "label_distribution": {
+    "UNDERVALUED": 20,
+    "OVERVALUED": 12,
+    "FAIRLY VALUED": 7
+  },
+  "cross_validation": {
+    "logistic_regression": {
+      "cv_accuracy_mean": 0.5464285714285715,
+      "cv_accuracy_std": 0.18091321631305626,
+      "cv_f1_macro_mean": 0.35962962962962963,
+      "cv_f1_macro_std": 0.15319370991395712,
+      "n_splits": 5
+    },
+    "gradient_boosting": {
+      "cv_accuracy_mean": 0.38571428571428573,
+      "cv_accuracy_std": 0.19483116709979795,
+      "cv_f1_macro_mean": 0.2513419913419913,
+      "cv_f1_macro_std": 0.13146883241681623,
+      "n_splits": 5
+    }
+  },
+  "held_out_test": {
+    "logistic_regression": {
+      "test_f1_macro": 0.3148148148148148,
+      "classification_report": {
+        "UNDERVALUED": {
+          "precision": 0.5,
+          "recall": 0.4,
+          "f1-score": 0.4444444444444444,
+          "support": 5.0
+        },
+        "FAIRLY VALUED": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1-score": 0.0,
+          "support": 2.0
+        },
+        "OVERVALUED": {
+          "precision": 0.4,
+          "recall": 0.6666666666666666,
+          "f1-score": 0.5,
+          "support": 3.0
+        },
+        "accuracy": 0.4,
+        "macro avg": {
+          "precision": 0.3,
+          "recall": 0.35555555555555557,
+          "f1-score": 0.3148148148148148,
+          "support": 10.0
+        },
+        "weighted avg": {
+          "precision": 0.37,
+          "recall": 0.4,
+          "f1-score": 0.37222222222222223,
+          "support": 10.0
+        }
+      }
+    },
+    "gradient_boosting": {
+      "test_f1_macro": 0.1574074074074074,
+      "classification_report": {
+        "UNDERVALUED": {
+          "precision": 0.25,
+          "recall": 0.2,
+          "f1-score": 0.2222222222222222,
+          "support": 5.0
+        },
+        "FAIRLY VALUED": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1-score": 0.0,
+          "support": 2.0
+        },
+        "OVERVALUED": {
+          "precision": 0.2,
+          "recall": 0.3333333333333333,
+          "f1-score": 0.25,
+          "support": 3.0
+        },
+        "accuracy": 0.2,
+        "macro avg": {
+          "precision": 0.15,
+          "recall": 0.17777777777777778,
+          "f1-score": 0.1574074074074074,
+          "support": 10.0
+        },
+        "weighted avg": {
+          "precision": 0.185,
+          "recall": 0.2,
+          "f1-score": 0.18611111111111112,
+          "support": 10.0
+        }
+      }
+    }
+  },
+  "best_model": "logistic_regression",
+  "feature_importances": [
+    {
+      "feature": "fcf_yield",
+      "importance": 0.5697594661403029
+    },
+    {
+      "feature": "dcf_over_price",
+      "importance": 0.49966318672925464
+    },
+    {
+      "feature": "mc_mean_over_price",
+      "importance": 0.3923168401936194
+    },
+    {
+      "feature": "mc_std_over_price",
+      "importance": 0.34939635880376213
+    },
+    {
+      "feature": "beta",
+      "importance": 0.303058773997282
+    },
+    {
+      "feature": "wacc",
+      "importance": 0.2691706940901624
+    },
+    {
+      "feature": "growth_rate",
+      "importance": 0.2572103403716957
+    },
+    {
+      "feature": "revenue_growth",
+      "importance": 0.2466292166885035
+    },
+    {
+      "feature": "mc_prob_undervalued",
+      "importance": 0.16528515039277758
+    },
+    {
+      "feature": "relative_vs_history_pct",
+      "importance": 0.07802086644735169
+    },
+    {
+      "feature": "net_cash_per_share_over_price",
+      "importance": 0.07220419599396738
+    }
+  ]
+}

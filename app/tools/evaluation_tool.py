@@ -22,6 +22,7 @@ leaving the report showing scores it never actually had.
 from datetime import datetime
 
 from app.core.research_context import ResearchContext
+from app.core.prediction_log import PredictionLogger
 from app.evaluation.evaluation_engine import EvaluationEngine
 from .base_tool import BaseTool
 
@@ -52,6 +53,18 @@ class EvaluationTool(BaseTool):
         context.evaluation = vars(metrics)
 
         self._refresh_report(context)
+
+        # Forward-tracking log (prediction_log.py): written here, not
+        # from report_tool, specifically so grounding_score/
+        # overall_score are actually populated -- this tool is the
+        # first point in the plan where they exist. Never allowed to
+        # break the run -- a logging failure (e.g. a read-only
+        # filesystem) shouldn't cost the user their report.
+        try:
+            if context.report_data:
+                PredictionLogger().log(context.ticker, context.report_data)
+        except Exception:
+            pass
 
         context.record_tool(self.name)
 

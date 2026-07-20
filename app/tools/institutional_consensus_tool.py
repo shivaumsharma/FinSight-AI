@@ -38,7 +38,11 @@ class InstitutionalConsensusTool(BaseTool):
             context.record_tool(self.name)
             return context
 
-        finsight_rating = derive_recommendation(context.valuation_results)["rating"]
+        finsight_rating = derive_recommendation(
+            context.valuation_results,
+            context.sentiment_summary,
+            context.news_sentiment_summary,
+        )["rating"]
 
         institutional_ratings = fetch_institutional_ratings(context.ticker)
 

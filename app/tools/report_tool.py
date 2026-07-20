@@ -59,6 +59,13 @@ class ReportTool(BaseTool):
 
         context.pdf_bytes = build_pdf_report(report_data)
 
+        # Forward-tracking log (prediction_log.py) is written from
+        # EvaluationTool, not here -- grounding/overall score aren't
+        # known yet at this point (evaluation_tool runs after
+        # report_tool in every plan's trailing tools), and logging
+        # here would have permanently baked in "not yet computed" for
+        # those fields. See evaluation_tool.py.
+
         context.record_tool(self.name)
 
         return context
