@@ -28,7 +28,9 @@ from app.valuation.dcf_engine import DCFEngine
 from app.valuation.fcff_engine import FCFFEngine
 from app.reporting.report_data_builder import _dcf_score, _composite_score, _rating_from_score
 
-DEFAULT_TERMINAL_GROWTH_RATE = 0.03
+# Kept in sync with valuation_pipeline.DEFAULT_TERMINAL_GROWTH_RATE --
+# see that constant's comment for why 4%, not 3%.
+DEFAULT_TERMINAL_GROWTH_RATE = 0.04
 DEFAULT_FORECAST_YEARS = 10
 
 # Slider bounds. WACC's bounds are NOT here -- they're centered on

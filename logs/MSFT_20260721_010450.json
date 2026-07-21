@@ -1,0 +1,212 @@
+{
+    "timestamp": "2026-07-20T19:33:03.268729",
+    "ticker": "MSFT",
+    "question": "Should I buy Microsoft?",
+    "company_info": {
+        "company_name": "Microsoft Corporation",
+        "sector": "Technology",
+        "industry": "Software - Infrastructure",
+        "market_cap": 2984299462656,
+        "currency": "USD",
+        "country": "United States",
+        "beta": 1.13,
+        "current_price": 401.745,
+        "business_summary": "Microsoft Corporation develops and supports software, services, devices, and solutions worldwide. The Productivity and Business Processes segment offers Microsoft 365 commercial, enterprise mobility + security, windows commercial, power BI, exchange, sharepoint, Microsoft teams, security and compliance, and copilot; Microsoft 365 commercial products, such as Windows commercial on-premises and office licensed services; Microsoft 365 consumer products and cloud services, including Microsoft 365 consumer subscriptions, office licensed on-premises, and other consumer services; LinkedIn; dynamics products and cloud services, such as dynamics 365, cloud-based applications, and on-premises ERP and CRM applications. Its Intelligent Cloud segment provides Server products and cloud services comprising Azure and other cloud services, GitHub, Nuance Healthcare, virtual desktop offerings, and other cloud services; server products, including SQL and windows server, visual studio and system center related client access licenses, and other on-premises offerings; enterprise and partner services, such as enterprise support and nuance professional services, industry solutions, Microsoft partner network, and learning experience. The Personal Computing segment provides windows and devices, such as Windows OEM licensing and devices and surface and PC accessories; gaming services and solutions, such as Xbox hardware, content, and services, first- and third-party content Xbox game pass, subscriptions, and cloud gaming, advertising, and other cloud services; search and news advertising services. It sells its products through OEMs, distributors, and resellers; and online and retail stores. The company has a strategic collaboration with Mayo Clinic, Inc. for the development of a frontier AI model for healthcare; and Global Objects, Inc. to build a retrieval-grounded generative AI world model. The company was founded in 1975 and is headquartered in Redmond, Washington.",
+        "website": "https://www.microsoft.com",
+        "employees": 228000
+    },
+    "market_cap": 2984299462656,
+    "beta": 1.13,
+    "sentiment": {
+        "label": "positive",
+        "score": 0.7362498641014099
+    },
+    "retrieved_chunks": [
+        {
+            "text": "Xbox content and services revenue\n(5)%\n(2)%\n(7)%\nSearch advertising revenue excluding traffic acquisition costs\n12%\n(3)%\n9%\nAbout Microsoft\nMicrosoft (Nasdaq “MSFT” @microsoft) creates platforms and tools powered by AI to deliver innovative solutions that meet the evolving needs of our customers. The technology company is committed to making AI available broadly and doing so responsibly, with a mission to empower every person and every organization on the planet to achieve more.",
+            "metadata": {
+                "quarter": "2026-04-29",
+                "company": "MSFT",
+                "section": "Financial Performance",
+                "importance": 0.6,
+                "speaker": "Management"
+            }
+        },
+        {
+            "text": "Microsoft has provided non-GAAP financial measures related to the impact from investments in OpenAI to aid investors in better understanding our performance. Microsoft believes these non-GAAP measures assist investors by providing additional insight into its operational performance and help clarify trends affecting its business. For comparability of reporting, management considers non-GAAP measures in conjunction with GAAP financial results in evaluating business performance. The non-GAAP financial measures presented in this release should not be considered as a substitute for, or superior to, the measures of financial performance prepared in accordance with GAAP.\nConstant Currency",
+            "metadata": {
+                "company": "MSFT",
+                "importance": 0.55,
+                "quarter": "2026-04-29",
+                "section": "AI",
+                "speaker": "Management"
+            }
+        },
+        {
+            "text": "Non-GAAP results exclude the impact from investments in OpenAI, explained in the Non-GAAP Definition section below\n“We are focused on delivering cloud and AI infrastructure and solutions that empower every business to eval-max their outcomes in the agentic computing era,” said Satya Nadella, chairman and chief executive officer of Microsoft. “Our AI business surpassed an annual revenue run rate of $37 billion, up 123% year-over-year.”\n“We delivered results that exceeded expectations across revenue, operating income, and earnings per share, reflecting strong execution and growing demand for the Microsoft Cloud,” said Amy Hood, executive vice president and chief financial officer of Microsoft.",
+            "metadata": {
+                "importance": 0.7,
+                "company": "MSFT",
+                "quarter": "2026-04-29",
+                "speaker": "Management",
+                "section": "Financial Performance"
+            }
+        },
+        {
+            "text": "Quarterly Highlights, Product Releases, and Customer Stories\nEvery quarter Microsoft delivers hundreds of products, services, and enhancements. These releases are driven by years of significant research and development investments, to empower customers with greater productivity, security, and differentiated value.\nThis momentum is reflected in stories that showcase how our technology is\nshaping industries and driving customer success\n. We share innovation updates on our product blogs across\nAzure\n,\nMicrosoft 365\n, and more on our\nOfficial Microsoft blog\n.\nWebcast Details",
+            "metadata": {
+                "section": "AI",
+                "company": "MSFT",
+                "speaker": "Management",
+                "quarter": "2026-04-29",
+                "importance": 0.55
+            }
+        },
+        {
+            "text": "Microsoft presents constant currency information to provide a framework for assessing how our underlying businesses performed excluding the effect of foreign currency rate fluctuations. To present this information, current and comparative prior period results for entities reporting in currencies other than United States dollars are converted into United States dollars using the average exchange rates from the comparative period rather than the actual exchange rates in effect during the respective periods. All growth comparisons relate to the corresponding period in the last fiscal year. Microsoft has provided this non-GAAP financial information to aid investors in better understanding our performance. The non-GAAP financial measures presented in this release should not be considered as a substitute for, or superior to, the measures of financial performance prepared in accordance with GAAP.",
+            "metadata": {
+                "company": "MSFT",
+                "speaker": "Management",
+                "quarter": "2026-04-29",
+                "importance": 0.6,
+                "section": "AI"
+            }
+        }
+    ],
+    "generated_answer": "# Executive Summary\nMicrosoft Corporation has demonstrated strong revenue growth of 14.93% over the past year and a CAGR of 12.42%. Despite this healthy performance, Microsoft's operating margin remains at an impressive 44.73%, indicating that despite its focus on cloud infrastructure and AI solutions, the company continues to maintain profitability through efficient operations.\n\n# Business Analysis\nThe Productivity and Business Processes segment offers diverse products such as Microsoft 365 commercial, enterprise mobility + security, Windows commercial, power BI, exchange, sharepoint, Microsoft teams, security and compliance, copilot; Microsoft 365 consumer products and cloud services, including Microsoft 365 consumer subscriptions, office licensed on-premises, other consumer services; LinkedIn; dynamics products and cloud services, SQL server, visual studio, system center related client access licenses, industry solutions, learning experience. These offerings cater to various business needs from productivity tools to enterprise-level software solutions.\n\nThe Intelligent Cloud segment provides Azure and other cloud services, GitHub, Nuance Healthcare, virtual desktops, and other cloud services; Server products like SQL and windows server, Visual Studio and System Center-related client access licenses, and on-premises ERP and CRM applications. This division supports businesses in managing their IT infrastructures efficiently with scalable cloud-based solutions.\n\nThe Personal Computing segment includes Windows OEM licensing and devices, gaming services, search advertising, news advertising, and other cloud services. It caters to consumers by offering personal computing experiences across platforms.\n\nThese segments collectively form a comprehensive suite of technology products designed for both corporate and individual use, reflecting Microsoft's commitment to providing robust technological capabilities worldwide.\n\n# Market and Earnings Analysis\nMarket sentiment towards Microsoft appears mixed but leans positive overall based on SEC filing tone (Management Sentiment: Positive). However, market media sentiment varies widely between bullish optimism (\"Buy\") and bearish skepticism (\"Sell\"). Recent earnings calls highlight management confidence while also acknowledging competitive pressures and regulatory scrutiny.\n\nInvestment Thesis:\nGiven Microsoft's consistent financial health, solid profit margins, and strategic partnerships, we recommend holding shares within our portfolio. Our composite score reflects a cautious approach considering potential risks associated with macroeconomic factors and evolving competition. We believe the current valuation aligns well with intrinsic value, making it suitable for investors seeking long-term stability without excessive risk exposure.\nHolding MSFT -- Composite Score -10.4\n\nThis recommendation takes into account DCF analysis (-28.4 x 60%), relative valuation (+16.6 x 40%) combined with the neutral outlook provided by market/media sentiment scores. While there are some signs of uncertainty due to external factors affecting tech companies globally, the underlying fundamentals remain favorable, warranting caution rather than aggressive investment moves. Investors should monitor broader economic trends and stay informed about any significant developments impacting Microsoft or the broader tech sector before deciding whether to buy, sell, or hold. \n\nNote: No recent news found regarding litigation, regulatory actions, competitive threats, or macroeconomic shifts relevant to Microsoft's stock price trajectory.\n\n# Risk Analysis\nNo recent news was identified concerning litigation, regulatory issues, competitive challenges, or macroeconomic conditions pertinent to Microsoft's stock performance. Therefore, no specific risks were highlighted beyond those mentioned in the RESEARCH CONTEXT section.\n\n# Investment Thesis\n[...]",
+    "context.valuation_results": {
+        "dcf_available": true,
+        "dcf_unavailable_reason": null,
+        "enterprise_value": 2168250124989.5232,
+        "equity_value": 2137904124989.5232,
+        "fcff_forecasts": {
+            "forecast_fcff": {
+                "Year_1": 113663664252.4082,
+                "Year_2": 127784231581.13019,
+                "Year_3": 143659013178.73404,
+                "Year_4": 159813792904.97437,
+                "Year_5": 175902784394.51724,
+                "Year_6": 191539568583.27393,
+                "Year_7": 206310252217.3727,
+                "Year_8": 218979843652.9119,
+                "Year_9": 228988359251.5116,
+                "Year_10": 235858010029.05695
+            }
+        },
+        "wacc": 0.10627264134945623,
+        "raw_wacc": 0.10627264134945623,
+        "wacc_floored": false,
+        "wacc_floor_note": null,
+        "terminal_growth_rate": 0.03,
+        "sensitivity_analysis": {
+            "0.01": {
+                "0.0863": 329.1526634453883,
+                "0.0963": 286.36939199397875,
+                "0.1063": 252.6770256282378,
+                "0.1163": 225.4969853553038,
+                "0.1263": 203.13852982212194
+            },
+            "0.02": {
+                "0.0863": 358.9263575788555,
+                "0.0963": 307.4323200364406,
+                "0.1063": 268.05593403398643,
+                "0.1163": 237.01111010221703,
+                "0.1263": 211.93724113063226
+            },
+            "0.03": {
+                "0.0863": 399.27685247021503,
+                "0.0963": 334.8490725261005,
+                "0.1063": 287.46601109130745,
+                "0.1163": 251.19362992373354,
+                "0.1263": 222.56330681266493
+            },
+            "0.04": {
+                "0.0863": 457.05736675309066,
+                "0.0963": 372.0053463264745,
+                "0.1063": 312.731315013582,
+                "0.1163": 269.09371719518884,
+                "0.1263": 235.65196013827418
+            },
+            "0.05": {
+                "0.0863": 494.6418857732208,
+                "0.0963": 425.2118463905089,
+                "0.1063": 346.97186011606067,
+                "0.1163": 292.39352913374984,
+                "0.1263": 252.171453129836
+            }
+        },
+        "intrinsic_value": 287.5784906139487,
+        "current_price": 401.745,
+        "upside_percent": -28.42,
+        "relative_valuation": {
+            "method": "Own trading history (no peer/sector multiple data source is wired into this pipeline)",
+            "metric": "EV/EBITDA",
+            "current_ev_ebitda": 18.82,
+            "historical_avg_ev_ebitda": 22.56,
+            "years_used": 3,
+            "vs_history_pct": -16.58,
+            "signal": "cheap",
+            "current_pfcf": 41.71,
+            "historical_avg_pfcf": 38.07
+        },
+        "monte_carlo": {
+            "mean": 307.7776990921547,
+            "median": 290.2671289808324,
+            "std_dev": 93.41244210448794,
+            "p25": 242.9505440223998,
+            "p75": 355.4031662275075,
+            "ci_lower": 191.49248103251333,
+            "ci_upper": 473.16591787269675,
+            "prob_undervalued": 0.1458227848101266,
+            "n_samples": 1975
+        },
+        "ml_classifier": {
+            "verdict": "UNDERVALUED",
+            "probabilities": {
+                "FAIRLY VALUED": 0.14287361592729622,
+                "OVERVALUED": 0.32950480781174446,
+                "UNDERVALUED": 0.5276215762609594
+            },
+            "model_name": "logistic_regression"
+        }
+    },
+    "investment_thesis": {},
+    "evaluation": {
+        "latency": 107.45,
+        "answer_length": 3916,
+        "grounding_score": 63.64,
+        "supported_claims": 14,
+        "unsupported_claims": 8,
+        "retrieval_score": 100.0,
+        "retrieved_chunks": 0,
+        "reranked_chunks": 5,
+        "citation_score": 80.0,
+        "citations_used": 4,
+        "citations_available": 5,
+        "news_grounding_rate": 30.0,
+        "news_citations_used": 3,
+        "news_citations_available": 10,
+        "completeness_score": 100.0,
+        "missing_sections": [],
+        "overall_score": 81.46
+    },
+    "metadata": {
+        "plan": [
+            "market_data_tool",
+            "valuation_tool",
+            "rag_tool",
+            "sentiment_tool",
+            "institutional_consensus_tool",
+            "news_tool",
+            "report_tool",
+            "evaluation_tool"
+        ],
+        "disclosure_source": {
+            "text": "EX-99.1\n2\nmsft-ex99_1.htm\nEX-99.1\nEX-99.1\nExhibit 99.1\nMicrosoft Cloud and AI Strength Fuels Third Quarter Results\nREDMOND, Wash. — April 29, 2026 —\nMicrosoft Corp. today announced the following results for the quarter ended March 31, 2026, as compared to the corresponding period of last fiscal year:\n•\nRevenue was $82.9 billion and increased 18% (up 15% in constant currency)\n•\nOperating income was $38.4 billion and increased 20% (up 16% in constant currency)\n•\nNet income was $31.8 billion and increased 23% on a GAAP basis, and  increased 20% (up 18% in constant currency) on a non-GAAP basis\n•\nDiluted earnings per share was $4.27 and increased 23% on a GAAP basis, and increased 21% (up 18% in constant currency) on a non-GAAP basis\n•\nNon-GAAP results exclude the impact from investments in OpenAI, explained in the Non-GAAP Definition section below\n“We are focused on delivering cloud and AI infrastructure and solutions that empower every business to eval-max their outcomes in the agentic computing era,” said Satya Nadella, chairman and chief executive officer of Microsoft. “Our AI business surpassed an annual revenue run rate of $37 billion, up 123% year-over-year.”\n“We delivered results that exceeded expectations across revenue, operating income, and earnings per share, reflecting strong execution and growing demand for the Microsoft Cloud,” said Amy Hood, executive vice president and chief financial officer of Microsoft.\nThe following table reconciles our financial results reported in accordance with generally accepted accounting principles (GAAP) to non-GAAP financial results. Additional information regarding our non-GAAP definition is provided below. All growth comparisons relate to the corresponding period in the last fiscal year.\nThree Months Ended March 31,\n2026\n2025\nPercentage Change Y/Y\n($ in millions, except per share amounts)\nAs Reported (GAAP)\nAdjustment*\nAs Adjusted (non-GAAP)\nAs Reported (GAAP)\nAdjustment*\nAs Adjusted (non-GAAP)\nGAAP\nConstant Currency\nNon-GAAP\nNon-GAAP Constant Currency\nNet\nIncome\n$31,778\n$14\n$31,792\n$25,824\n$583\n$26,407\n23%\n20%\n20%\n18%\nDiluted Earnings\nper Share\n$4.27\n$0.00\n$4.27\n$3.46\n$0.08\n$3.54\n23%\n21%\n21%\n18%\n*Adjustment is the impact from investments in OpenAI\nBusiness Highlights\nMicrosoft Cloud revenue was $54.5 billion and increased 29% (up 25% in constant currency), and commercial remaining performance obligation increased 99% to $627 billion.\nRevenue in Productivity and Business Processes was $35.0\nbillion and increased 17% (up 13% in constant currency), with the following business highlights:\n•\nMicrosoft 365 Commercial cloud revenue increased 19% (up 15% in constant currency)\n•\nMicrosoft 365 Consumer cloud revenue increased 33% (up 29% in constant currency)\n•\nLinkedIn revenue increased 12% (up 9% in constant currency)\n•\nDynamics 365 revenue increased 22% (up 17% in constant currency)\nRevenue in Intelligent Cloud was $34.7 billion and increased 30% (up 28% in constant currency), with the following business highlights:\n•\nAzure and other cloud services revenue increased 40% (up 39% in constant currency)\nRevenue in More Personal Computing was $13.2 billion and decreased 1% (down 3% in constant currency), with the following business highlights:\n•\nWindows OEM and Devices revenue decreased 2% (down 3% in constant currency)\n•\nXbox content and services revenue decreased 5% (down 7% in constant currency)\n•\nSearch advertising revenue excluding traffic acquisition costs increased 12% (up 9% in constant currency)\nMicrosoft returned $10.2 billion to shareholders in the form of dividends and share repurchases in the third quarter of fiscal year 2026.\nBusiness Outlook\nMicrosoft will provide forward-looking guidance in connection with this quarterly earnings announcement on its earnings conference call and webcast.\nQuarterly Highlights, Product Releases, and Customer Stories\nEvery quarter Microsoft delivers hundreds of products, services, and enhancements. These releases are driven by years of significant research and development investments, to empower customers with greater productivity, security, and differentiated value.\nThis momentum is reflected in stories that showcase how our technology is\nshaping industries and driving customer success\n. We share innovation updates on our product blogs across\nAzure\n,\nMicrosoft 365\n, and more on our\nOfficial Microsoft blog\n.\nWebcast Details\nSatya Nadella, chairman and chief executive officer, Amy Hood, executive vice president and chief financial officer, Alice Jolla, chief accounting officer, Brian DeFoe, deputy general counsel and corporate secretary, and Jonathan Neilson, vice president of investor relations, will host a conference call and webcast at 2:30 p.m. Pacific time (5:30 p.m. Eastern time) today to discuss details of the company’s performance for the quarter and certain forward-looking information. The session may be accessed at\nhttp://www.microsoft.com/en-us/investor\n. Participants can also dial into the conference call at (877) 407-0666 or +1 (201) 689-8023 for international, no password required. The webcast will be available for replay through the close of business on April 29, 2027.\nNon-GAAP Definition\nImpact from investments in OpenAI.\nIn the third quarter of fiscal year 2026, net losses from investments in OpenAI resulted in a decrease in net income of $14 million and had minimal impact on earnings per share. In the third quarter of fiscal year 2025, net income and diluted earnings per share were impacted by net losses from investments in OpenAI, which resulted in a decrease in net income and diluted earnings per share of $583 million and $0.08, respectively.\nMicrosoft has provided non-GAAP financial measures related to the impact from investments in OpenAI to aid investors in better understanding our performance. Microsoft believes these non-GAAP measures assist investors by providing additional insight into its operational performance and help clarify trends affecting its business. For comparability of reporting, management considers non-GAAP measures in conjunction with GAAP financial results in evaluating business performance. The non-GAAP financial measures presented in this release should not be considered as a substitute for, or superior to, the measures of financial performance prepared in accordance with GAAP.\nConstant Currency\nMicrosoft presents constant currency information to provide a framework for assessing how our underlying businesses performed excluding the effect of foreign currency rate fluctuations. To present this information, current and comparative prior period results for entities reporting in currencies other than United States dollars are converted into United States dollars using the average exchange rates from the comparative period rather than the actual exchange rates in effect during the respective periods. All growth comparisons relate to the corresponding period in the last fiscal year. Microsoft has provided this non-GAAP financial information to aid investors in better understanding our performance. The non-GAAP financial measures presented in this release should not be considered as a substitute for, or superior to, the measures of financial performance prepared in accordance with GAAP.\nFinancial Performance Constant Currency Reconciliation\nThree Months Ended March 31,\n2026\n2025\nPercentage Change Y/Y\nPercentage Change Y/Y\n($ in millions, except per share amounts)\nAs Reported (GAAP)\nAs Adjusted (non-GAAP)\nAs Reported (GAAP)\nAs Adjusted (non-GAAP)\nGAAP\nNon-GAAP\nConstant Currency Impact\nConstant Currency\nNon-GAAP Constant Currency\nRevenue\n$82,886\n-\n$70,066\n-\n18%\n-\n$2,067\n15%\n-\nOperating\nIncome\n$38,398\n-\n$32,000\n-\n20%\n-\n$1,300\n16%\n-\nNet Income\n$31,778\n$31,792\n$25,824\n$26,407\n23%\n20%\n$740\n20%\n18%\nDiluted Earnings per Share\n$4.27\n$4.27\n$3.46\n$3.54\n23%\n21%\n$0.10\n21%\n18%\nSegment Revenue Constant Currency Reconciliation\nThree Months Ended March 31,\n2026\n2025\nPercentage Change Y/Y\nPercentage Change Y/Y\n($ in millions)\nAs Reported (GAAP)\nAs Reported (GAAP)\nGAAP\nConstant Currency Impact\nConstant Currency\nProductivity and Business Processes\n$35,013\n$29,944\n17%\n$1,325\n13%\nIntelligent Cloud\n$34,681\n$26,751\n30%\n$506\n28%\nMore Personal Computing\n$13,192\n$13,371\n(1)%\n$235\n(3)%\nSelected Product and Service Information Constant Currency Reconciliation\nThree Months Ended March 31, 2026\nPercentage Change Y/Y (GAAP)\nConstant Currency Impact\nPercentage Change Y/Y Constant Currency\nMicrosoft Cloud revenue\n29%\n(4)%\n25%\nCommercial remaining performance obligation\n99%\n0%\n99%\nMicrosoft 365 Commercial cloud revenue\n19%\n(4)%\n15%\nMicrosoft 365 Consumer cloud revenue\n33%\n(4)%\n29%\nLinkedIn revenue\n12%\n(3)%\n9%\nDynamics 365 revenue\n22%\n(5)%\n17%\nAzure and other cloud services revenue\n40%\n(1)%\n39%\nWindows OEM and Devices revenue\n(2)%\n(1)%\n(3)%\nXbox content and services revenue\n(5)%\n(2)%\n(7)%\nSearch advertising revenue excluding traffic acquisition costs\n12%\n(3)%\n9%\nAbout Microsoft\nMicrosoft (Nasdaq “MSFT” @microsoft) creates platforms and tools powered by AI to deliver innovative solutions that meet the evolving needs of our customers. The technology company is committed to making AI available broadly and doing so responsibly, with a mission to empower every person and every organization on the planet to achieve more.",
+            "form": "8-K",
+            "filing_date": "2026-04-29",
+            "source_url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526191457/msft-ex99_1.htm"
+        },
+        "query_intent": "investment"
+    }
+}

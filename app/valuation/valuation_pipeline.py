@@ -6,7 +6,22 @@ from app.valuation.wacc_engine import WACCEngine
 from app.valuation.sensitivity_analysis import SensitivityAnalysis
 from app.valuation.monte_carlo_dcf import MonteCarloDCFEngine
 
-DEFAULT_TERMINAL_GROWTH_RATE = 0.03
+# 3% (roughly long-run real GDP growth alone) was the original value.
+# Backtesting (scripts/phase2_backtest.py, ~1000-ticker universe)
+# showed a strong systematic bias: median DCF-implied upside across
+# the whole universe was -30.8% -- more companies flagged "overvalued"
+# than is plausible for a broad market index. Traced by hand (WMT:
+# model says $463B enterprise value vs. $949B market-implied) to the
+# terminal-value math, not the cash-flow base (WMT's own projected
+# FCFF was already slightly ABOVE its reported free cash flow) --
+# closing that gap fully would need an implausibly high terminal
+# growth assumption, but 3% alone is on the low end of standard
+# practice, which typically ties terminal growth to long-run NOMINAL
+# GDP growth (real growth + inflation, historically ~4% in the US),
+# not real growth alone. Raised to 4% as the first, cheapest candidate
+# fix -- see scripts/phase2_backtest.py's own accuracy comparison
+# before/after for whether this alone meaningfully closes the gap.
+DEFAULT_TERMINAL_GROWTH_RATE = 0.04
 
 # Terminal growth assumptions to sweep in the sensitivity table. Kept
 # fixed across companies (a reasonable long-run real-growth range),

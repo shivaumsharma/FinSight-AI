@@ -26,19 +26,34 @@ def _is_nan(value) -> bool:
 
 # Recommendation thresholds, applied to the composite score below (a
 # blend of the DCF and relative-valuation component scores, both on
-# the same +/-percent scale) -- same numeric thresholds as before, now
-# applied to the blended score rather than DCF's upside_percent alone.
-BUY_THRESHOLD = 15.0
-SELL_THRESHOLD = -15.0
+# the same +/-percent scale).
+#
+# Both this band width and DCF_WEIGHT/RELATIVE_WEIGHT below were
+# retuned from (15.0, 0.6/0.4) after backtesting (scripts/
+# phase2_backtest.py + scripts/tune_recommendation_config.py +
+# scripts/validate_tuning_stability.py) across TWO independent,
+# non-overlapping 12-month windows: a tighter band and higher DCF
+# weight beat the old config in both, not just one -- a config
+# selected using only the first window also scored at the top when
+# tested cold against the second window's data it never saw. The
+# values below are a deliberately moderate pick, not the literal best
+# scorer in either window (which was a 5-point band at 100% DCF
+# weight, i.e. zeroing relative valuation's influence entirely) --
+# 80/20 captured nearly all of the measured benefit in both windows
+# while keeping the relative-valuation cross-check meaningfully alive,
+# rather than fully retiring a feature backed by only two backtest
+# windows' worth of evidence.
+BUY_THRESHOLD = 7.5
+SELL_THRESHOLD = -7.5
 
-# Composite weighting: DCF remains the primary signal (more granular,
-# company-specific), but relative valuation now has real, substantial
-# pull on the headline rating -- not just a confidence-flag footnote.
-# When relative valuation is unavailable, DCF_WEIGHT is renormalized
-# to 1.0 (see _composite_score) rather than silently discarding 40%
-# of the score.
-DCF_WEIGHT = 0.6
-RELATIVE_WEIGHT = 0.4
+# Composite weighting -- see the backtest note above. DCF gets most of
+# the weight (both windows showed it as the stronger standalone
+# signal), with relative valuation kept at a real, non-trivial 20%
+# rather than reduced to a confidence-flag footnote. When relative
+# valuation is unavailable, DCF_WEIGHT is renormalized to 1.0 (see
+# _composite_score) rather than silently discarding 20% of the score.
+DCF_WEIGHT = 0.8
+RELATIVE_WEIGHT = 0.2
 
 # Component scores are clipped to this range before blending. Without
 # a cap, an outlier DCF upside (NVDA has hit +400%+ in testing) would
@@ -103,7 +118,7 @@ def _fallback_recommendation(
         "basis": (
             f"DCF was unavailable ({(relative_valuation or {}).get('method', 'see valuation analysis')}), "
             f"so this recommendation is derived instead from relative valuation "
-            f"({signal}, current EV/EBITDA {relative_valuation['current_ev_ebitda']:.1f}x vs. "
+            f"({signal}, current {relative_valuation['metric']} {relative_valuation['current_ev_ebitda']:.1f}x vs. "
             f"{relative_valuation['historical_avg_ev_ebitda']:.1f}x own "
             f"{relative_valuation['years_used']}-year average) and {sentiment_desc}."
         ),
@@ -187,13 +202,15 @@ def derive_recommendation(
     valuation now has real pull on the headline call, not just a
     confidence-flag footnote.
 
-    On top of that blend, a hard guardrail: if DCF's OWN directional
-    call (independent of the blend) actively disagrees with the
-    relative valuation signal, the rating is capped at Hold regardless
-    of what the composite score alone would say. Blending alone
-    doesn't guarantee this -- a strongly bullish DCF can still clear
-    the Buy threshold after a 40%-weighted bearish relative score is
-    mixed in -- so this is enforced explicitly rather than assumed.
+    Previously, a disagreement between DCF's own directional call and
+    the relative valuation signal forced the rating to Hold outright,
+    regardless of the composite score. Removed after Phase 2
+    backtesting (scripts/phase2_backtest.py, ~80 tickers, 12-month
+    forward window): on the 13 tickers where this fired, the forced
+    Hold scored 15.4% accuracy versus 53.8% for trusting DCF's own
+    call -- the guardrail was making the recommendation worse, not
+    safer. The disagreement is now surfaced as a confidence flag (see
+    _confidence_flag) instead of overriding the rating.
     """
     valuation_results = valuation_results or {}
     upside = valuation_results.get("upside_percent")
@@ -237,11 +254,6 @@ def derive_recommendation(
     dcf_only_rating = _rating_from_score(dcf_score)
     disagreement = compute_signal_agreement(dcf_only_rating, relative_valuation) == "disagree"
 
-    downgraded = False
-    if disagreement and rating in ("Buy", "Sell"):
-        rating = "Hold"
-        downgraded = True
-
     if relative_score is None:
         weight_desc = "relative valuation unavailable, 100% DCF weight"
     else:
@@ -252,12 +264,11 @@ def derive_recommendation(
         f"+ {weight_desc}) -- Buy at >={BUY_THRESHOLD:.0f}, Sell at <={SELL_THRESHOLD:.0f}, "
         f"Hold in between."
     )
-    if downgraded:
+    if disagreement:
         basis += (
-            f" Downgraded to Hold: DCF's own call ({dcf_only_rating}) disagrees with "
-            f"relative valuation ({relative_valuation['signal']}) -- when the two signals "
-            f"actively contradict each other, the recommendation is capped at Hold rather "
-            f"than trusting either signal alone."
+            f" Note: DCF's own directional call ({dcf_only_rating}) disagrees with "
+            f"relative valuation ({relative_valuation['signal']}) -- the composite score "
+            f"above already reflects both signals blended, not an override."
         )
 
     return {
@@ -266,17 +277,21 @@ def derive_recommendation(
         "dcf_score": round(dcf_score, 1),
         "relative_score": round(relative_score, 1) if relative_score is not None else None,
         "composite_score": round(composite_score, 1),
-        "downgraded_for_disagreement": downgraded,
+        # Whether DCF's own directional call (ignoring the blend)
+        # disagrees with relative valuation -- informational only.
+        # This used to force the rating to Hold; removed after
+        # backtesting showed that scored worse (15.4%) than trusting
+        # DCF's own call (53.8%) on exactly these cases. Surfaced as a
+        # confidence flag instead (see _confidence_flag).
+        "signal_disagreement": disagreement,
         # What the rating would have been from DCF alone, before the
-        # composite blend and the disagreement guardrail -- exposed so
-        # callers (e.g. the backtest) can measure whether downgrading
-        # to Hold on disagreement actually improves accuracy versus
-        # what the original DCF-only call would have scored.
+        # composite blend -- exposed so callers (e.g. the backtest)
+        # can compare the blended composite against a DCF-only call.
         "dcf_only_rating": dcf_only_rating,
     }
 
 
-def _confidence_flag(valuation_results: Dict[str, Any], current_price, rating: str):
+def _confidence_flag(valuation_results: Dict[str, Any], current_price, rating: str, disagreement: bool = False):
     """
     If the recommendation holds across the ENTIRE tested sensitivity
     grid (e.g. even the most bullish WACC/growth combination still
@@ -292,16 +307,21 @@ def _confidence_flag(valuation_results: Dict[str, Any], current_price, rating: s
     readings are stated; the reader is pointed at the Institutional
     Consensus Score to help judge which.
 
-    DCF/relative-valuation disagreement is NOT flagged here anymore --
-    derive_recommendation() now downgrades the rating to Hold outright
-    when the two signals actively disagree (with its own explanation
-    in the recommendation's "basis"), so by the time a Buy/Sell rating
-    reaches this function, it has already survived that check. Flagging
-    it again here would be dead code (a real disagreement can never
-    produce a Buy/Sell rating anymore) and would duplicate what's
-    already explained in "basis".
+    disagreement (DCF's own directional call vs. relative valuation)
+    is flagged here rather than changing the rating -- derive_recommendation()
+    used to force the rating to Hold on disagreement, but backtesting
+    showed that scored worse than trusting the blended composite score,
+    so the disagreement is now informational only.
     """
     flags = []
+
+    if disagreement and rating in ("Buy", "Sell"):
+        flags.append(
+            "DCF's own directional call disagrees with the relative valuation "
+            "signal on this one -- the rating above already reflects both blended "
+            "together (see basis), not just DCF alone. Worth weighing alongside "
+            "the Institutional Consensus Score below."
+        )
 
     if rating in ("Buy", "Sell") and valuation_results.get("dcf_available") is False:
         flags.append(
@@ -499,6 +519,7 @@ def build_report_data(context: ResearchContext) -> Dict[str, Any]:
                 valuation_results,
                 info.get("current_price"),
                 recommendation["rating"],
+                recommendation.get("signal_disagreement", False),
             ),
         },
 

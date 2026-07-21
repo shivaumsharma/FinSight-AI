@@ -179,6 +179,64 @@ class FCFFEngine:
 
         return nopat_current+depreciation_current-normalized_capex-normalized_change_in_nwc
 
+    def calculate_return_on_equity(self):
+        """
+        Most recent fiscal year's net income / total equity -- the
+        classic quality-investing proxy for a durable competitive
+        advantage (a business that can sustain high returns on its own
+        equity capital usually has pricing power or a moat that a
+        commodity business doesn't, and can typically keep compounding
+        above the broader market longer). Used by forecast_fcff below
+        to size how many years of the explicit forecast get to hold at
+        the company's own current growth rate before fading toward
+        terminal growth, instead of every company decaying on the same
+        fixed clock regardless of quality.
+
+        Returns None if net_income/total_equity are missing, or if
+        total_equity isn't positive -- a negative or near-zero equity
+        base (common for companies with large share buybacks funded by
+        debt) makes ROE a leverage artifact, not a genuine quality
+        signal, and shouldn't be read as one.
+        """
+        net_income_series = self.financial_df["net_income"].dropna()
+        equity_series = self.financial_df["total_equity"].dropna()
+        if net_income_series.empty or equity_series.empty:
+            return None
+        total_equity = equity_series.iloc[-1]
+        if total_equity <= 0:
+            return None
+        return net_income_series.iloc[-1] / total_equity
+
+    # ROE tiers -> years of the 10-year explicit forecast spent holding
+    # at the company's own current growth rate before starting to fade
+    # (see calculate_return_on_equity and forecast_fcff). 15%/25% are
+    # standard quality-investing breakpoints -- roughly the S&P's
+    # long-run average ROE (~13-15%) as the "nothing special" line, and
+    # 25%+ as the tier most quality-factor screens treat as an elite,
+    # moat-level return on capital.
+    HOLD_YEARS_HIGH_QUALITY = 5
+    HOLD_YEARS_DEFAULT = 3
+    HOLD_YEARS_LOW_QUALITY = 2
+    ROE_HIGH_QUALITY_THRESHOLD = 0.25
+    ROE_LOW_QUALITY_THRESHOLD = 0.15
+    # Above this, ROE is overwhelmingly a tiny-equity-base or leverage
+    # artifact (e.g. a company with a small positive but not-yet-
+    # negative equity base after years of buybacks) rather than a
+    # genuine quality signal -- treated as unreadable, same as a
+    # missing/non-positive ROE, rather than extended extra years on
+    # the strength of a distorted number.
+    ROE_IMPLAUSIBLE_THRESHOLD = 1.00
+
+    def _quality_hold_years(self):
+        roe = self.calculate_return_on_equity()
+        if roe is None or roe > self.ROE_IMPLAUSIBLE_THRESHOLD:
+            return self.HOLD_YEARS_DEFAULT
+        if roe >= self.ROE_HIGH_QUALITY_THRESHOLD:
+            return self.HOLD_YEARS_HIGH_QUALITY
+        if roe >= self.ROE_LOW_QUALITY_THRESHOLD:
+            return self.HOLD_YEARS_DEFAULT
+        return self.HOLD_YEARS_LOW_QUALITY
+
     def forecast_fcff(self,forecast_years=10,terminal_growth_rate=0.03,
                        base_fcff_override=None,initial_growth_rate_override=None):
        """
@@ -200,9 +258,9 @@ class FCFFEngine:
        # growth in a uniform straight line over just 5 years -- that
        # structurally caps its implied value at roughly a mature-company
        # multiple regardless of how strong the business actually is.
-       # Years 1-3 hold at the company's current growth rate, years 4-7
-       # fade linearly to an intermediate rate (the midpoint between
-       # current and terminal growth), and years 8-10 fade linearly from
+       # Stage 1 holds at the company's current growth rate, stage 2
+       # fades linearly to an intermediate rate (the midpoint between
+       # current and terminal growth), and stage 3 fades linearly from
        # that intermediate rate down to terminal_growth_rate, reaching it
        # exactly by the final year. This gives a genuine high-growth
        # company more of the explicit forecast window to compound at a
@@ -210,9 +268,21 @@ class FCFFEngine:
        # terminal value (anchored to the final year) takes over.
        intermediate_growth_rate=(initial_growth_rate+terminal_growth_rate)/2
 
-       stage1_years=3
-       stage2_years=4
-       stage3_years=forecast_years-stage1_years-stage2_years
+       # Stage 1's length varies by quality (_quality_hold_years, ROE-
+       # based) instead of a fixed 3 years for every company -- a
+       # durable, high-ROE compounder gets a longer runway at its own
+       # growth rate before being forced toward terminal growth, rather
+       # than every company decaying to "generic mature company" on the
+       # same clock regardless of how strong the underlying business is.
+       # Stages 2+3 split whatever's left roughly evenly (matching this
+       # method's original fixed 4/3 split of the remaining 7 years),
+       # so the default (average-ROE) case reduces to exactly the prior
+       # fixed 3/4/3 behavior -- this is a generalization of it, not an
+       # unrelated change.
+       stage1_years=min(self._quality_hold_years(), forecast_years - 1)
+       remaining_years=forecast_years-stage1_years
+       stage2_years=remaining_years-remaining_years//2
+       stage3_years=remaining_years//2
 
        forecasted_fcff=[]
        current_fcff=base_fcff

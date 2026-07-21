@@ -83,6 +83,47 @@ class RelativeValuationEngine:
 
         return pd.Series(rows).sort_index()
 
+    def _yearly_ev_revenue(self):
+        """
+        Fallback multiple for companies with negative/unusable EBITDA
+        (confirmed in Phase 2 backtesting: unprofitable growth
+        companies -- RIVN, LCID, SNOW, U, AI, UPST, AFRM, RBLX, DKNG,
+        PATH -- got no relative-valuation signal at all, since
+        _yearly_ev_ebitda's `ebitda <= 0` filter drops every one of
+        their fiscal years, and evaluate() also requires positive
+        CURRENT EBITDA before returning anything). Revenue is
+        virtually never negative, so EV/Revenue keeps a signal
+        available for exactly the companies EV/EBITDA structurally
+        can't cover -- the same "vs. its own trading history" logic,
+        just on a metric that doesn't require profitability.
+        """
+        df = self.financial_df
+        required = ["revenue", "total_debt", "cash", "shares_outstanding"]
+        if not all(c in df.columns for c in required):
+            return pd.Series(dtype=float)
+
+        rows = {}
+        for date, row in df.iterrows():
+            revenue, debt, cash, shares = (
+                row.get("revenue"), row.get("total_debt"),
+                row.get("cash"), row.get("shares_outstanding"),
+            )
+            if any(pd.isna(v) for v in (revenue, debt, cash, shares)):
+                continue
+
+            if revenue <= 0:
+                continue
+
+            price = self._year_end_price(date)
+            if price is None:
+                continue
+
+            approx_market_cap = price * shares
+            ev = approx_market_cap + debt - cash
+            rows[date] = ev / revenue
+
+        return pd.Series(rows).sort_index()
+
     def _yearly_pfcf(self):
         df = self.financial_df
         required = ["cash_from_operations", "capex", "shares_outstanding"]
@@ -109,16 +150,19 @@ class RelativeValuationEngine:
 
         return pd.Series(rows).sort_index()
 
-    def evaluate(self):
-        """
-        Returns None if there isn't enough data to form a signal
-        (fewer than 2 fiscal years with clean data, no market cap,
-        or non-positive current EBITDA). Otherwise returns a dict
-        with the current EV/EBITDA multiple, the historical average
-        (excluding the current year, computed from real contemporaneous
-        prices/shares -- not today's price applied to old financials),
-        the P/FCF equivalent, and a cheap/in-line/expensive signal.
-        """
+    def _signal_from_pct(self, pct_vs_history):
+        if pct_vs_history <= -self.NEUTRAL_BAND_PCT:
+            return "cheap"
+        elif pct_vs_history >= self.NEUTRAL_BAND_PCT:
+            return "expensive"
+        return "in-line"
+
+    def _evaluate_ev_ebitda(self):
+        """Primary metric. Returns None if there isn't enough data to
+        form a signal (fewer than 2 fiscal years with clean data, no
+        market cap, or non-positive current EBITDA) -- most commonly
+        that last case, which is exactly when _evaluate_ev_revenue
+        below is tried instead."""
         ev_ebitda_series = self._yearly_ev_ebitda()
         if len(ev_ebitda_series) < 2 or self.market_cap is None:
             return None
@@ -151,14 +195,7 @@ class RelativeValuationEngine:
 
         pct_vs_history = (ev_ebitda_current / historical_avg - 1) * 100
 
-        if pct_vs_history <= -self.NEUTRAL_BAND_PCT:
-            signal = "cheap"
-        elif pct_vs_history >= self.NEUTRAL_BAND_PCT:
-            signal = "expensive"
-        else:
-            signal = "in-line"
-
-        result = {
+        return {
             "method": "Own trading history (no peer/sector multiple data "
                        "source is wired into this pipeline)",
             "metric": "EV/EBITDA",
@@ -166,9 +203,77 @@ class RelativeValuationEngine:
             "historical_avg_ev_ebitda": round(historical_avg, 2),
             "years_used": len(historical_series),
             "vs_history_pct": round(pct_vs_history, 2),
-            "signal": signal,
+            "signal": self._signal_from_pct(pct_vs_history),
         }
 
+    def _evaluate_ev_revenue(self):
+        """Fallback metric, tried only when _evaluate_ev_ebitda returns
+        None -- see _yearly_ev_revenue for why this exists. Same shape
+        and same neutral-band logic as the EBITDA path, just on
+        revenue instead."""
+        ev_revenue_series = self._yearly_ev_revenue()
+        if len(ev_revenue_series) < 2 or self.market_cap is None:
+            return None
+
+        latest = self.financial_df.iloc[-1]
+        revenue_current = latest.get("revenue")
+        debt_current = latest.get("total_debt")
+        cash_current = latest.get("cash")
+
+        if pd.isna(revenue_current) or revenue_current <= 0:
+            return None
+
+        ev_current = self.market_cap + (debt_current or 0) - (cash_current or 0)
+        ev_revenue_current = ev_current / revenue_current
+
+        historical_series = ev_revenue_series.iloc[:-1]
+        historical_avg = historical_series.mean()
+
+        if pd.isna(historical_avg) or historical_avg == 0:
+            return None
+
+        pct_vs_history = (ev_revenue_current / historical_avg - 1) * 100
+
+        return {
+            "method": (
+                "Own trading history (EV/Revenue fallback -- EBITDA is negative "
+                "or unusable for this company, so EV/EBITDA can't form a signal; "
+                "no peer/sector multiple data source is wired into this pipeline)"
+            ),
+            "metric": "EV/Revenue",
+            # Reuses the EV/EBITDA result's field names deliberately --
+            # every caller (report_data_builder.py's fallback-recommendation
+            # basis text, pdf_report_builder.py's "Current Multiple" row)
+            # already reads these generically as "the current multiple" and
+            # labels which metric it is separately via "metric" above; a
+            # second pair of metric-specific field names would just make
+            # every caller branch on which metric was used to display a
+            # number that's conceptually the same thing either way.
+            "current_ev_ebitda": round(ev_revenue_current, 2),
+            "historical_avg_ev_ebitda": round(historical_avg, 2),
+            "years_used": len(historical_series),
+            "vs_history_pct": round(pct_vs_history, 2),
+            "signal": self._signal_from_pct(pct_vs_history),
+        }
+
+    def evaluate(self):
+        """
+        Returns None if there isn't enough data to form ANY signal.
+        Tries EV/EBITDA first (_evaluate_ev_ebitda, the more standard
+        profitability-based multiple); falls back to EV/Revenue
+        (_evaluate_ev_revenue) when EBITDA is negative/unusable, which
+        is common for unprofitable growth companies that would
+        otherwise get no relative-valuation signal at all -- confirmed
+        in Phase 2 backtesting (RIVN, LCID, SNOW, U, AI, UPST, AFRM,
+        RBLX, DKNG, PATH all fell into this gap). A P/FCF cross-check
+        is attached when available, independent of which primary
+        metric was used.
+        """
+        result = self._evaluate_ev_ebitda() or self._evaluate_ev_revenue()
+        if result is None:
+            return None
+
+        latest = self.financial_df.iloc[-1]
         pfcf_series = self._yearly_pfcf()
         cfo_current, capex_current, shares_current = (
             latest.get("cash_from_operations"), latest.get("capex"), latest.get("shares_outstanding"),
