@@ -1,4 +1,5 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 
 pandas
 numpy==1.26.4
@@ -18,3 +19,5 @@ protobuf==3.20.3
 transformers
 sentencepiece
 accelerate
+huggingface_hub
+llama-cpp-python

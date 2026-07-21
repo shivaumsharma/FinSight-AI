@@ -44,8 +44,10 @@ sentiment truly is unavailable, it just isn't attempting a historical
 sentiment reconstruction.
 """
 
+import argparse
+import json
 import sys
-import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -224,14 +226,11 @@ def run_one(ticker, category, as_of_date, today_date, market_history):
     rec = derive_recommendation(ctx.valuation_results, None, None)
     relative = ctx.valuation_results.get("relative_valuation")
 
-    # Since derive_recommendation now downgrades an actual Buy/Sell
-    # disagreement to Hold outright (not just a confidence flag), a
-    # SCORED Buy/Sell row can no longer be a "disagree" case -- that
-    # combination is structurally impossible now. What's newly
-    # measurable instead: for rows where DCF's own call WOULD have
-    # disagreed with relative valuation (dcf_only_rating), was
-    # forcing it to Hold the right call, or would the original
-    # DCF-only direction have scored better?
+    # derive_recommendation no longer forces a downgrade to Hold on
+    # DCF/relative-valuation disagreement (removed after this same
+    # backtest showed the forced Hold scored 15.4% vs. 53.8% for
+    # trusting DCF's own call -- see report_data_builder.py). A SCORED
+    # Buy/Sell row CAN be a "disagree" case again now.
     agreement = compute_signal_agreement(rec.get("dcf_only_rating"), relative)
 
     # ML feature vector at this same point-in-time context, for
@@ -247,11 +246,22 @@ def run_one(ticker, category, as_of_date, today_date, market_history):
         "as_of_date": as_of_date.date().isoformat(),
         "recommendation": rec["rating"],
         "dcf_only_rating": rec.get("dcf_only_rating"),
-        "downgraded": rec.get("downgraded_for_disagreement", False),
+        "signal_disagreement": rec.get("signal_disagreement", False),
         "dcf_available": ctx.valuation_results.get("dcf_available"),
         "upside_pct": ctx.valuation_results.get("upside_percent"),
         "relative_signal": relative["signal"] if relative else None,
         "agreement": agreement,
+        # Raw component scores (see report_data_builder.py's _dcf_score/
+        # _relative_score/_composite_score) -- captured so threshold
+        # and weighting experiments (analyze different BUY_THRESHOLD/
+        # SELL_THRESHOLD/DCF_WEIGHT/RELATIVE_WEIGHT combinations) can be
+        # run by recomputing composite_score = w1*dcf_score +
+        # w2*relative_score from this same backtest data, instead of
+        # re-fetching and re-running the pipeline for every combination
+        # tried.
+        "dcf_score": rec.get("dcf_score"),
+        "relative_score": rec.get("relative_score"),
+        "composite_score": rec.get("composite_score"),
         "price_as_of": round(price_as_of, 2),
         "price_today": round(price_today, 2),
         "realized_return_pct": round(realized_return_pct, 2),
@@ -284,38 +294,106 @@ def score(row):
     return score_rating(row["recommendation"], row["realized_return_pct"])
 
 
-def main():
-    today_date = pd.Timestamp(datetime.utcnow().date())
-    as_of_date = today_date - pd.Timedelta(days=BACKTEST_MONTHS_AGO * 30)
+def _parse_args():
+    parser = argparse.ArgumentParser(description="Point-in-time backtest of the recommendation pipeline.")
+    # AS_OF_MONTHS_AGO / EXIT_MONTHS_AGO let this same point-in-time
+    # methodology test a genuinely independent, non-overlapping
+    # historical window instead of always "12 months ago to today" --
+    # e.g. `phase2_backtest.py 24 12` prices/values companies as of 24
+    # months ago and measures realized return through 12 months ago
+    # (still a 12-month holding period, just anchored to a different
+    # point in market history, so it isn't confounded with
+    # holding-period length the way "just change months-ago to 24"
+    # would be). Defaults preserve the original behavior exactly.
+    parser.add_argument("as_of_months_ago", nargs="?", type=int, default=BACKTEST_MONTHS_AGO)
+    parser.add_argument("exit_months_ago", nargs="?", type=int, default=0)
+    parser.add_argument(
+        "--universe", type=str, default=None,
+        help="Path to a {ticker: category} JSON file (e.g. scripts/ticker_universe.json) "
+             "to run against instead of the ~80-ticker hand-curated TICKERS dict.",
+    )
+    parser.add_argument(
+        "--workers", type=int, default=10,
+        help="Concurrent worker threads (default: %(default)s). This is network-bound "
+             "(yfinance calls per ticker), not CPU-bound, so threads are the right tool -- "
+             "kept moderate to avoid Yahoo Finance rate-limiting on a large universe.",
+    )
+    return parser.parse_args()
 
-    print(f"As-of date: {as_of_date.date()}   Today: {today_date.date()}", file=sys.stderr)
+
+def main():
+    args = _parse_args()
+    as_of_months_ago = args.as_of_months_ago
+    exit_months_ago = args.exit_months_ago
+
+    if args.universe:
+        with open(args.universe) as f:
+            tickers = json.load(f)
+        universe_tag = Path(args.universe).stem
+    else:
+        tickers = TICKERS
+        universe_tag = "curated"
+
+    today_date = pd.Timestamp(datetime.utcnow().date())
+    as_of_date = today_date - pd.Timedelta(days=as_of_months_ago * 30)
+    exit_date = today_date - pd.Timedelta(days=exit_months_ago * 30)
+
+    results_output_path = str(
+        Path(__file__).resolve().parent
+        / f"backtest_results_{universe_tag}_asof{as_of_months_ago}mo_exit{exit_months_ago}mo.json"
+    )
+
+    print(f"Universe: {universe_tag} ({len(tickers)} tickers)   Workers: {args.workers}", file=sys.stderr)
+    print(f"As-of date: {as_of_date.date()}   Exit date: {exit_date.date()}", file=sys.stderr)
     print(f"Accuracy bands: Buy>+{BUY_THRESHOLD}%  Sell<{SELL_THRESHOLD}%  "
           f"Hold in [{SELL_THRESHOLD}%,+{BUY_THRESHOLD}%]", file=sys.stderr)
 
-    market_history = _tz_naive(yf.Ticker(MARKET_BENCHMARK).history(period="2y"))
+    # 5y, not 2y: a trailing beta window (BETA_WINDOW_TRADING_DAYS)
+    # computed AS OF an as_of_date that's itself far in the past (e.g.
+    # 24 months ago) needs benchmark price history reaching back
+    # further still -- 2y was only ever enough for the original
+    # "12 months ago" default.
+    market_history = _tz_naive(yf.Ticker(MARKET_BENCHMARK).history(period="5y"))
 
-    rows = []
-    for ticker, category in TICKERS.items():
-        print(f"Running {ticker} ({category})...", file=sys.stderr)
+    def _run(ticker, category):
         try:
-            row = run_one(ticker, category, as_of_date, today_date, market_history)
+            return run_one(ticker, category, as_of_date, exit_date, market_history)
         except Exception as e:
-            row = {
+            return {
                 "ticker": ticker, "category": category, "as_of_date": as_of_date.date().isoformat(),
-                "recommendation": None, "dcf_only_rating": None, "downgraded": False,
+                "recommendation": None, "dcf_only_rating": None, "signal_disagreement": False,
                 "dcf_available": None, "upside_pct": None,
-                "relative_signal": None, "agreement": None, "price_as_of": None,
+                "relative_signal": None, "agreement": None,
+                "dcf_score": None, "relative_score": None, "composite_score": None,
+                "price_as_of": None,
                 "price_today": None, "realized_return_pct": None, "error": str(e),
             }
-            traceback.print_exc(file=sys.stderr)
-        rows.append(row)
+
+    rows = []
+    completed = 0
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+        futures = {executor.submit(_run, ticker, category): (ticker, category) for ticker, category in tickers.items()}
+        for future in as_completed(futures):
+            ticker, category = futures[future]
+            row = future.result()
+            rows.append(row)
+            completed += 1
+            status = row.get("error") or row.get("recommendation")
+            print(f"[{completed}/{len(tickers)}] {ticker} ({category}) -> {status}", file=sys.stderr)
 
     for row in rows:
         row["correct"] = score(row)
 
+    # ml_features is a large per-row dict only build_ml_training_set.py
+    # needs -- excluded here to keep this export focused on what the
+    # threshold/weighting grid search actually uses.
+    with open(results_output_path, "w") as f:
+        json.dump([{k: v for k, v in row.items() if k != "ml_features"} for row in rows], f, indent=2)
+    print(f"\nRaw results saved -> {results_output_path}", file=sys.stderr)
+
     # ---------------- results table ----------------
     print()
-    header = f"{'Ticker':<7}{'Category':<32}{'Rec':<9}{'Downgr':<7}{'DCF?':<6}{'Upside%':>9}  {'RelSig':<10}{'AsOf$':>9}{'Today$':>9}{'Return%':>9}  Correct"
+    header = f"{'Ticker':<7}{'Category':<32}{'Rec':<9}{'Disagr':<7}{'DCF?':<6}{'Upside%':>9}  {'RelSig':<10}{'AsOf$':>9}{'Today$':>9}{'Return%':>9}  Correct"
     print(header)
     print("-" * len(header))
     for r in rows:
@@ -325,7 +403,7 @@ def main():
         upside = f"{r['upside_pct']:.1f}" if isinstance(r["upside_pct"], (int, float)) else "N/A"
         correct = "N/A" if r["correct"] is None else ("YES" if r["correct"] else "NO")
         print(f"{r['ticker']:<7}{r['category']:<32}{str(r['recommendation']):<9}"
-              f"{str(r['downgraded']):<7}{str(r['dcf_available']):<6}{upside:>9}  "
+              f"{str(r['signal_disagreement']):<7}{str(r['dcf_available']):<6}{upside:>9}  "
               f"{str(r['relative_signal']):<10}{r['price_as_of']:>9}{r['price_today']:>9}"
               f"{r['realized_return_pct']:>9}  {correct}")
 
@@ -357,26 +435,31 @@ def main():
                 acc = 100 * sum(1 for r in group if r["correct"]) / len(group)
                 print(f"  {label:<38} {acc:5.1f}% ({sum(1 for r in group if r['correct'])}/{len(group)})")
 
-        # Disagreement now forces Hold outright (see report_data_builder.py),
-        # so a scored Buy/Sell can no longer be a "disagree" case -- that
-        # combination is structurally impossible. What IS newly testable:
-        # for every row where DCF's own call would have disagreed with
-        # relative valuation, was downgrading to Hold the right move, or
-        # would trusting the original DCF-only direction have scored better?
-        downgraded_rows = [r for r in valid if r.get("downgraded")]
-        if downgraded_rows:
-            print(f"\nDowngrade guardrail ({len(downgraded_rows)} tickers had DCF/relative disagreement "
-                  f"and were downgraded to Hold) -- did downgrading help?")
-            hold_scores = [score_rating("Hold", r["realized_return_pct"]) for r in downgraded_rows]
-            original_scores = [score_rating(r["dcf_only_rating"], r["realized_return_pct"]) for r in downgraded_rows]
+        # DCF/relative disagreement no longer forces a Hold override
+        # (removed -- see report_data_builder.py's derive_recommendation
+        # docstring for why). What's testable now: on the rows where
+        # DCF's own directional call disagreed with relative valuation,
+        # does the blended composite rating (current behavior) actually
+        # do better than either signal trusted alone?
+        disagreement_rows = [r for r in valid if r.get("signal_disagreement")]
+        if disagreement_rows:
+            print(f"\nSignal disagreement ({len(disagreement_rows)} tickers had DCF/relative "
+                  f"disagreement) -- how did each approach score on exactly these rows?")
+            blended_scores = [r["correct"] for r in disagreement_rows]
+            dcf_only_scores = [score_rating(r["dcf_only_rating"], r["realized_return_pct"]) for r in disagreement_rows]
+            hold_scores = [score_rating("Hold", r["realized_return_pct"]) for r in disagreement_rows]
+            blended_valid = [s for s in blended_scores if s is not None]
+            dcf_only_valid = [s for s in dcf_only_scores if s is not None]
             hold_valid = [s for s in hold_scores if s is not None]
-            original_valid = [s for s in original_scores if s is not None]
+            if blended_valid:
+                acc = 100 * sum(blended_valid) / len(blended_valid)
+                print(f"  Blended composite rating (current):  {acc:5.1f}% ({sum(blended_valid)}/{len(blended_valid)})")
+            if dcf_only_valid:
+                acc = 100 * sum(dcf_only_valid) / len(dcf_only_valid)
+                print(f"  DCF-only call (ignoring relative):   {acc:5.1f}% ({sum(dcf_only_valid)}/{len(dcf_only_valid)})")
             if hold_valid:
                 acc = 100 * sum(hold_valid) / len(hold_valid)
-                print(f"  As downgraded Hold:              {acc:5.1f}% ({sum(hold_valid)}/{len(hold_valid)})")
-            if original_valid:
-                acc = 100 * sum(original_valid) / len(original_valid)
-                print(f"  As original DCF-only call:       {acc:5.1f}% ({sum(original_valid)}/{len(original_valid)})")
+                print(f"  Forced Hold (old guardrail):         {acc:5.1f}% ({sum(hold_valid)}/{len(hold_valid)})")
 
     if insufficient:
         print(f"\nInsufficient Data cases ({len(insufficient)}) -- not scored against the accuracy definition, "

@@ -4,7 +4,7 @@ import numpy as np
 class DCFEngine:
 
   # Minimum WACC-to-terminal-growth spread, in absolute terms (e.g.
-  # 0.04 = 4 percentage points). The Gordon-growth terminal value has
+  # 0.03 = 3 percentage points). The Gordon-growth terminal value has
   # a 1/(discount_rate - terminal_growth_rate) term -- once that
   # spread gets small, terminal value (and therefore the whole DCF
   # output) blows up non-linearly and becomes numerically unstable
@@ -14,7 +14,19 @@ class DCFEngine:
   # which constructs its own DCFEngine) -- gets identical treatment
   # through the same code path, instead of two places independently
   # reimplementing (and risking drifting from) the same stability rule.
-  MIN_WACC_TERMINAL_SPREAD = 0.04
+  #
+  # Was 0.04, lowered to 0.03 in the same change that raised
+  # DEFAULT_TERMINAL_GROWTH_RATE 3%->4% (see valuation_pipeline.py).
+  # The floor is terminal_growth + this spread, so raising terminal
+  # growth alone would have also raised the floor itself for every
+  # already-floored company (confirmed by hand: JNJ's WACC floor moved
+  # 7%->8%, which discounts its cash flows MORE heavily and made its
+  # valuation WORSE, the opposite of the terminal-growth change's
+  # intent). Lowering the spread by the same 1 point keeps the floor
+  # at exactly 7% for those companies (unaffected), while companies
+  # whose raw WACC already clears the floor still get the full benefit
+  # of the higher terminal growth.
+  MIN_WACC_TERMINAL_SPREAD = 0.03
 
   def __init__(self,forecast_fcff_df,discount_rate=0.10,terminal_growth_rate=0.03):
     self.forecast_fcff_df=(forecast_fcff_df)

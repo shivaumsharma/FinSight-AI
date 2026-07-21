@@ -37,6 +37,23 @@ RATING_COLORS = {
     "Insufficient Data": "gray",
 }
 
+
+def _md_escape(text: str) -> str:
+    """
+    Streamlit renders markdown text through remark-math, which treats
+    a `$...$` pair as inline LaTeX -- not literal dollar signs. Any
+    generated sentence citing two or more currency values (e.g. "implied
+    value $258.12 ... current price of $351.52") gets silently mangled:
+    both dollar signs vanish and everything between them renders as a
+    math block instead of the sentence (confirmed via a live "Low-
+    confidence signal" render). This app has no actual use for LaTeX
+    math -- every "$" it ever generates is a currency symbol -- so
+    escaping it to "\\$" here forces literal rendering everywhere this
+    wraps generated/computed text before a markdown-rendering call
+    (st.write/st.markdown/st.caption/st.warning/st.info).
+    """
+    return text.replace("$", "\\$")
+
 # ---------------------------------------------------
 # INTRODUCTION
 # ---------------------------------------------------
@@ -170,7 +187,7 @@ if "report" in st.session_state:
     col1, col2 = st.columns([1, 2])
     with col1:
         st.markdown(f"### :{color}[{rating}]")
-        st.caption(recommendation.get("basis", ""))
+        st.caption(_md_escape(recommendation.get("basis", "")))
         if recommendation.get("composite_score") is not None:
             s1, s2, s3 = st.columns(3)
             s1.metric("DCF Score", f"{recommendation['dcf_score']:+.1f}")
@@ -180,7 +197,7 @@ if "report" in st.session_state:
             )
             s3.metric("Composite Score", f"{recommendation['composite_score']:+.1f}")
         if recommendation.get("confidence_flag"):
-            st.warning(f"**Low-confidence signal:** {recommendation['confidence_flag']}")
+            st.warning(f"**Low-confidence signal:** {_md_escape(recommendation['confidence_flag'])}")
     with col2:
         confidence = report_data.get("confidence_scores", {})
         c1, c2, c3 = st.columns(3)
@@ -191,7 +208,7 @@ if "report" in st.session_state:
     narrative = report_data.get("narrative", {})
     if narrative.get("Executive Summary"):
         with st.expander("Executive Summary preview", expanded=True):
-            st.write(narrative["Executive Summary"])
+            st.write(_md_escape(narrative["Executive Summary"]))
 
     monte_carlo = report_data.get("valuation_analysis", {}).get("monte_carlo")
     if monte_carlo:
@@ -205,11 +222,11 @@ if "report" in st.session_state:
             m1.metric("Mean Intrinsic Value", f"${monte_carlo['mean']:,.2f}")
             m2.metric("Median", f"${monte_carlo['median']:,.2f}")
             m3.metric("Probability Undervalued", f"{monte_carlo['prob_undervalued']:.1%}")
-            st.caption(
+            st.caption(_md_escape(
                 f"90% CI: ${monte_carlo['ci_lower']:,.2f} - ${monte_carlo['ci_upper']:,.2f}  |  "
                 f"25th-75th percentile: ${monte_carlo['p25']:,.2f} - ${monte_carlo['p75']:,.2f}  |  "
                 f"Std Dev: ${monte_carlo['std_dev']:,.2f}"
-            )
+            ))
 
     ml_classifier = report_data.get("valuation_analysis", {}).get("ml_classifier")
     if ml_classifier:
