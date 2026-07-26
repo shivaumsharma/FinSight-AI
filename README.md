@@ -12,7 +12,7 @@ python_version: "3.11"
 
 # FinSight AI — Agentic Financial Research Platform
 
-**[Try the live demo →](https://huggingface.co/spaces/YOUR_HF_USERNAME/finsight-ai)** *(update this link once deployed — see [Deployment](#deployment))*
+**[Try the live demo →](https://shivaum-finsight-ai.streamlit.app)**
 
 An agentic research assistant that answers open-ended financial questions ("Should I invest in Apple?", "What did management say about AI demand?") by planning which tools to run, executing them against live market data and earnings-call transcripts, and synthesizing a cited, self-scored equity research report — entirely with local, open-weight models (no external LLM API keys required).
 
