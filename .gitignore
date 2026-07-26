@@ -18,6 +18,15 @@ models/
 # regenerated on demand, not source.
 filings_cache/
 
+# Saved fine-tuned embedding model weights (419MB, exceeds GitHub's
+# 100MB per-file limit -- would need Git LFS to commit at all). Not
+# used in production: scripts/evaluate_embedding_finetune.py measured
+# this fine-tune as WORSE than the baseline BGE model on the held-out
+# retrieval eval set, so it was never deployed. Reproducible from
+# scripts/embedding_training_pairs.jsonl + scripts/finetune_embeddings.py
+# if ever needed again.
+scripts/finetuned_bge_embeddings/
+
 .idea/
 .vscode/
 .claude/

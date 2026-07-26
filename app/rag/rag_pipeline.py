@@ -30,7 +30,20 @@ class RAGPipeline:
         Fetches this ticker's most useful recent SEC disclosure (an
         8-K earnings-release exhibit, falling back to a 10-Q/10-K's
         MD&A section) and ingests it into the vector store, unless
-        this company already has chunks stored.
+        this company's stored chunks are already from that exact
+        filing.
+
+        Previously this skipped ingestion whenever the company had
+        ANY chunks stored at all, regardless of which filing they
+        came from -- fetch_company_disclosure() always re-checks SEC
+        for whatever filing is CURRENTLY the latest (its own disk
+        cache is keyed per accession number, not "per ticker"), but
+        the vector store never got refreshed to match, so a ticker
+        queried once would keep serving that same filing's content
+        indefinitely, even years later once new filings existed. Now
+        compares accession numbers -- SEC's unique ID for a specific
+        filing -- so ingestion actually re-runs when a newer filing is
+        available, and stays skipped (cheap) when it isn't.
 
         Returns (chunks, disclosure_metadata). disclosure_metadata is
         None if SEC has no CIK / no qualifying filing for this ticker
@@ -45,17 +58,33 @@ class RAGPipeline:
         if not disclosure:
             return [], None
 
-        if self.vector_store.company_has_documents(ticker):
-            # Already ingested in an earlier query -- skip re-chunking
-            # and re-embedding, but still return disclosure metadata
-            # (cheap: fetch_company_disclosure is disk-cached) so
-            # citations always have a source URL/filing date, not
-            # just on the first query for this ticker.
+        latest_accession = disclosure.get("accession_number")
+        existing_accession = self.vector_store.get_ingested_accession(ticker)
+
+        if existing_accession is not None and existing_accession == latest_accession:
+            # Already have chunks from exactly this filing -- skip
+            # re-chunking/re-embedding, but still return disclosure
+            # metadata (cheap: fetch_company_disclosure is disk-cached)
+            # so citations always have a source URL/filing date.
             return [], disclosure
+
+        # Otherwise: either nothing is ingested yet, a newer filing is
+        # available, or the existing chunks predate accession-number
+        # tracking (unknown vintage, existing_accession is None but
+        # chunks may still exist). Clear out anything stale before
+        # ingesting fresh chunks -- unconditionally, not only when
+        # existing_accession is known, because chunk_ids are built
+        # from company+filing_date and would otherwise collide with
+        # old chunks for the SAME filing_date, silently blocking
+        # add_documents() from writing the new (accession-tagged)
+        # chunks at all. delete_company_documents() on a company with
+        # nothing stored is a harmless no-op.
+        self.vector_store.delete_company_documents(ticker)
 
         chunker = FinancialTranscriptChunker(
             company=ticker,
             quarter=disclosure["filing_date"],
+            accession_number=latest_accession,
         )
 
         chunks = chunker.chunk_text(disclosure["text"])

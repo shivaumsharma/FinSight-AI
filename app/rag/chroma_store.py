@@ -180,6 +180,39 @@ class ChromaVectorStore:
 
     #############################################################
 
+    def get_ingested_accession(self, company):
+        """
+        The accession_number stamped on this company's currently-
+        stored chunks (every chunk from one ingestion shares the same
+        one), or None if nothing is stored. Lets a caller detect that
+        a NEWER filing has become available since this company was
+        last ingested -- company_has_documents() above only answers
+        "does anything exist," which is what let a company's data
+        silently freeze at whichever filing was current the first
+        time it was ever queried, with no way to notice a newer one
+        later. Returns None (not "") for a pre-fix ingestion whose
+        chunks predate this metadata field existing, which correctly
+        treats them as "unknown vintage" rather than falsely matching.
+        """
+        existing = self.collection.get(where={"company": company}, limit=1)
+        metadatas = existing.get("metadatas", [])
+        if not metadatas:
+            return None
+        return metadatas[0].get("accession_number") or None
+
+    #############################################################
+
+    def delete_company_documents(self, company):
+        """
+        Removes all stored chunks for a company -- used when a newer
+        filing is available and should REPLACE the stale one, rather
+        than accumulating every filing a company has ever had under
+        one ticker forever.
+        """
+        self.collection.delete(where={"company": company})
+
+    #############################################################
+
     def reset(self):
 
         self.client.delete_collection(

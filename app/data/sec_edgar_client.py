@@ -140,6 +140,33 @@ class SECEdgarClient:
                 break
         return matches
 
+    # Filename substrings that identify a real narrative earnings
+    # press release (EX-99.1, the actual "management discusses this
+    # quarter" document) vs. a separate, much larger, pure-data
+    # exhibit filed alongside it under a different EX-99.x number --
+    # confirmed on a real filing (JPM, accession 0001628280-26-048078):
+    # "a2q26erfexhibit991narrative.htm" (207KB, real commentary) sits
+    # right next to "a2q26erfex992supplement.htm" (3.4MB, tables only,
+    # labeled "EARNINGS RELEASE FINANCIAL SUPPLEMENT"). The old "first
+    # filename containing ex99" match had no way to tell these apart
+    # and picked whichever sorted first alphabetically -- for this
+    # filing, that was the wrong one: 120 chunks were produced from
+    # it, 81 of them (68%) over 15% digit-density, i.e. table
+    # fragments rather than narrative text. Large financial-supplement
+    # exhibits are a common pattern specifically for banks/insurers
+    # (extensive tabular schedules), a big share of this pipeline's
+    # ticker universe -- this isn't a JPM-only quirk.
+    _NARRATIVE_HINTS = ("narrative", "99.1", "99_1", "ex991")
+    _SUPPLEMENT_HINTS = ("supplement", "schedule", "99.2", "99_2", "99.3", "99_3")
+
+    def _rank_exhibit_candidate(self, filename: str) -> int:
+        name = filename.lower()
+        if any(hint in name for hint in self._NARRATIVE_HINTS):
+            return 0
+        if any(hint in name for hint in self._SUPPLEMENT_HINTS):
+            return 2
+        return 1
+
     def _find_exhibit_document(self, cik: str, accession_number: str) -> Optional[str]:
         """
         For an 8-K, the per-company submissions feed only lists the
@@ -150,6 +177,11 @@ class SECEdgarClient:
         files aren't consistently named, but this convention holds
         broadly enough to be worth trying before falling back to the
         cover page itself).
+
+        When multiple "ex99"-matching files exist (see
+        _rank_exhibit_candidate above), the narrative press release is
+        preferred over a numbers-only supplement exhibit, instead of
+        just taking whichever sorts first.
         """
         acc_nodash = accession_number.replace("-", "")
         cik_int = str(int(cik))
@@ -162,12 +194,22 @@ class SECEdgarClient:
         resp.raise_for_status()
         items = resp.json().get("directory", {}).get("item", [])
 
-        for item in items:
-            name = item.get("name", "").lower()
-            if "ex99" in name or "ex-99" in name:
-                return item["name"]
+        # "ex99"/"ex-99" alone misses filenames spelled out as
+        # "exhibit99..." (no abbreviation) -- confirmed on the real
+        # JPM filing above: "a2q26erfexhibit991narrative.htm" contains
+        # no literal "ex99" substring at all ("exhibit" breaks the
+        # match), so the file this whole preference logic exists to
+        # prefer was never even in the candidate list to begin with.
+        exhibit_99_pattern = re.compile(r"ex(?:hibit)?[\s\-_]?99")
+        candidates = [
+            item["name"] for item in items
+            if exhibit_99_pattern.search(item.get("name", "").lower())
+        ]
+        if not candidates:
+            return None
 
-        return None
+        candidates.sort(key=self._rank_exhibit_candidate)
+        return candidates[0]
 
     # ------------------------------------------------------------
     # Document fetch + text extraction
@@ -256,12 +298,17 @@ class SECEdgarClient:
 
     def fetch_company_disclosure(self, ticker: str) -> Optional[dict]:
         """
-        Returns {"text", "form", "filing_date", "source_url"} for the
-        most useful recent disclosure available for `ticker`, or None
-        if SEC has no CIK for it (e.g. some foreign private issuers
-        file 20-F/6-K instead of 10-K/10-Q/8-K) or no qualifying
-        filing was found. Disk-cached per ticker+accession so repeat
-        queries don't re-hit SEC or re-parse HTML.
+        Returns {"text", "form", "filing_date", "accession_number",
+        "source_url"} for the most useful recent disclosure available
+        for `ticker`, or None if SEC has no CIK for it (e.g. some
+        foreign private issuers file 20-F/6-K instead of 10-K/10-Q/8-K)
+        or no qualifying filing was found. Disk-cached per
+        ticker+accession so repeat queries don't re-hit SEC or
+        re-parse HTML -- but _get_submissions above is NOT cached, so
+        every call still checks SEC for whatever the current latest
+        filing actually is; accession_number in the result is what
+        RAGPipeline.ingest_company_disclosure compares against what's
+        already in the vector store to detect a newer filing.
         """
         try:
             cik = self.get_cik(ticker)
@@ -321,7 +368,15 @@ class SECEdgarClient:
         cache_file = CACHE_DIR / f"{ticker.upper()}_{accession_number}.json"
         if cache_file.exists():
             with open(cache_file, "r", encoding="utf-8") as f:
-                return json.load(f)
+                result = json.load(f)
+            # Heals cache files written before accession_number was
+            # added to _write_cache's result dict -- the cache file is
+            # already scoped per-accession (it's in the filename, the
+            # very parameter this method was called with), so the
+            # value is known here even for an old file that doesn't
+            # have it in its body yet.
+            result.setdefault("accession_number", accession_number)
+            return result
         return None
 
     def _write_cache(self, ticker: str, cik: str, filing: dict, document: str, text: str) -> dict:
@@ -329,6 +384,7 @@ class SECEdgarClient:
             "text": text,
             "form": filing["form"],
             "filing_date": filing["filing_date"],
+            "accession_number": filing["accession_number"],
             "source_url": (
                 f"https://www.sec.gov/Archives/edgar/data/"
                 f"{int(cik)}/{filing['accession_number'].replace('-', '')}/{document}"

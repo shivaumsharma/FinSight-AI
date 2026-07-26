@@ -1,0 +1,212 @@
+{
+    "timestamp": "2026-07-22T11:24:03.428705",
+    "ticker": "NFLX",
+    "question": "Should I buy Netflix?",
+    "company_info": {
+        "company_name": "Netflix, Inc.",
+        "sector": "Communication Services",
+        "industry": "Entertainment",
+        "market_cap": 285937729536,
+        "currency": "USD",
+        "country": "United States",
+        "beta": 1.517,
+        "current_price": 68.67,
+        "business_summary": "Netflix, Inc. provides entertainment services worldwide. The company offers television (TV) series, documentaries, feature films, games, and live programming across various genres and languages. It also provides members the ability to receive streaming content through a host of internet-connected devices, including TVs, digital video players, TV set-top boxes, and mobile devices. Netflix, Inc. was incorporated in 1997 and is headquartered in Los Gatos, California.",
+        "website": "https://www.netflix.com",
+        "employees": 16000
+    },
+    "market_cap": 285937729536,
+    "beta": 1.517,
+    "sentiment": {
+        "label": "positive",
+        "score": 0.8900419473648071
+    },
+    "retrieved_chunks": [
+        {
+            "text": "Building out our ads business has been a major monetization priority and we continue to make good progress. Our ads plan (priced at $8.99 in the US) remains very popular, representing over 60% of all Q1 sign ups within our ads countries. We'll launch new products throughout 2026 to help advertisers assess the incrementality of their buys on Netflix, all verified by Netflix's trusted first-party data. Our improved capabilities are attracting many new advertising clients — we now work with over 4,000, up 70% year over year — and we continue to expect ~$3B in ad revenue this year, up 2x from 2025.\nIn summary,",
+            "metadata": {
+                "section": "Financial Performance",
+                "speaker": "Management",
+                "quarter": "2026-04-16",
+                "company": "NFLX",
+                "importance": 0.6
+            }
+        },
+        {
+            "text": "We believe we have meaningful advantages as we strive to become a must‑have service for consumers: a strong global brand, a wide range of high‑quality programming, a best‑in‑class product experience, and a frequent role at the center of culture. Given our global footprint and deep engagement, we believe we provide a superior monetization model for the content we offer, making us a more attractive partner for creators and licensors. To maintain these advantages, we need to keep building our brand, audience, engagement, and monetization so Netflix remains the home for the best storytellers and the default place where consumers choose to spend their entertainment time. In such a dynamic environment, we’ve learned that the best thing we can do is get better faster than the competition.",
+            "metadata": {
+                "speaker": "Management",
+                "section": "AI",
+                "company": "NFLX",
+                "importance": 0.55,
+                "quarter": "2026-04-16"
+            }
+        },
+        {
+            "text": ", the filmmaking technology company founded by Ben Affleck that develops AI‑powered tools built by and for filmmakers.\nThird, improving our monetization.\nBetter monetization enables us to invest more in content and the product experience, which increases member value and engagement, and in turn supports long‑term revenue and profit growth and our ability to reinvest to further improve Netflix – driving a virtuous cycle. We deliver industry-leading monetization through a combination of broad distribution, increasingly sophisticated plans and pricing, and a growing ads business.\n__________________________________\n8\nLaunched in the US, Canada, UK, Australia, the Philippines and New Zealand, with full global launch on 4/28.\n9",
+            "metadata": {
+                "quarter": "2026-04-16",
+                "importance": 0.65,
+                "speaker": "Management",
+                "section": "Financial Performance",
+                "company": "NFLX"
+            }
+        },
+        {
+            "text": "Defined as cash provided by (used in) operating activities less purchases of property and equipment.\n5\nGovernance\nReed Hastings has informed us that he will not stand for re-election to our Board when his current term expires at the Annual Meeting in June, in order to focus on his philanthropy and other pursuits. Reed built a culture of innovation, integrity and high performance that defines who we are today. His vision and leadership pioneered how the world is entertained, and his legacy and impact are not only felt by all of us at Netflix, but by audiences around the world. On behalf of the Board and our shareholders, we extend our deepest thanks for his extraordinary leadership and service.",
+            "metadata": {
+                "quarter": "2026-04-16",
+                "speaker": "Management",
+                "section": "AI",
+                "company": "NFLX",
+                "importance": 0.55
+            }
+        },
+        {
+            "text": "https://www.youtube.com/netflixir\n8\nUse of Non-GAAP Measures",
+            "metadata": {
+                "speaker": "Management",
+                "importance": 0.5,
+                "quarter": "2026-04-16",
+                "section": "General Discussion",
+                "company": "NFLX"
+            }
+        }
+    ],
+    "generated_answer": "# Executive Summary\nNetflix, Inc. (NFLX) is a leading provider of entertainment services worldwide with strong revenue growth and profitability. Despite recent market concerns about its competitive position in the streaming industry, management remains optimistic about future prospects.\n\n# Business Analysis\nNetflix's business model focuses on delivering high-quality content through various platforms to maximize member engagement and monetization opportunities. The company has successfully expanded into new markets while maintaining consistent performance metrics across key financial indicators such as operating margins and free cash flow generation.\n\n# Market and Earnings Analysis\nThe current price-to-earnings ratio for Netflix stock suggests an undervaluation compared to its intrinsic value, indicating potential upside. However, investors should be aware that the company faces challenges from competitors like Disney and other emerging players in the streaming space.\n\n# Risk Analysis\nWhile Netflix enjoys significant advantages due to its global reach and brand recognition, it also faces risks related to regulatory scrutiny, competition from established companies, and fluctuations in advertising demand which can impact ad revenues negatively.\n\n# Investment Thesis\nDespite the valuation gap between current prices and intrinsic values, Netflix continues to demonstrate steady progress in terms of revenue growth, profit margin expansion, and improved operational efficiency. Investors who are willing to accept this risk profile may find merit in considering a sell recommendation at current levels given the compelling opportunity presented by the company's long-term strategic direction and sustainable competitive advantage. # DETERMINED RECOMMENDATION\n\nSell -- Composite score -17.0 (DCF -28.2 x 80% + relative valuation +27.7 x 20%) -- Buy at >=8, Sell at <=-8, Hold in between. Note: DCF's own directional call (Sell) disagrees with relative valuation (cheap) -- the composite score above already reflects both signals blended, not an override.\nThis recommendation aligns with the overall sentiment expressed by management, but acknowledges the inherent risks associated with the competitive landscape and fluctuating economic conditions within the media sector. It advises against buying or holding positions below the recommended threshold unless there is substantial evidence supporting the case for doing so.\n\n[Note: this section's framing has been flagged as potentially inconsistent with FinSight's own Sell rating. FinSight's determined position is: Composite score -17.0 (DCF -28.2 x 80% + relative valuation +27.7 x 20%) -- Buy at >=8, Sell at <=-8, Hold in between. Note: DCF's own directional call (Sell) disagrees with relative valuation (cheap) -- the composite score above already reflects both signals blended, not an override.]",
+    "context.valuation_results": {
+        "dcf_available": true,
+        "dcf_unavailable_reason": null,
+        "enterprise_value": 213485650248.17517,
+        "equity_value": 208056495248.17517,
+        "fcff_forecasts": {
+            "forecast_fcff": {
+                "Year_1": 12561484044.911152,
+                "Year_2": 14149220251.451326,
+                "Year_3": 15937641842.978304,
+                "Year_4": 17952114886.966896,
+                "Year_5": 20221211650.38262,
+                "Year_6": 22485939897.95612,
+                "Year_7": 24680525414.098923,
+                "Year_8": 26733910374.837997,
+                "Year_9": 28380700431.34101,
+                "Year_10": 29515928448.594654
+            }
+        },
+        "wacc": 0.12680068797802474,
+        "raw_wacc": 0.12680068797802474,
+        "wacc_floored": false,
+        "wacc_floor_note": null,
+        "terminal_growth_rate": 0.04,
+        "sensitivity_analysis": {
+            "0.01": {
+                "0.1068": 52.89256804067031,
+                "0.1168": 47.031068643186806,
+                "0.1268": 42.21354760236833,
+                "0.1368": 38.19041724866827,
+                "0.1468": 34.78526419990259
+            },
+            "0.02": {
+                "0.1068": 56.23070463706627,
+                "0.1168": 49.53312036573679,
+                "0.1268": 44.1273006725324,
+                "0.1368": 39.67910241213545,
+                "0.1468": 35.9599643691445
+            },
+            "0.03": {
+                "0.1068": 60.43814763877366,
+                "0.1168": 52.61168170177756,
+                "0.1268": 46.43645726958987,
+                "0.1368": 41.44656756876128,
+                "0.1468": 37.335811827640164
+            },
+            "0.04": {
+                "0.1068": 65.90530411404613,
+                "0.1168": 56.49195171907893,
+                "0.1268": 49.277677598688236,
+                "0.1368": 43.579211476756086,
+                "0.1468": 38.969308622932765
+            },
+            "0.05": {
+                "0.1068": 73.29751568624555,
+                "0.1168": 61.533979226590326,
+                "0.1268": 52.85879905515596,
+                "0.1368": 46.20324799027965,
+                "0.1468": 40.940304756095735
+            }
+        },
+        "intrinsic_value": 49.27723944666009,
+        "current_price": 68.67,
+        "upside_percent": -28.24,
+        "relative_valuation": {
+            "method": "Own trading history (no peer/sector multiple data source is wired into this pipeline)",
+            "metric": "EV/EBITDA",
+            "current_ev_ebitda": 21.06,
+            "historical_avg_ev_ebitda": 29.15,
+            "years_used": 3,
+            "vs_history_pct": -27.73,
+            "signal": "cheap",
+            "current_pfcf": 30.65,
+            "historical_avg_pfcf": 55.55
+        },
+        "monte_carlo": {
+            "mean": 52.599695939401066,
+            "median": 49.628380836991255,
+            "std_dev": 17.049772023094427,
+            "p25": 40.95655501949849,
+            "p75": 60.88282710978678,
+            "ci_lower": 31.068486541433476,
+            "ci_upper": 81.90890483387624,
+            "prob_undervalued": 0.14507253626813407,
+            "n_samples": 1999
+        },
+        "ml_classifier": {
+            "verdict": "UNDERVALUED",
+            "probabilities": {
+                "FAIRLY VALUED": 0.08704636506902003,
+                "OVERVALUED": 0.23797610400659916,
+                "UNDERVALUED": 0.6749775309243808
+            },
+            "model_name": "logistic_regression"
+        }
+    },
+    "investment_thesis": {},
+    "evaluation": {
+        "latency": 97.85,
+        "answer_length": 2867,
+        "grounding_score": 47.06,
+        "supported_claims": 8,
+        "unsupported_claims": 9,
+        "retrieval_score": 100.0,
+        "retrieved_chunks": 0,
+        "reranked_chunks": 5,
+        "citation_score": 40.0,
+        "citations_used": 2,
+        "citations_available": 5,
+        "news_grounding_rate": 70.0,
+        "news_citations_used": 7,
+        "news_citations_available": 10,
+        "completeness_score": 100.0,
+        "missing_sections": [],
+        "overall_score": 66.82
+    },
+    "metadata": {
+        "plan": [
+            "market_data_tool",
+            "valuation_tool",
+            "rag_tool",
+            "sentiment_tool",
+            "institutional_consensus_tool",
+            "news_tool",
+            "report_tool",
+            "evaluation_tool"
+        ],
+        "disclosure_source": {
+            "text": "EX-99.1\n2\nex991_q226.htm\nEX-99.1\nDocument\nExhibit 99.1\nJuly 16, 2026\nFellow shareholders,\n•\nOur financial performance remains solid and we’re on track to meet our objectives for the year:\n◦\nQ2 revenue grew 13% year over year (+12% on a FX-neutral basis\n1\n) to $12.6B, and operating margin was 33%. Both were in-line with our guidance.\n◦\nFor 2026, we’ve narrowed our forecasted revenue range to $51.0-$51.4B and continue to forecast an operating margin of 31.5%, both consistent with our prior guidance.\n•\nWe’re delivering increasing value to our members; engagement is healthy, reflecting the quality, quantity, and variety of our offering:\n◦\nHarlan Coben’s\nI Will Find You\nis our most viewed new original series debut in 2026 and\nSwapped\nis on its way to becoming our second most viewed original animated film ever.\n◦\nView hours grew +2% in H1’26 vs. +1.5% growth in 2025, despite the competitive impact of the Winter Olympics and the World Cup this year.\n◦\nTo better satisfy members, we’re continuing to expand the variety of our entertainment offering with video podcasts, creators like Danny Go! and Salish & Jordan Matter, and cloud TV games.\n•\nThe results of our recent price changes are consistent with prior changes and our expectations.\n•\nWe are leveraging AI to provide a more personalized, immersive and interactive experience for members, enhance ads capabilities for brands, and improve the quality of our series and films.\n•\nThe entertainment industry remains dynamic and competitive. We aim to stay ahead by executing against our three areas of focus: delivering more entertainment value, leveraging technology to improve every aspect of our service, and improving monetization.\nOur summary results, and forecast for Q3, are below.\n(in millions except per share data)\nQ2'25\nQ3'25\nQ4'25\nQ1'26\nQ2'26\nQ3'26 Forecast\nRevenue\n$\n11,079\n$\n11,510\n$\n12,051\n$\n12,250\n$\n12,560\n$\n12,860\nY/Y % Growth\n15.9\n%\n17.2\n%\n17.6\n%\n16.2\n%\n13.4\n%\n11.7\n%\nOperating Income\n$\n3,775\n$\n3,248\n$\n2,957\n$\n3,957\n$\n4,193\n$\n4,268\nOperating Margin\n34.1\n%\n28.2\n%\n24.5\n%\n32.3\n%\n33.4\n%\n33.2\n%\nNet Income\n$\n3,125\n$\n2,547\n$\n2,419\n$\n5,283\n$\n3,401\n$\n3,452\nDiluted EPS\n$\n0.72\n$\n0.59\n$\n0.56\n$\n1.23\n$\n0.80\n$\n0.82\nNet cash provided by operating activities\n$\n2,423\n$\n2,825\n$\n2,112\n$\n5,290\n$\n1,744\nFree Cash Flow\n$\n2,267\n$\n2,660\n$\n1,872\n$\n5,094\n$\n1,525\nShares (FD)\n4,349\n4,340\n4,317\n4,298\n4,261\n__________________________________\n1\nExcluding the year over year effect of foreign exchange rate movements and the impact of hedging gains/losses realized as revenues. Assumes foreign exchange rates remained constant with foreign exchange rates from each of the corresponding months of the prior-year period.\n1\nQ2 Results and Forecast\nQ2 revenue of $12.6B was in-line with forecast and grew 13% year over year (+12% on a foreign exchange (F/X) neutral basis), driven primarily by membership growth, pricing and increased ad revenue. We delivered double digit revenue growth in all regions, surpassing the quarterly revenue mark of $4.0B in EMEA and $1.5B in both LATAM and APAC. In UCAN, Q2 revenue growth of 10% reflects only a partial quarter impact from our recent price change, which has gone well and as expected.\nOperating income in Q2 was $4.2B, up 11% year over year, and operating margin was 33.4% versus 34.1% in Q2’25. Q2 operating income and margin were slightly ahead of forecast due to the timing of expenses. As we noted in previous letters, operating income in Q2 grew slower than revenue because our content amortization growth is higher in the first half of the year; we continue to expect content amortization to grow slower in the second half of the year and to increase ~10% for 2026. Diluted EPS for the quarter amounted to $0.80 vs. $0.72 in Q2’25 (+11% year over year), slightly above our forecast.\nAs a reminder, the guidance we provide is our actual internal forecast at the time we report and we strive for accuracy. Our primary financial metrics are revenue for growth and operating margin for profitability. Our goal is to sustain healthy revenue growth, expand operating profit and margin, and deliver growing free cash flow.\nFor Q3, we expect revenue growth of 12% (or 11% F/X neutral) driven by growth in memberships, pricing, and ad revenue. We project an operating margin of 33.2% compared with 28.2% in the year ago quarter.\nOur 2026 outlook is consistent with our prior forecast: we are narrowing our revenue forecast to $51.0-$51.4B, which represents 13%-14% growth (~12% F/X neutral), driven by growth in memberships and pricing, and a projected rough doubling of our ads revenue to approximately $3 billion. We continue to anticipate an operating margin of 31.5% for 2026 both on a reported basis and based on F/X rates as of January 1, 2026 vs. 29.5% in 2025. Our forecast implies annual operating income growth of 20%+ for 2026.\nOur Focus\nAs we outlined in our last letter, we have three main areas of focus:\nFirst, delivering more entertainment value.\nWe want to win the most valuable moments of truth and thrill our members. We’ve used “engagement” as a shorthand for the value we deliver members. But, as we’ve developed an increasingly sophisticated understanding of how consumers ascribe value to our service, we know not all hours are equal. Time spent is just one aspect of strong engagement - quality and variety also matter. The key is to improve across all of those dimensions: quality, variety, and quantity.\nQuality is defined by how much our members enjoy and love a title. We work every day to raise the bar on our core series and film offering, which we have successfully done since we launched streaming in 2007. Animation is a good example of how patient and focused execution can pay off. We started original animation in 2018, kept improving, and last year produced a true breakout global phenomenon with\nKPop Demon Hunters\n. It became our first title to surpass over 52 consecutive weeks in the Global\n2\nTop 10. We built on that momentum in Q2 with\nSwapped\n* (137M views\n2\n) which is loved by our members and on its way to becoming our second most viewed\n4\noriginal animated film ever.\nIn addition to a high-quality slate, we also need a wide variety of programming because we serve a massive audience (approaching 1B people) with broad and diverse tastes, moods and needs. Different types of content impact our business differently – some drive more acquisition, some primarily aid retention, and some make the service feel indispensable. For example, in 2026, we expect live programming to account for just over 5% of our content spend but only ~1% of view hours. Yet, live event programming accounted for six of the top 10 new member sign-up days over the last five years (and we've only been doing live events since 2023).\nQuantity of engagement is also important and, as detailed in our bi-annual\nWhat We Watched\n5\nreport, in the first half of 2026, our members watched more than 97 billion hours, up 2% year over year. This was slightly faster than the 1.5% growth in 2025, despite the competitive impact of the Winter Olympics and the World Cup this year. Non-English content again drove more than a third of all viewing this half, with standout titles from Korea, Japan, Spain, and India.\nOur Q2 slate delivered a host of titles that our members loved and were broadly viewed, including Harlan Coben’s\nI Will Find You\n* (87M views) - our biggest new original series debut in 2026 so far,\nLegends\n* from the UK (20M views), K-drama\nTeach You a Lesson\n* (55M views) - which is on track to become our second-most viewed Korean show globally\n6\n,\nBerlin and The Lady with an Ermine\n* (28M views) from Spain,\nThe Polygamist\n* (24M views) from South Africa,\nFlunked\n* (11M views) from France, and\nRosario Tijeras\nS5* (6M views) from Mexico. We also continued to strengthen our film slate, delivering hits across multiple genres, like action with\nApex\n* (131M views) starring Charlize Theron, rom-coms with\nOffice Romance\n* (63M views) featuring Jennifer Lopez and\nVoicemails for Isabelle\n* (71M views), drama with the Emmy nominated feature,\nRemarkably Bright Creatures\n* (53M views) starring Sally Field, and documentaries with\nMaternal Instinct\n* (54M views) and\nThe Crash\n* (67M views).\nBeyond series and films, we continually evolve and expand our entertainment offering to better meet the needs of members and strengthen our engagement.\n•\nFor instance, approximately half of our viewing occurs in the evening, but our recently launched video podcasts over-index on viewing during the day and on mobile devices, an indicator that this engagement is incremental. We recently added Jay Shetty’s\nOn Purpose\nand\nAllegedly\n, as well as announced podcasts featuring Kate Hudson and Oliver Hudson, Lele Pons and Martha Stewart through our partnership with iHeartMedia.\n•\nWe have a history of working with the most talented storytellers from around the world and, increasingly, that includes top creators from open content platforms. We’ve had success with creators including Danny Go!, Ms. Rachel, Mark Rober, and Salish & Jordan Matter, and recently announced collaborations with the Stokes Twins, Alan Chikin Chow, Nick DiGiovanni, and Mythical. Ms. Rachel has spent 27 weeks in the Global Top 10 since debuting on Netflix last year and, more recently, Salish & Jordan Matter and Danny Go! have spent eight and seven weeks, respectively, in the Global Top 10 since coming to Netflix in April. We also announced\npartnerships\n7\nwith leading publishers including Condé Nast, Hearst, and People, to bring their lifestyle content to members in the US and several other countries beginning in August.\n__________________________________\n2\nA view is defined as hours viewed divided by runtime for each title. Views for a title are based on the first 91 days since the release of each episode (less than 91 days denoted with an asterisk and data is from launch date through July 12, 2026). We publish our top titles based on views each week at\nNetflix Top 10\n3\n.\n3\nhttps://www.netflix.com/tudum/top10\n4\nBased on expected 91 day views.\n5\nhttps://about.netflix.com/en/news/what-we-watched-the-first-half-of-2026\n6\nBased on expected 91 day views (behind Squid Game).\n7\nhttps://www.netflix.com/tudum/articles/digital-publisher-videos\n3\n•\nTo deepen our local programming in France, last month we launched a partnership with leading local French broadcaster TF1. Netflix members in France are now able to experience TF1 programming as part of their subscription at no additional cost. This fully integrated experience includes TF1’s linear channels as well as TF1+’s on-demand content, including a wide array of scripted, unscripted and major live sports programming. While still early, we’re pleased with the initial performance. Our French members are discovering and engaging with this content (with view hours of TF1 content growing each week), a TF1 title,\nSecret Story\nhas already reached our Top 10 list in France, and we’re gratified to see our\npartner\n8\nis also seeing strong early results.\n•\nOur cloud-based TV games are gaining traction. In June, we had our two most successful cloud game debuts, with the releases of\nFIFA World Cup: Launch Edition\nand\nUnhinged\n. And Netflix Playground, our app for kids games, has experienced 3x growth in daily players since its launch in April, and has fueled growth in our kids mobile games engagement, which is up 600% year over year\n9\n. While off a small base, these early signals give us increasing confidence that we are building a foundation with exciting future growth potential.\nOverall, our engagement remains healthy and as with all things we do, we’re working hard to improve every day. We have an exciting Q3 slate including new films like\n72 HOURS\nwith Kevin Hart,\nThe Last House\nwith Greta Lee & Wagner Moura,\nThe Whisper Man\nwith Robert DeNiro, and\nCall My Agent!\nfrom France, and series such as\nThe Hawk\nwith Will Ferrell, the fifth and final season of\nOuter Banks\n,\nLittle House on the Prairie\n, the fourth installment of Ryan Murphy’s anthology series,\nMonster: The Lizzie Borden Story\n,\nThe Gentlemen\nS2 from the UK,\nThe East Palace\nfrom Korea,\nThe Doll\nfrom Poland, and\nLovesick\nfrom Mexico. We’ll continue to build out our live programming – we have two Major League Baseball events (\nHome Run Derby\nand\nField of Dreams\ngame) in Q3, as well as the\nTyson Fury vs. Anthony Joshua\nfight later this year. We also recently announced an expanded agreement with the NFL, securing a premium slate of games that includes a week-one matchup in Q3, as well as a Thanksgiving Eve game and NFL Christmas Gameday in Q4, and a final week contest in Q1 of next year.\nSecond, leveraging technology to improve every aspect of our service and our business.\nTo support our growing content offering, we continue to evolve our product to create more personalized, immersive, and interactive experiences for our members. We are leveraging LLMs to improve title discovery and to better understand member preferences. We’re also enhancing search for our members with new voice search functionality and AI-powered natural language search.\nAcross the production lifecycle, from concept and pre-visualization through post and delivery, GenAI utilization by our creative partners is scaling quickly. In 2026, GenAI workflows have been used in roughly 300 of our titles, with the largest concentration of work in post-production. We are increasingly leveraging these tools to deliver higher quality output more quickly and at a lower cost than traditional methods. In some cases, productions would have had to leave out key shots and sequences in the absence of GenAI technology. For example,\nGlory\n(India),\nBrasil 70: A Saga do Tri\n(Brazil), and\nThe American Experiment\n(US) utilized GenAI tools to create highly complex sequences (e.g., enhanced crowds, historical battle sequences, and worldbuilding establishing shots).\nIn our ads business, we continue to invest in developing a premium ad experience which delivers highly engaged and attentive audiences to advertisers. In Q2, we expanded our AI-powered tools across the full advertising lifecycle, from planning and creative production to campaign management, optimization, and reporting. We're also automating more of the workflow around how advertisers transact with us by extending programmatic access to Pause Ads and live inventory this summer. This reduces the manual effort that has historically limited access for smaller buyers, opening Netflix to a broader range of advertisers over time. These investments enhance the value of our existing inventory and lay the groundwork for the next phase of growth in our ads business.\n__________________________________\n8\nhttps://www.hollywoodreporter.com/business/business-news/tf1-netflix-deal-record-streaming-figures-france-1236642951/\n9\nGame play hours are not included in our\nWhat We Watched\nreport.\n4\nThird, improving monetization.\nBuilding out our ads business continues to be a top priority and we remain on track to deliver approximately $3 billion in ads revenue in 2026. Our US upfront negotiations are in advanced stages, and we expect commitments to close in the next few weeks. We are seeing strong interest in our Live events lineup — Women's World Cup, an expanded NFL slate, WWE, MLB events and more — alongside continued demand for our unparalleled breadth of entertainment titles. The growth in our ads business is being fueled by the strength and variety of our slate combined with our investments in AI powered tools and workflows, the Netflix Ads Suite and broader programmatic capabilities.\nWe offer a wide range of plans and feature sets at accessible price points to provide the best value for members. As we expand and improve our entertainment offering, we occasionally adjust prices so that we can reinvest in our service. Our first half price changes, in markets like the US, Mexico and Spain, have gone well with the impact consistent with prior price changes and our expectations.\nWe are constantly testing, assessing, and improving the membership lifecycle. Over the years, investments in our product capabilities (e.g. TV and mobile UI) have given us greater flexibility to evaluate the best ways to attract and retain members in different markets. We’ve tested a variety of methods, including a low cost first month in Japan to coincide with the WBC, and an “upgrade on us” offer in various countries around the world. As part of this test and learn strategy, last week we began re-testing free trials for non-rejoining new members in a number of markets around the world (excluding the US and UK).\nEvolving Our View Hours Disclosure\nEngagement is important to our business. But as discussed above, engagement is not just the quantity of view hours, but also refers to the quality and variety of our offering. To make this clearer, we’re making a change to our view hours disclosure.\nAfter today’s\nWhat We Watched\nreport, which covers the first half of 2026, we will shift to publishing this report annually in the first quarter, beginning in 2027. The goal of separating the publication of the report from our earnings results is to keep the focus on our primary financial metrics – revenue and operating profit. With this change, we will still report industry-leading title-by-title and total view hours data (including our weekly Top 10 lists for movies and series in more than 90 countries).\nCash Flow and Capital Structure\nNet cash generated from operating activities was $1.7B vs $2.4B in the prior year period. Free cash flow (FCF)\n10\nin Q2’26 totaled $1.5B vs. $2.3B in Q2’25. This included higher cash tax payments due in part to the Warner Bros. termination fee. For the full year, we continue to expect FCF of approximately $12.5B, and an annual cash content spend to amortization ratio of ~1.1x.\nOur capital allocation approach is unchanged. We prioritize reinvestment in the business, both organically and through selective M&A, while maintaining a healthy balance sheet and ample liquidity, and then returning excess cash to shareholders via share repurchases. In April, our Board of Directors authorized the repurchase of an additional $25B of our stock on top of the $6.8B of capacity we had remaining as of the end of Q1. In Q2, we bought back $4.7B of stock, our largest quarter of share repurchases, and we currently have $27.1B of capacity left in our remaining authorizations. We ended the quarter with gross debt of $14.4B and cash and cash equivalents of $9.1B. We have $1B of debt maturing later this year, which we plan to refinance.\n__________________________________\n10\nDefined as cash provided by (used in) operating activities less purchases of property and equipment.\n5\nEnvironmental, Social, and Governance (ESG)\nWe recently published our 2025 Environmental, Social, and Governance (ESG)\nreport\n11\n. Key updates for 2025 include how we continue to decarbonize our operations, including the productions of our films, series and games; invest in our people and the next generation of talent around the world, while contributing to local economies; and maintain our corporate governance structure to support healthy growth and create long-term shareholder value.\nDuring Q2, we launched\nThe Netflix Effect\n12\n— a comprehensive look at the impact our films and series have had on economies, industries and culture over the last decade. Netflix is deeply embedded and invested in the creative industries around the world, producing TV series and films in more than 50 countries, and contributing more than $325 billion in gross value to the global economy.\nReference\nFor quick reference, our past investor letters can be found\nhere\n13\n.\n___________________________________\n11\nhttps://s22.q4cdn.com/959853165/files/doc_downloads/2026/6/2025-Netflix-Environmental-Social-Governance-Report.pdf\n12\nhttps://thenetflixeffect.com/\n13\nhttps://ir.netflix.net/financials/quarterly-earnings/default.aspx\n6\nRegional Breakdown\n(in millions)\nQ2'25\nQ3'25\nQ4'25\nQ1'26\nQ2'26\nUCAN:\nRevenue\n$\n4,929\n$\n5,072\n$\n5,339\n$\n5,245\n$\n5,432\nY/Y % Growth\n15\n%\n17\n%\n18\n%\n14\n%\n10\n%\nF/X Neutral Y/Y % Growth\n15\n%\n17\n%\n18\n%\n14\n%\n10\n%\nEMEA:\nRevenue\n$\n3,538\n$\n3,699\n$\n3,873\n$\n3,998\n$\n4,034\nY/Y % Growth\n18\n%\n18\n%\n18\n%\n17\n%\n14\n%\nF/X Neutral Y/Y % Growth\n16\n%\n15\n%\n15\n%\n12\n%\n11\n%\nLATAM:\nRevenue\n$\n1,307\n$\n1,371\n$\n1,418\n$\n1,497\n$\n1,584\nY/Y % Growth\n9\n%\n10\n%\n15\n%\n19\n%\n21\n%\nF/X Neutral Y/Y % Growth\n23\n%\n20\n%\n20\n%\n18\n%\n16\n%\nAPAC:\nRevenue\n$\n1,305\n$\n1,369\n$\n1,421\n$\n1,509\n$\n1,510\nY/Y % Growth\n24\n%\n21\n%\n17\n%\n20\n%\n16\n%\nF/X Neutral Y/Y % Growth\n23\n%\n20\n%\n19\n%\n19\n%\n18\n%\nF/X Neutral revenue growth excludes the year over year effect of foreign exchange rate movements and the impact of hedging gains/losses realized as revenues. Assumes foreign exchange rates remained constant with foreign exchange rates from each of the corresponding months of the prior-year period.\n7\nJuly 16, 2026 Earnings Interview, 1:45pm PT\nOur live video interview will be on\nyoutube/netflixir\n14\nat 1:45pm PT today.  Co-CEOs Greg Peters and Ted Sarandos, CFO Spence Neumann and VP of Finance & Capital Markets Spencer Wang, will all be on the video to answer questions submitted by sellside analysts.\nIR Contact:\nPR Contact:\nLowell Singer\nComms@netflix.com\nVP, Investor Relations\n415 254-4462\n818 434-2141\n__________________________________\n14\nhttps://www.youtube.com/netflixir\n8\nUse of Non-GAAP Measures\nThis shareholder letter and its attachments include reference to the non-GAAP financial measures of F/X neutral revenue and adjusted operating profit and margin, free cash flow and net debt. Management believes that free cash flow is an important liquidity metric because it measures, during a given period, the amount of cash generated that is available to repay debt obligations, make strategic acquisitions and investments and for certain other activities like stock repurchases. Management believes that F/X neutral revenue and adjusted operating profit and margin allow investors to compare our projected results to our actual results absent year-over-year and intra-year currency fluctuations. Management believes net debt is a useful measure of the company's liquidity, capital structure, and leverage. However, these non-GAAP financial measures should be considered in addition to, not as a substitute for or superior to, net income, operating income (profit), operating margin, diluted earnings per share and net cash provided by (used in) operating activities, or other financial measures prepared in accordance with GAAP. Reconciliation to the GAAP equivalent of these non-GAAP measures are contained in tabular form on the attached unaudited financial statements and in the F/X neutral operating margin disclosure above. We are not able to reconcile forward-looking non-GAAP financial measures because we are unable to predict without unreasonable effort the exact amount or timing of the reconciling items, including property and equipment, and the impact of changes in currency exchange rates. The variability of these items could have a significant impact on our future GAAP financial results.",
+            "form": "8-K",
+            "filing_date": "2026-07-16",
+            "source_url": "https://www.sec.gov/Archives/edgar/data/1065280/000106528026000211/ex991_q226.htm"
+        },
+        "query_intent": "investment"
+    }
+}

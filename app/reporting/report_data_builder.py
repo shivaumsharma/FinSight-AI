@@ -389,11 +389,19 @@ def _references(context: ResearchContext) -> list:
         })
 
     for citation in context.citations or []:
+        filing_date = citation.get("filing_date")
+        label = f"{citation.get('id', 'Citation')} ({citation.get('section', 'General')})"
+        if filing_date:
+            label += f" -- filed {filing_date}"
         references.append({
             "type": "Retrieved Evidence",
-            "label": f"{citation.get('id', 'Citation')} "
-                     f"({citation.get('section', 'General')})",
-            "url": None,
+            "label": label,
+            # CitationEngine.build() stamps every chunk from one
+            # ingestion with the SAME filing's source_url (they're all
+            # chunks of that one document) -- was hardcoded None here
+            # even though the document-level "SEC Filing" entry two
+            # lines above already had the real URL the whole time.
+            "url": citation.get("source_url"),
         })
 
     for article in context.news_selected or []:

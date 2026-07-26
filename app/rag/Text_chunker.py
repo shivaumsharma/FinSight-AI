@@ -46,11 +46,17 @@ class FinancialTranscriptChunker:
     def __init__(
         self,
         company="",
-        quarter=""
+        quarter="",
+        accession_number=""
     ):
 
         self.company = company
         self.quarter = quarter
+        # Stamped onto every chunk's metadata so ChromaVectorStore can
+        # tell whether a company's stored chunks came from the SEC
+        # filing that's currently the latest available, or a stale
+        # one -- see RAGPipeline.ingest_company_disclosure.
+        self.accession_number = accession_number
 
     # ---------------------------------------------------
 
@@ -75,6 +81,7 @@ class FinancialTranscriptChunker:
             metadata = {
                 "company": self.company,
                 "quarter": self.quarter,
+                "accession_number": self.accession_number,
                 "speaker": speaker,
                 "section": section,
                 "importance": importance,
