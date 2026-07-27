@@ -1,0 +1,5 @@
+# Dev/test-only dependencies -- not needed to run the app itself, only
+# to run the pytest suite in app/tests/ (excluding the two manual
+# smoke-test scripts, which need the full model stack in requirements.txt
+# and network access; see .github/workflows/tests.yml).
+pytest>=8.0

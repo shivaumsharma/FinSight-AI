@@ -18,6 +18,12 @@ models/
 # regenerated on demand, not source.
 filings_cache/
 
+# ChromaDB persistent store (embeddings + HNSW index binaries) -- fully
+# regenerated on demand by RAGPipeline.ingest_company_disclosure() from
+# live SEC filings, not source. Was previously tracked in git (~8MB of
+# binary index files that changed on every local run of the app).
+vector_db/
+
 # Saved fine-tuned embedding model weights (419MB, exceeds GitHub's
 # 100MB per-file limit -- would need Git LFS to commit at all). Not
 # used in production: scripts/evaluate_embedding_finetune.py measured

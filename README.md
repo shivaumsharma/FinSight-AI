@@ -1,6 +1,5 @@
 ---
 title: FinSight AI
-emoji: 📈
 colorFrom: blue
 colorTo: green
 sdk: streamlit
@@ -66,7 +65,7 @@ Every tool reads from and writes to one shared `ResearchContext` object, so `rep
 
 | Layer | Tools |
 |---|---|
-| LLM (planning + report generation) | Qwen2.5-1.5B-Instruct (local, via 🤗 Transformers) |
+| LLM (planning + report generation) | Qwen2.5-1.5B-Instruct (local, via Hugging Face Transformers) |
 | Retrieval | ChromaDB, `BAAI/bge-base-en-v1.5` embeddings, `cross-encoder/ms-marco-MiniLM-L-6-v2` reranker |
 | Sentiment | FinBERT (`ProsusAI/finbert`) |
 | Financial data | yfinance |
@@ -94,6 +93,8 @@ Every generated report is scored, not just produced — `evaluation_tool` runs a
 - **Latency** — end-to-end wall-clock time
 
 `app/evaluation/benchmark_runner.py` runs this scoring against a fixed benchmark set (`app/benchmarks/*.json`) so changes to prompts/retrieval/models can be compared against a baseline instead of eyeballed.
+
+**[Full results, including the backtest findings that didn't come out as hoped →](EVALUATION.md)** — point-in-time recommendation backtest across 1,000+ tickers, the RAG reranker that was measured and rejected, embedding fine-tune methodology, and ML classifier metrics.
 
 ---
 

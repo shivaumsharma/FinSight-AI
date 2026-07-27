@@ -1,0 +1,33 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Deliberately NOT `pip install -r requirements.txt` -- that pulls
+      # in torch/transformers/chromadb/llama-cpp-python (multi-GB, and
+      # some of it needs a model download at runtime), none of which the
+      # deterministic unit tests below touch. Installing only pandas/
+      # numpy + pytest keeps this workflow fast and keeps CI from
+      # silently depending on network access to Hugging Face.
+      - name: Install test dependencies
+        run: pip install pandas numpy -r requirements-dev.txt
+
+      # test_finbert.py and test_rag.py are manual smoke tests (see
+      # their own docstrings) -- they need the full model stack and
+      # live network access (SEC EDGAR, Hugging Face), so they're
+      # excluded from CI and left for a developer to run locally.
+      - name: Run unit tests
+        run: pytest app/tests/ --ignore=app/tests/test_finbert.py --ignore=app/tests/test_rag.py -v
