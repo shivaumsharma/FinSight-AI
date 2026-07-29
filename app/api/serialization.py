@@ -52,6 +52,10 @@ def context_to_api_dict(context: ResearchContext) -> Dict[str, Any]:
     if sensitivity_table is not None and hasattr(sensitivity_table, "to_dict"):
         report_data["valuation_analysis"]["sensitivity_table"] = sensitivity_table.to_dict()
 
+    next_earnings_date = report_data.get("market_earnings_snapshot", {}).get("next_earnings_date")
+    if next_earnings_date is not None and hasattr(next_earnings_date, "isoformat"):
+        report_data["market_earnings_snapshot"]["next_earnings_date"] = next_earnings_date.isoformat()
+
     normalized_financials_json = None
     if context.normalized_financials is not None and not context.normalized_financials.empty:
         normalized_financials_json = context.normalized_financials.to_json(orient="split", date_format="iso")
