@@ -44,6 +44,7 @@ class ValuationTool(BaseTool):
             financial_df=context.normalized_financials,
             market_cap=context.market_cap,
             beta=context.beta,
+            ticker=context.ticker,
         )
 
         results = pipeline.run_valuation()

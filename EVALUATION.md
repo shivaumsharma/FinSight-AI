@@ -125,6 +125,54 @@ Switching the local LLM backend from a raw Hugging Face `transformers` pipeline 
 
 ---
 
+## 7. LangGraph orchestration vs. the hand-rolled controller
+
+**Method** (`scripts/benchmark_orchestration.py`): `app/agents/langgraph_agent.py` is a LangGraph port of `ResearchAgent`'s plan-execution loop, kept alongside it as a documented alternative rather than a replacement. The benchmark runs the same questions through both and checks two things: does the graph visit the exact same tools in the exact same order (`tool_trace` equality), and how does control-flow latency actually compare, isolated from the real tool work neither orchestrator controls.
+
+**First attempt, and why it was thrown out:** an initial run against real AAPL/MSFT queries (`--lite` mode — real tools, LLM narrative call stubbed) produced a 964s outlier for one `ResearchAgent` run against a 32s `LangGraphResearchAgent` run on the *same* ticker — not a real 30x orchestration difference, but a stalled SEC/yfinance call on that particular run (a transient "possibly delisted, no price data found" warning showed up in the same run). Real network I/O variance is large enough to make a small-sample latency comparison meaningless noise, not signal — reported here instead of the flashier-looking but wrong number.
+
+**`--pure` mode** (all 9 tools stubbed to no-ops on both sides, 20 reps/ticker, median reported) isolates what's actually being asked — StateGraph/Pregel dispatch overhead vs. a plain Python `for` loop, with zero network/model calls in either path:
+
+| Orchestrator | Median latency (control-flow only) |
+|---|---:|
+| `ResearchAgent` (hand-rolled loop) | ~0.00ms |
+| `LangGraphResearchAgent` | ~7–13ms |
+
+`tool_trace` was identical across every real and stubbed run — the two orchestrators agree on which tools to run, in which order, every time. LangGraph adds a small, real, consistently-measurable dispatch overhead (single-digit-to-low-double-digit milliseconds) versus a bare loop — completely negligible against the tens of seconds to minutes a real tool call (network fetch, LLM inference) actually takes. The honest conclusion: at this system's scale, the choice between the two is a maintainability/observability decision (state inspection, checkpointing, a visualizable graph), not a performance one.
+
+**Reproduce:** `python scripts/benchmark_orchestration.py` (default `--pure`; `--lite`/`--full` run real tools and are noisier by design, see the script's own docstring).
+
+---
+
+## 8. Redis caching layer
+
+**Method** (`app/core/cache.py` + `scripts/benchmark_redis_cache.py`): two different caching strategies, deliberately not collapsed into one. Content-addressed caching (the narrative LLM call in `narrative_builder.py`, and `ValuationPipeline.run_valuation()`'s statement-derived output) keys on a hash of every input that actually determines the output, so a cache hit can never serve a result computed from different inputs — TTL there is a storage bound, not the correctness mechanism. TTL-only caching (`MarketDataLoader`'s income/balance/cash-flow statement fetches) is scoped specifically to data that only changes quarterly; `current_price`/`market_cap` are never cached this way, since serving a stale price on a live research tool would be a correctness bug, not a staleness inconvenience.
+
+No real Redis server runs anywhere this project deploys by default (local dev, HF Spaces) — every cache call degrades to a silent no-op if unreachable, and the benchmark below uses `fakeredis` (a standard package implementing the real redis-py wire protocol in-process) so it's exercising the actual `cache_get`/`cache_set` code path, not a mock.
+
+| Operation | Cache miss | Cache hit | Speedup |
+|---|---:|---:|---:|
+| `ValuationPipeline.run_valuation()` (AAPL — WACC, FCFF forecast, 5x5 sensitivity grid, 2,000-sample Monte Carlo) | 5,278ms | 3.0ms | **1,738x** |
+| `MarketDataLoader` statement fetch (MSFT — 3 sequential yfinance calls) | 1,149ms | 2.0ms | **567x** |
+
+Both numbers are from independent tickers specifically to avoid a methodology bug caught during this benchmark's own development: an earlier version reused the same ticker across both sections, so the "miss" for the statement fetch was actually riding on a cache the valuation section had already warmed — a real, if small, reminder that a benchmark's own fairness needs the same scrutiny as the thing it's measuring. Neither of these is the dominant cost in a full report (the ~65s LLM narrative call is, and it's now cached too) — but both are genuine, correctly-isolated speedups on their own terms.
+
+**Reproduce:** `python scripts/benchmark_redis_cache.py`
+
+---
+
+## 9. Known limitations
+
+Documented here rather than left implicit, in the same spirit as the rest of this file — both entries below are read-only findings from diagnostic scripts already in `scripts/`, not new results being claimed as fixed.
+
+**DCF systematically undervalues high-growth compounders and overvalues mature businesses.** Across the 40 DCF-available tickers in the curated backtest universe, median intrinsic-value-to-price is **0.59 for mega-caps** vs. **1.77 for deep-value** names (`scripts/wacc_capm_audit.py`, point-in-time as of 2025-08-03) — companies aren't randomly mispriced by this model, they're mispriced by *category*. A 10-year explicit forecast anchored to a fixed 4% terminal growth rate structurally cannot represent an extended competitive advantage period the way the market prices one into a durable compounder's multiple. Sell (or Hold-leaning) signals on mega-cap names should be read with this in mind, not taken as an independent read on whether the specific company is actually overvalued.
+
+**No predictive skill is currently demonstrated.** Model accuracy loses to a naive always-Buy baseline in both backtest windows — 52.6% vs. 62.8% (12mo→today) and 32.9% vs. 72.4% (24mo→12mo) — and the Buy-minus-Sell return spread, a ranking signal independent of the accuracy threshold, flips sign between the two windows (+20.76 points in one, −31.30 in the other; see `scripts/phase2_backtest.py`'s `RETURN SPREAD` section). Whatever ranking ability the model shows in one window doesn't reproduce in the other. Two contributing factors worth naming directly rather than treating the recommendation engine as a fixed, external oracle: the CAPM inputs feeding every WACC calculation — risk-free rate (4%) and equity risk premium (6%) — are hardcoded in `WACCEngine.__init__` with no live source and no "as of" date; and `DEFAULT_TERMINAL_GROWTH_RATE` (`valuation_pipeline.py`) was itself raised from 3% to 4% after an earlier backtest run against this exact same accuracy metric found a systematic bias — a choice made to improve the metric being reported here, which is a real methodological caveat about how much independent weight this specific benchmark number should carry.
+
+**Reproduce:** `python scripts/wacc_capm_audit.py 12 0` for the intrinsic-value-to-price distribution; `python scripts/phase2_backtest.py 12 0` (or `24 12`) for accuracy and return spread.
+
+---
+
 ## Resume-ready framing
 
 Numbers that survive a follow-up question are worth more than a single flattering percentage. Suggested framing, in that spirit:
@@ -134,3 +182,5 @@ Numbers that survive a follow-up question are worth more than a single flatterin
 - Fine-tuned a retrieval embedding model with contrastive learning (`MultipleNegativesRankingLoss`) and designed a frozen-candidate-pool evaluation methodology to isolate the embedding model as the only variable under test.
 - Built an ML valuation classifier (Logistic Regression vs. XGBoost) with stratified k-fold CV, a held-out test split, and per-class metrics — while being explicit that a 39-row training set doesn't yet clear the bar for a production signal, and gating it out of the system's actual recommendation logic until it does.
 - Rewrote a report-faithfulness evaluator after realizing its v1 metric was structurally unsatisfiable (penalizing exactly the paraphrasing behavior the generation prompt asked for) — an example of debugging an eval, not just a model.
+- Ported the agent's planner-dispatches-tools control flow onto LangGraph as a StateGraph, kept alongside the original hand-rolled controller, and benchmarked the two — including catching and discarding a misleading first result (network I/O variance masquerading as a 30x orchestration difference) before reporting the real, isolated ~7-13ms dispatch-overhead number.
+- Added a Redis caching layer with two deliberately different strategies (content-addressed for correctness-sensitive valuation/narrative output, TTL-only for genuinely time-bound statement data) and measured real 500-1,700x speedups on cache hits — after catching a cross-contamination bug in the benchmark's own methodology first.

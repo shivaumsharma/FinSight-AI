@@ -14,9 +14,11 @@ Design choices
   This is ~60 lines of plain Python: build a prompt, call a model,
   parse JSON, validate against the tool registry, fall back to
   rules on any failure. That's the entire "framework."
-- Reuses the same local Qwen2.5-1.5B-Instruct model already used for
-  report writing (via `get_shared_generator`), so the redesign adds
-  zero new external dependencies or API keys.
+- Reuses the same LLM provider already used for report writing (via
+  `get_llm_provider` -- app/core/llm_provider.py, hosted by default,
+  `LLM_PROVIDER=local` for the on-box fallback), so the redesign adds
+  zero *new* external dependencies or API keys beyond whichever
+  provider is already configured.
 - The planner is asked ONLY to choose tools from a fixed, known
   vocabulary (the registry's tool names). It is never asked to
   invent tool names, arguments, or company tickers -- ticker/company
@@ -69,8 +71,8 @@ class LLMPlanner:
     @property
     def generator(self):
         if self._generator is None:
-            from app.core.llm_provider import get_shared_generator
-            self._generator = get_shared_generator()
+            from app.core.llm_provider import get_llm_provider
+            self._generator = get_llm_provider()
         return self._generator
 
     def create_plan(self, question: str) -> List[str]:
@@ -113,6 +115,25 @@ class LLMPlanner:
     # -----------------------------------------------------------
 
     def _build_prompt(self, question: str) -> str:
+        """
+        Every literal JSON example below (the "Example:" section) is
+        double-brace-escaped ({{...}}) -- this is an f-string, and a
+        SINGLE-braced {"tools":[...]} is not just visually confusing,
+        it's a real crash: Python's f-string grammar reads the first
+        colon inside {...} as introducing a format spec, not as a dict
+        literal, so {"tools":["rag_tool"]} parses as expression "tools"
+        with format-spec ["rag_tool"] -- an invalid spec for a string,
+        raising ValueError every single time this method was called.
+        Confirmed the hard way: create_plan()'s broad `except Exception:
+        llm_plan = []` was silently swallowing that on every call, which
+        meant the LLM half of "LLM proposal (union) rule-based fallback"
+        had never actually executed -- create_plan() had always been
+        rule-based-only in practice, indistinguishable from the real
+        thing until this was traced by hand. Keep every brace in this
+        template doubled; the "Respond with ONLY a JSON object" line
+        below was already doing this correctly, which is what made the
+        bug only affect the few-shot examples above it.
+        """
 
         tool_list = "\n".join(
             f'- "{name}": {desc}' for name, desc in PLANNABLE_TOOLS.items()
@@ -159,17 +180,17 @@ Example:
 Question:
 "What did management say about AI?"
 
-{"tools":["rag_tool"]}
+{{"tools":["rag_tool"]}}
 
 Question:
 "What is Apple's intrinsic value?"
 
-{"tools":["market_data_tool","valuation_tool"]}
+{{"tools":["market_data_tool","valuation_tool"]}}
 
 Question:
 "Should I invest in Apple?"
 
-{"tools":["market_data_tool","valuation_tool","rag_tool","sentiment_tool"]}
+{{"tools":["market_data_tool","valuation_tool","rag_tool","sentiment_tool"]}}
 
 Respond with ONLY a JSON object of the form:
 {{"tools": ["tool_name_1", "tool_name_2"]}}

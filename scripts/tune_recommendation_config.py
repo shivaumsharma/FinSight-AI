@@ -38,15 +38,23 @@ RESULTS_PATH = str(Path(__file__).resolve().parent / "backtest_results_asof12mo_
 SCORE_BUY_THRESHOLD = 5.0
 SCORE_SELL_THRESHOLD = -5.0
 
-# Grid ranges. Hold-band half-widths from tight (5, closer to the
-# scoring band itself) to the current production value (15) and a bit
-# wider (25), so the current config sits inside the tested range, not
-# at an edge. Weights swept in 10% steps including the two extremes
-# (100/0 = DCF alone, 0/100 = relative valuation alone).
+# Grid ranges. Hold-band half-widths from tight (5) through the
+# current production value (7.5) up to 25, so the current config sits
+# inside the tested range, not at an edge. Weights swept in 10% steps
+# including the two extremes (100/0 = DCF alone, 0/100 = relative
+# valuation alone).
 BAND_WIDTHS = [5.0, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 25.0]
 DCF_WEIGHTS = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 
 SCORE_CAP = 100.0
+
+# Values actually shipped in report_data_builder.py right now, kept
+# here (not just in validate_tuning_stability.py) so this script's own
+# "current production config" printout can't drift stale again the way
+# it did after the (15.0, 0.6) -> (7.5, 0.8) retune -- it printed the
+# pre-retune numbers for a full session before that was caught.
+PROD_BAND_WIDTH = 7.5
+PROD_DCF_WEIGHT = 0.8
 
 
 def score_rating(rating, realized_return_pct):
@@ -137,8 +145,9 @@ def main():
         print(f"{r['band_width']:>10.1f}{r['dcf_weight']:>8.1f}{r['relative_weight']:>8.1f}"
               f"{r['correct']:>9}{r['scored']:>8}{r['accuracy']:>9.1f}%")
 
-    print(f"\nCurrent production config: band_width=15.0, dcf_weight=0.6, relative_weight=0.4")
-    current = next((r for r in results if r["band_width"] == 15.0 and r["dcf_weight"] == 0.6), None)
+    print(f"\nCurrent production config: band_width={PROD_BAND_WIDTH}, dcf_weight={PROD_DCF_WEIGHT}, "
+          f"relative_weight={1.0 - PROD_DCF_WEIGHT:.1f}")
+    current = next((r for r in results if r["band_width"] == PROD_BAND_WIDTH and r["dcf_weight"] == PROD_DCF_WEIGHT), None)
     if current:
         print(f"  -> scores {current['accuracy']:.1f}% ({current['correct']}/{current['scored']}) on this grid")
 

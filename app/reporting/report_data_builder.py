@@ -16,7 +16,9 @@ whatever this rule decided.
 """
 
 import math
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
+
+import numpy as np
 
 from app.core.research_context import ResearchContext
 
@@ -43,6 +45,19 @@ def _is_nan(value) -> bool:
 # while keeping the relative-valuation cross-check meaningfully alive,
 # rather than fully retiring a feature backed by only two backtest
 # windows' worth of evidence.
+#
+# Re-validated, not just carried over unexamined, after _dcf_score/
+# _relative_score switched from raw-percentage clipping to percentile-
+# rank normalization (see the "Percentile-based normalization" comment
+# below): re-ran tune_recommendation_config.py + validate_tuning_stability.py
+# against both windows' backtest data recomputed under the new scoring
+# (scripts/backtest_results_curated_asof{12,24}mo_*.json). Both windows'
+# grid-search "winners" were flagged as narrow spikes (few nearby configs
+# scored similarly) AND scored WORSE than these production values on
+# held-out data in the stability check (window 1: winner 58.9% vs. prod
+# 61.1%; window 2: winner 41.6% vs. prod 42.5%) -- i.e. the values below
+# already generalize better than anything the grid search "found," so
+# they were kept unchanged rather than chased into an overfit config.
 BUY_THRESHOLD = 7.5
 SELL_THRESHOLD = -7.5
 
@@ -55,19 +70,97 @@ SELL_THRESHOLD = -7.5
 DCF_WEIGHT = 0.8
 RELATIVE_WEIGHT = 0.2
 
-# Component scores are clipped to this range before blending. Without
-# a cap, an outlier DCF upside (NVDA has hit +400%+ in testing) would
-# swamp the relative-valuation component regardless of DCF_WEIGHT --
-# capping keeps both components on a comparable, bounded scale so the
-# stated weights actually reflect how much each one influences the
-# blend.
+# Component scores are on this range after normalization (see
+# _percentile_rank_score below) -- both are now percentile ranks
+# against real historical experience, rescaled from [0, 100] to
+# [-100, +100] so 0 means "a perfectly median reading" and the sign
+# still means bullish (+) / bearish (-), matching the scale the raw,
+# pre-normalization scores used to occupy.
 SCORE_CAP = 100.0
+
+# --- Percentile-based normalization ------------------------------------
+#
+# DCF upside_percent and relative-valuation's vs_history_pct are both
+# percentages, but NOT percentages of the same thing, and their real-
+# world spreads are wildly different -- measured directly from
+# scripts/backtest_results_*.json (scripts/phase2_backtest.py's saved
+# output across the 79-ticker curated universe and the 1,002-ticker
+# broad universe, both backtest windows: 1,341 DCF-available and 1,331
+# relative-valuation-available observations). Blending both as raw
+# percentages at fixed 80/20 weights (the previous approach, with each
+# side independently clipped to +/-100 -- see the old SCORE_CAP
+# comment, now below) was blending two different units as if they were
+# the same one: a +13% DCF gap and a +18% relative-valuation discount
+# do not represent comparably "extreme" readings, but raw-percentage
+# blending (each side independently clipped to +/-100) scored them as
+# if they did, and on a real MSFT run this was the actual reason
+# relative valuation (+18.3, not really that extreme a reading) pulled
+# a Sell-zone DCF call (-13.4) back into Hold by a single point.
+#
+# _dcf_score/_relative_score below instead rank the raw value against
+# these reference distributions and rescale that 0-100 percentile to
+# the same -100..+100 scale BUY_THRESHOLD/SELL_THRESHOLD/DCF_WEIGHT/
+# RELATIVE_WEIGHT already used -- so "how extreme is this reading"
+# is now measured in real-world rarity, not raw percent, while every
+# other constant in this module keeps its existing meaning.
+#
+# Breakpoints are the value at percentiles 0, 5, 10, ..., 100 of the
+# reference distribution; _percentile_rank_score() linearly
+# interpolates between them (and clips outside the observed range,
+# same as the old hard cap did -- see its docstring).
+#
+# DCF's table is built from the RAW, uncapped upside_percent (winsorized
+# to [-300%, 1000%] -- a handful of near-zero-price tickers produced
+# pathological outliers, one DCF implying +201,252% upside, that would
+# otherwise single-handedly stretch the whole top of the scale and
+# compress every real observation into a sliver near p99). The
+# relative-valuation table is built from the already sign-flipped,
+# already +/-100-capped value _relative_score() used to return
+# directly -- acceptable because only 8.3% of observations actually hit
+# that cap (vs. 30.4% for DCF), so this loses far less resolution than
+# building DCF's table the same way would have.
+#
+# Reproduce: rerun scripts/phase2_backtest.py against both universes
+# and windows (see EVALUATION.md section 1), collect upside_pct and
+# relative_score from the saved backtest_results_*.json files, and
+# recompute np.percentile(values, range(0, 101, 5)) on each (winsorizing
+# upside_pct to [-300, 1000] first) -- each table below is that result,
+# the value at percentiles 0, 5, 10, ..., 100 in order.
+_DCF_UPSIDE_PCT_PERCENTILES = [
+    -244.7, -111.4, -94.1, -83.4, -74.9, -66.6, -57.3, -46.8, -37.3, -25.5,
+    -13.5, -0.1, 15.8, 31.9, 54.1, 80.7, 116.4, 167.5, 241.9, 428.6, 1000.0,
+]
+
+_RELATIVE_SCORE_PERCENTILES = [
+    -100.0, -100.0, -88.4, -68.7, -56.3, -45.9, -36.8, -29.4, -24.6, -19.9,
+    -15.8, -10.9, -6.8, -2.8, 2.3, 7.4, 13.3, 21.0, 30.1, 44.5, 99.2,
+]
+
+
+def _percentile_rank_score(raw_value: float, reference_breakpoints: List[float]) -> float:
+    """
+    See the "Percentile-based normalization" comment above for why
+    this exists. `reference_breakpoints` is assumed evenly spaced from
+    p0 to p100 (however many points it has -- the percentile axis is
+    derived from its length, not hardcoded to the specific 21-point
+    (0, 5, 10, ..., 100) tables above, so this stays correct if either
+    table is ever rebuilt at a different resolution, and so it's
+    independently testable against a small hand-built table). np.interp
+    clips values outside the reference range to the nearest end
+    (percentile 0 or 100) rather than extrapolating -- the same "cap
+    the extremes" behavior the old flat +/-100 clip had, just against a
+    real, measured distribution instead of an arbitrary round number.
+    """
+    percentile_axis = np.linspace(0.0, 100.0, len(reference_breakpoints))
+    percentile = float(np.interp(raw_value, reference_breakpoints, percentile_axis))
+    return (percentile - 50.0) * 2.0
 
 
 def _fallback_recommendation(
     relative_valuation: Dict[str, Any],
     sentiment_summary: Dict[str, Any],
     news_sentiment_summary: Dict[str, Any],
+    dcf_unavailable_reason: str = None,
 ):
     """
     Used only when DCF is unavailable (see derive_recommendation
@@ -116,7 +209,19 @@ def _fallback_recommendation(
     return {
         "rating": rating,
         "basis": (
-            f"DCF was unavailable ({(relative_valuation or {}).get('method', 'see valuation analysis')}), "
+            # BUG FIXED HERE: this used to read
+            # relative_valuation.get("method") -- relative_valuation.py's
+            # OWN methodology description ("Own trading history (no peer/
+            # sector multiple data source is wired into this pipeline)"),
+            # which has nothing to do with why DCF was unavailable. Found
+            # by directly running this on KHC/HAS/CVNA: the basis text
+            # read "DCF was unavailable (Own trading history (no peer/
+            # sector multiple data source is wired into this pipeline)),"
+            # which explains nothing -- and affected every DCF-unavailable
+            # ticker (banks, negative-FCFF names, ...), not just the
+            # leverage-instability guard below. dcf_unavailable_reason is
+            # ValuationPipeline's actual, specific, per-company reason.
+            f"DCF was unavailable ({dcf_unavailable_reason or 'see valuation analysis'}), "
             f"so this recommendation is derived instead from relative valuation "
             f"({signal}, current {relative_valuation['metric']} {relative_valuation['current_ev_ebitda']:.1f}x vs. "
             f"{relative_valuation['historical_avg_ev_ebitda']:.1f}x own "
@@ -154,29 +259,74 @@ def _rating_from_score(score: float) -> str:
 
 
 def _dcf_score(upside_percent: float) -> float:
-    return max(-SCORE_CAP, min(SCORE_CAP, upside_percent))
+    """Percentile rank of `upside_percent` against real historical DCF
+    calls -- see the "Percentile-based normalization" comment above."""
+    return _percentile_rank_score(upside_percent, _DCF_UPSIDE_PCT_PERCENTILES)
 
 
-def _relative_score(relative_valuation: Dict[str, Any]):
+def _relative_score(relative_valuation: Dict[str, Any]) -> Optional[float]:
     """
     Relative valuation's vs_history_pct is expensive-positive /
     cheap-negative (see relative_valuation.py) -- the opposite sign
     convention from "bullish is positive," which the DCF score and
     BUY/SELL_THRESHOLD both use. Negating it here puts both component
-    scores on the same bullish-positive scale before blending.
+    scores on the same bullish-positive scale before the percentile
+    rank below (see the "Percentile-based normalization" comment
+    above for why this is a percentile rank rather than the raw
+    negated percentage).
     """
     if not relative_valuation:
         return None
     vs_history_pct = relative_valuation.get("vs_history_pct")
     if vs_history_pct is None or _is_nan(vs_history_pct):
         return None
-    return max(-SCORE_CAP, min(SCORE_CAP, -vs_history_pct))
+    return _percentile_rank_score(-vs_history_pct, _RELATIVE_SCORE_PERCENTILES)
 
 
 def _composite_score(dcf_score: float, relative_score):
     if relative_score is None:
         return dcf_score
     return DCF_WEIGHT * dcf_score + RELATIVE_WEIGHT * relative_score
+
+
+def _monte_carlo_ci_straddles_price(valuation_results: Dict[str, Any]) -> bool:
+    """
+    True when the Monte Carlo simulation's 90% confidence interval for
+    intrinsic value (app/valuation/monte_carlo_dcf.py, ci_lower/
+    ci_upper -- the 5th/95th percentile across growth/WACC/terminal-
+    growth uncertainty) straddles the current price -- i.e. the
+    simulation itself has no real directional conviction, even if the
+    DCF point estimate alone looks like a confident Buy/Sell.
+
+    This started as a hard cap (a straddling CI forced the rating to
+    Hold), matching the reasonable-sounding argument that a wide
+    distribution shouldn't be presented as a confident directional
+    call. Backtested (scripts/phase2_backtest.py, both curated-universe
+    windows) before shipping, the same way every other threshold in
+    this file was -- and it measurably hurt accuracy: on the tickers it
+    actually flipped to Hold, the ORIGINAL composite call would have
+    been correct 8/15 (window 1) and 8/11 (window 2), versus 3/15 and
+    2/11 for the forced Hold. Both backtest windows are strongly
+    bullish periods (62-72% of tickers moved >+5%), where "Hold" loses
+    almost by construction -- this is the exact same failure mode
+    derive_recommendation()'s docstring already documents for the old
+    disagreement-forced-Hold guardrail, which was removed for the same
+    measured reason. So this is now detection-only, surfaced as a
+    confidence flag (see _confidence_flag) rather than overriding the
+    rating -- epistemic honesty about the uncertainty without discarding
+    a call that backtests better left alone.
+    """
+    monte_carlo = valuation_results.get("monte_carlo")
+    current_price = valuation_results.get("current_price")
+    if not monte_carlo or current_price is None:
+        return False
+
+    ci_lower = monte_carlo.get("ci_lower")
+    ci_upper = monte_carlo.get("ci_upper")
+    if ci_lower is None or ci_upper is None:
+        return False
+
+    return ci_lower <= current_price <= ci_upper
 
 
 def derive_recommendation(
@@ -232,6 +382,7 @@ def derive_recommendation(
             valuation_results.get("relative_valuation"),
             sentiment_summary,
             news_sentiment_summary,
+            valuation_results.get("dcf_unavailable_reason"),
         )
         if fallback:
             return fallback
@@ -254,6 +405,14 @@ def derive_recommendation(
     dcf_only_rating = _rating_from_score(dcf_score)
     disagreement = compute_signal_agreement(dcf_only_rating, relative_valuation) == "disagree"
 
+    # Detection-only -- see _monte_carlo_ci_straddles_price's docstring
+    # for why this no longer overrides `rating` (it used to, until
+    # backtesting showed the override itself hurt accuracy the same
+    # way the old disagreement-forced-Hold guardrail did). Surfaced as
+    # a confidence flag instead (see _confidence_flag), same pattern as
+    # `disagreement` above.
+    mc_wide_ci = _monte_carlo_ci_straddles_price(valuation_results)
+
     if relative_score is None:
         weight_desc = "relative valuation unavailable, 100% DCF weight"
     else:
@@ -261,7 +420,13 @@ def derive_recommendation(
 
     basis = (
         f"Composite score {composite_score:+.1f} (DCF {dcf_score:+.1f} x {DCF_WEIGHT:.0%} "
-        f"+ {weight_desc}) -- Buy at >={BUY_THRESHOLD:.0f}, Sell at <={SELL_THRESHOLD:.0f}, "
+        # BUY_THRESHOLD/SELL_THRESHOLD are 7.5, not a whole number --
+        # ":.0f" silently rounds 7.5/-7.5 to Python's round-half-to-even
+        # "8"/"-8" (found by reading a real generated report end to
+        # end: the LLM's Investment Thesis then repeated the wrong
+        # "-8" back as if it were the real Sell threshold, sourced
+        # straight from this string, not a model hallucination).
+        f"+ {weight_desc}) -- Buy at >={BUY_THRESHOLD:g}, Sell at <={SELL_THRESHOLD:g}, "
         f"Hold in between."
     )
     if disagreement:
@@ -269,6 +434,17 @@ def derive_recommendation(
             f" Note: DCF's own directional call ({dcf_only_rating}) disagrees with "
             f"relative valuation ({relative_valuation['signal']}) -- the composite score "
             f"above already reflects both signals blended, not an override."
+        )
+    if mc_wide_ci and rating in ("Buy", "Sell"):
+        monte_carlo = valuation_results["monte_carlo"]
+        basis += (
+            f" Note: the Monte Carlo simulation's 90% confidence interval for "
+            f"intrinsic value (${monte_carlo['ci_lower']:,.2f} - ${monte_carlo['ci_upper']:,.2f}) "
+            f"straddles the current price (${valuation_results['current_price']:,.2f}) -- "
+            f"the simulation itself doesn't confidently say over- or under-valued once "
+            f"realistic growth/WACC/terminal-growth uncertainty is accounted for. Worth "
+            f"weighing alongside the DCF point estimate above, not a reason to discount "
+            f"this rating outright (see Monte Carlo Simulation for the full distribution)."
         )
 
     return {
@@ -288,10 +464,18 @@ def derive_recommendation(
         # composite blend -- exposed so callers (e.g. the backtest)
         # can compare the blended composite against a DCF-only call.
         "dcf_only_rating": dcf_only_rating,
+        # Whether the Monte Carlo 90% CI straddles the current price --
+        # see _monte_carlo_ci_straddles_price's docstring for why this
+        # is informational only (surfaced via _confidence_flag), not an
+        # override of `rating`.
+        "mc_wide_ci": mc_wide_ci,
     }
 
 
-def _confidence_flag(valuation_results: Dict[str, Any], current_price, rating: str, disagreement: bool = False):
+def _confidence_flag(
+    valuation_results: Dict[str, Any], current_price, rating: str,
+    disagreement: bool = False, mc_wide_ci: bool = False,
+):
     """
     If the recommendation holds across the ENTIRE tested sensitivity
     grid (e.g. even the most bullish WACC/growth combination still
@@ -308,10 +492,13 @@ def _confidence_flag(valuation_results: Dict[str, Any], current_price, rating: s
     Consensus Score to help judge which.
 
     disagreement (DCF's own directional call vs. relative valuation)
-    is flagged here rather than changing the rating -- derive_recommendation()
-    used to force the rating to Hold on disagreement, but backtesting
-    showed that scored worse than trusting the blended composite score,
-    so the disagreement is now informational only.
+    and mc_wide_ci (Monte Carlo 90% CI straddles price) are both
+    flagged here rather than changing the rating -- derive_recommendation()
+    used to force Hold on disagreement, and this file briefly forced
+    Hold on mc_wide_ci too, but backtesting showed both overrides
+    scored worse than trusting the blended composite score (see
+    _monte_carlo_ci_straddles_price's docstring for the mc_wide_ci
+    numbers). Both are now informational only.
     """
     flags = []
 
@@ -321,6 +508,16 @@ def _confidence_flag(valuation_results: Dict[str, Any], current_price, rating: s
             "signal on this one -- the rating above already reflects both blended "
             "together (see basis), not just DCF alone. Worth weighing alongside "
             "the Institutional Consensus Score below."
+        )
+
+    if mc_wide_ci and rating in ("Buy", "Sell"):
+        flags.append(
+            "The Monte Carlo simulation's 90% confidence interval for intrinsic "
+            "value straddles the current price -- once realistic growth/WACC/"
+            "terminal-growth uncertainty is accounted for, the simulation itself "
+            "doesn't confidently say over- or under-valued (see Monte Carlo "
+            "Simulation below for the full distribution). Worth weighing alongside "
+            "the DCF point estimate the rating above is based on."
         )
 
     if rating in ("Buy", "Sell") and valuation_results.get("dcf_available") is False:
@@ -488,6 +685,7 @@ def build_report_data(context: ResearchContext) -> Dict[str, Any]:
             "FCF Growth (%)": financial.get("FCF Growth (%)", "Unavailable"),
             "Revenue Trend": financial.get("Revenue Trend", "Unknown"),
             "Net Income Trend": financial.get("Net Income Trend", "Unknown"),
+            "FCF Trend": financial.get("FCF Trend", "Unknown"),
         },
 
         "valuation_analysis": {
@@ -519,6 +717,12 @@ def build_report_data(context: ResearchContext) -> Dict[str, Any]:
             # management tone and independent media tone diverge.
             "news_sentiment_label": (context.news_sentiment_summary or {}).get("Overall Sentiment", "Unavailable"),
             "news_sentiment_confidence": (context.news_sentiment_summary or {}).get("Confidence", "Unavailable"),
+            # None if yfinance doesn't report one -- see
+            # MarketDataLoader.get_next_earnings_date(). Consumed by
+            # narrative_builder.py to flag an imminent earnings date
+            # explicitly rather than leaving it to be noticed (or not)
+            # among the numbered news items.
+            "next_earnings_date": info.get("next_earnings_date"),
         },
 
         "recommendation": {
@@ -528,6 +732,7 @@ def build_report_data(context: ResearchContext) -> Dict[str, Any]:
                 info.get("current_price"),
                 recommendation["rating"],
                 recommendation.get("signal_disagreement", False),
+                recommendation.get("mc_wide_ci", False),
             ),
         },
 

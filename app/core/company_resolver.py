@@ -204,7 +204,7 @@ def _llm_propose_company_name(question: str) -> Optional[str]:
     overlap alone (both score similarly), since real company names
     are often themselves common words.
 
-    This asks the local LLM instead -- but only to name a company, if
+    This asks the configured LLM instead -- but only to name a company, if
     it thinks the question is about one. It never gets to hand back a
     ticker directly; whatever it proposes still has to pass the exact
     same deterministic fuzzy-match validation against SEC's real
@@ -213,8 +213,6 @@ def _llm_propose_company_name(question: str) -> Optional[str]:
     correctly resolves to no company -- it can't inject a wrong
     ticker into the result on its own.
     """
-    from app.core.llm_provider import get_shared_generator
-
     # Few-shot, matching the pattern already used successfully for the
     # tool planner (see app/planner/llm_planner.py) -- a bare zero-shot
     # version of this prompt was unstable: the model would answer
@@ -238,7 +236,15 @@ Question: "{question}"
 Answer:""".format(question=question)
 
     try:
-        raw = get_shared_generator().generate(prompt, max_new_tokens=8)
+        # Imported inside the try, not at module/function top -- an
+        # environment without the model stack installed at all (e.g. a
+        # lightweight service that only needs deterministic ticker
+        # resolution, not full report generation) should degrade the
+        # same way a real model failure does here: "worst case it
+        # proposes nothing" (see this function's own docstring), not an
+        # unhandled ImportError.
+        from app.core.llm_provider import get_llm_provider
+        raw = get_llm_provider().generate(prompt, max_new_tokens=8)
     except Exception:
         return None
 

@@ -21,3 +21,26 @@ sentencepiece
 accelerate
 huggingface_hub
 llama-cpp-python
+
+# LangGraph port of the agent orchestrator (app/agents/langgraph_agent.py)
+# -- kept alongside the hand-rolled controller (research_agent.py) as a
+# documented, benchmarked alternative, not a replacement. Pinned to the
+# version verified compatible with this project's chromadb/streamlit
+# pydantic requirements (see app/tests/test_langgraph_agent.py).
+langgraph==1.2.9
+
+# Redis client for app/core/cache.py. The app runs fine with no Redis
+# server reachable (see cache.py's module docstring -- every call
+# degrades to a silent no-op); this is just the client library needed
+# to make the *attempt*. REDIS_URL env var points it at a real
+# instance (e.g. Upstash for HF Spaces, which can't run a local daemon).
+redis
+
+# FastAPI service boundary (app/api/) -- step 1 of a staged, mobile-
+# aware rollout (see the plan referenced in EVALUATION.md). Both were
+# already present as chromadb's own transitive dependencies but never
+# declared as real dependencies of this app until now. httpx is needed
+# by fastapi's TestClient (app/tests/test_api.py), not by the app itself.
+fastapi
+uvicorn
+httpx

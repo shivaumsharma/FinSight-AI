@@ -86,8 +86,14 @@ class ReportGenerator:
             )
         return self._generator
 
-    def generate(self, prompt: str, max_new_tokens: int = 700) -> str:
+    def _call(self, prompt: str, max_new_tokens: int) -> dict:
         """
+        Shared by generate() and generate_with_usage() -- one place for
+        the actual llama.cpp call parameters, so generate_with_usage()
+        (added for app/core/llm_provider.py's LocalLlamaProvider, to
+        report token usage the same way HostedProvider does) can't
+        silently drift from generate()'s own values.
+
         max_new_tokens defaults to 700, not 250.
 
         250 was cutting the report off mid-section: the system prompt
@@ -105,11 +111,25 @@ class ReportGenerator:
         old backend's do_sample=False. repeat_penalty carries over the
         same 1.15 value from the old backend's repetition_penalty.
         """
-        response = self.generator(
+        return self.generator(
             prompt,
             max_tokens=max_new_tokens,
             temperature=0.0,
             repeat_penalty=1.15,
             echo=False,
         )
+
+    def generate(self, prompt: str, max_new_tokens: int = 700) -> str:
+        response = self._call(prompt, max_new_tokens)
         return response["choices"][0]["text"]
+
+    def generate_with_usage(self, prompt: str, max_new_tokens: int = 700):
+        """
+        Same call as generate(), also returning llama.cpp's own usage
+        dict (prompt_tokens/completion_tokens/total_tokens -- it mirrors
+        the OpenAI completions response shape) so LocalLlamaProvider can
+        report token counts the same way HostedProvider does, instead of
+        only the provider that costs real money having a usage story.
+        """
+        response = self._call(prompt, max_new_tokens)
+        return response["choices"][0]["text"], response.get("usage")

@@ -5,6 +5,20 @@ from app.valuation.fcff_engine import FCFFEngine
 from app.valuation.wacc_engine import WACCEngine
 from app.valuation.sensitivity_analysis import SensitivityAnalysis
 from app.valuation.monte_carlo_dcf import MonteCarloDCFEngine
+from app.core.cache import cache_get, cache_set, make_key
+
+# Content-addressed, not TTL-based for correctness (see app/core/cache.py's
+# module docstring): run_valuation()'s output (WACC, FCFF forecast,
+# sensitivity table, Monte Carlo distribution) is entirely derived from
+# financial_df/market_cap/beta and never touches a live price -- current
+# price/upside_percent are computed separately, downstream, in
+# valuation_tool.py, always fresh. market_cap is rounded before hashing
+# (see _round_market_cap) so a hit still requires market cap not having
+# moved meaningfully, without demanding byte-for-byte equality on a
+# number that technically ticks with every trade. TTL below is a
+# storage bound only.
+VALUATION_CACHE_TTL_SECONDS = 3600
+_MARKET_CAP_ROUNDING = 1e8  # nearest $100M
 
 # 3% (roughly long-run real GDP growth alone) was the original value.
 # Backtesting (scripts/phase2_backtest.py, ~1000-ticker universe)
@@ -23,6 +37,32 @@ from app.valuation.monte_carlo_dcf import MonteCarloDCFEngine
 # before/after for whether this alone meaningfully closes the gap.
 DEFAULT_TERMINAL_GROWTH_RATE = 0.04
 
+# equity_value = enterprise_value - net_debt (DCFEngine.calculate_equity_value).
+# For a heavily-levered company, net_debt can sit close to (or above)
+# enterprise_value, making equity_value a small, unstable DIFFERENCE
+# between two much larger, individually uncertain numbers -- the same
+# kind of numerical instability MIN_WACC_TERMINAL_SPREAD already guards
+# against for the discount-rate/terminal-growth spread (DCFEngine's own
+# comment), just one step further down this same calculation, and just
+# as capable of turning "we don't actually have a reliable number here"
+# into a confidently-reported near-zero (or negative) intrinsic value
+# that would otherwise drive a Sell call nobody should trust.
+#
+# Confirmed by hand across the full ~80-ticker backtest universe
+# (scripts/wacc_capm_audit.py, point-in-time as of 2025-08-03):
+# equity_value/enterprise_value shows a stark, unambiguous gap -- CVNA
+# (-56.1%, net debt literally exceeds EV), KHC (0.9%), and HAS (2.4%)
+# are the only three tickers below this, then every other one of the
+# 37 remaining DCF-available tickers sits at 44.1% or higher. Neither
+# KHC nor HAS has negative FCFF or an obviously broken share count
+# (both were traced by hand: KHC's $19.9B debt against an $18.7B
+# modeled enterprise value, HAS's $3.4B debt against a $2.8B modeled
+# enterprise value) -- the DCF's own leverage-extraction step is what
+# produces the near-zero result, not any one input being wrong. 15% is
+# a round threshold with wide margin on both sides of that gap (max
+# real failure 2.4%, min real pass 44.1%), not a tight fit to it.
+MIN_EQUITY_TO_ENTERPRISE_VALUE_RATIO = 0.15
+
 # Terminal growth assumptions to sweep in the sensitivity table. Kept
 # fixed across companies (a reasonable long-run real-growth range),
 # unlike the WACC axis which is centered on the company's own computed
@@ -32,12 +72,39 @@ SENSITIVITY_WACC_OFFSETS = [-0.02, -0.01, 0.0, 0.01, 0.02]
 
 
 class ValuationPipeline:
-  def __init__(self,financial_df,market_cap,beta):
+  def __init__(self,financial_df,market_cap,beta,ticker=None):
     self.financial_df=(financial_df)
     self.market_cap=(market_cap)
     self.beta=(beta)
+    # Optional -- only used to make the Redis cache key human-readable
+    # (see _cache_key/make_key); no valuation math depends on it. None
+    # (the default) still caches correctly, just with a less legible key.
+    self.ticker=(ticker)
+
+  def _cache_key(self):
+    rounded_market_cap = (
+        round(self.market_cap / _MARKET_CAP_ROUNDING) * _MARKET_CAP_ROUNDING
+        if self.market_cap else self.market_cap
+    )
+    financials_fingerprint = (
+        self.financial_df.to_json() if self.financial_df is not None else "none"
+    )
+    return make_key(
+        "valuation", self.ticker or "unknown", financials_fingerprint,
+        rounded_market_cap, round(self.beta or 0, 2),
+    )
 
   def run_valuation(self):
+    cache_key = self._cache_key()
+    cached = cache_get(cache_key)
+    if cached is not None:
+      return cached
+
+    result = self._compute_valuation()
+    cache_set(cache_key, result, ttl_seconds=VALUATION_CACHE_TTL_SECONDS)
+    return result
+
+  def _compute_valuation(self):
     fcff_engine=(FCFFEngine(self.financial_df))
 
     # If the normalized base FCFF is negative, FCFF-DCF doesn't apply:
@@ -129,6 +196,29 @@ class ValuationPipeline:
     cash = self.financial_df["cash"].iloc[-1]
 
     equity_value=(dcf_engine.calculate_equity_value(total_debt=total_debt,cash=cash))
+    net_debt = total_debt - cash
+
+    # See MIN_EQUITY_TO_ENTERPRISE_VALUE_RATIO's own comment above for
+    # the calibration evidence. enterprise_value<=0 is checked and
+    # rejected separately, not folded into one ratio comparison --
+    # equity_value/enterprise_value with a NEGATIVE denominator can
+    # come out positive (two negatives), which would silently evade
+    # this guard exactly when the underlying number is least
+    # trustworthy of all.
+    if enterprise_value <= 0 or equity_value / enterprise_value < MIN_EQUITY_TO_ENTERPRISE_VALUE_RATIO:
+        return self._unavailable_result(
+            f"DCF is not applicable for this capital structure -- net debt (${net_debt:,.0f}) "
+            f"leaves an equity value (${equity_value:,.0f}) that's under "
+            f"{MIN_EQUITY_TO_ENTERPRISE_VALUE_RATIO:.0%} of the ${enterprise_value:,.0f} "
+            f"enterprise value this model computed: a small difference between two much "
+            f"larger, individually uncertain numbers, not a reliable per-share value. This is "
+            f"a coverage limitation of the enterprise-value DCF used here, not a data error -- "
+            f"it affects any highly-levered capital structure (utilities, telecoms, REITs, "
+            f"post-LBO companies), which the market typically prices by other means for "
+            f"exactly this reason. The correct approach for these names is an equity DCF "
+            f"(forecast FCFE directly, discount at cost of equity, skipping the enterprise-"
+            f"to-equity bridge entirely) -- not implemented here."
+        )
 
     sensitivity_analysis = self._build_sensitivity_table(
         fcff_forecasts=fcff_forecasts,

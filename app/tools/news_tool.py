@@ -35,7 +35,17 @@ class NewsTool(BaseTool):
         articles = fetch_company_news(context.ticker)
 
         context.news_articles = articles
-        context.news_selected = select_for_analysis(articles)
+        context.news_selected = select_for_analysis(
+            articles,
+            ticker=context.ticker,
+            # news_tool is a trailing tool that always runs (see
+            # agent_constants.TRAILING_TOOLS), but market_data_tool --
+            # the only source of company_info -- isn't guaranteed to
+            # have run first for every plan (e.g. a pure "what did
+            # management say" question). select_for_analysis() already
+            # degrades to ticker-only matching when this is None.
+            company_name=(context.company_info or {}).get("company_name"),
+        )
 
         context.news_sentiment = score_news_sentiment(articles)
         context.news_sentiment_summary = build_news_sentiment_summary(context.news_sentiment)

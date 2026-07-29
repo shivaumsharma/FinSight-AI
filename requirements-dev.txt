@@ -3,3 +3,10 @@
 # smoke-test scripts, which need the full model stack in requirements.txt
 # and network access; see .github/workflows/tests.yml).
 pytest>=8.0
+
+# In-process fake Redis server (real redis-py wire protocol) used only
+# by scripts/benchmark_redis_cache.py -- lets that benchmark exercise
+# the real app/core/cache.py code path without needing an actual Redis
+# server running anywhere. Not needed by the pytest suite itself (which
+# mocks cache_get/cache_set directly for the deterministic tests).
+fakeredis

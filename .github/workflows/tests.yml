@@ -20,10 +20,24 @@ jobs:
       # in torch/transformers/chromadb/llama-cpp-python (multi-GB, and
       # some of it needs a model download at runtime), none of which the
       # deterministic unit tests below touch. Installing only pandas/
-      # numpy + pytest keeps this workflow fast and keeps CI from
-      # silently depending on network access to Hugging Face.
+      # numpy/langgraph + pytest keeps this workflow fast and keeps CI
+      # from silently depending on network access to Hugging Face.
+      # langgraph itself has no torch/chromadb dependency (see its own
+      # requires: langchain-core, pydantic, xxhash -- verified via
+      # `pip show langgraph`), so it's cheap to add here even though the
+      # rest of the heavy stack stays excluded.
+      # fastapi/httpx/yfinance/rapidfuzz/python-dotenv are also
+      # lightweight (no torch/chromadb dependency) -- needed to import
+      # app/api/main.py's chain: app.core.company_resolver (requests,
+      # rapidfuzz), app.data.market_data.TickerNotFoundError (imported
+      # lazily inside jobs.py's _run_job specifically so the rest of
+      # this stays true), and app.reporting.narrative_builder's own
+      # import of news_client.py (python-dotenv, for FINNHUB_API_KEY).
+      # Verified against a truly isolated venv with only this list
+      # installed, not just the (much more populated) main dev venv --
+      # that's what caught this exact gap.
       - name: Install test dependencies
-        run: pip install pandas numpy -r requirements-dev.txt
+        run: pip install pandas numpy langgraph==1.2.9 redis fastapi httpx yfinance rapidfuzz python-dotenv -r requirements-dev.txt
 
       # test_finbert.py and test_rag.py are manual smoke tests (see
       # their own docstrings) -- they need the full model stack and

@@ -1,0 +1,32 @@
+# Mirrors .gitignore's "regenerated on demand, not source" list, plus
+# Docker-specific excludes. Keeping the build context small also keeps
+# `docker build` from re-uploading multi-GB of local cache/venv state
+# on every rebuild.
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+.git/
+.github/
+
+.cache/
+.chroma/
+vector_db/
+filings_cache/
+models/
+narrative_comparison/
+reports/
+llm_logs/
+*.db
+
+scripts/finetuned_bge_embeddings/
+
+.streamlit/
+.idea/
+.vscode/
+.claude/
+
+.env

@@ -33,13 +33,37 @@ Two failure modes found by inspecting real output (not hypothetical):
    tag, and the rewrite dropped the instruction. Restored below.
 """
 
+import logging
 import re
-from typing import Dict
+from datetime import date
+from typing import Dict, Optional
 
 from app.core.research_context import ResearchContext
-from app.core.llm_provider import get_shared_generator
+from app.core.llm_provider import get_llm_provider
+from app.core.cache import cache_get, cache_set, make_key
 from app.reporting.news_client import RISK_CATEGORIES
 from app.reporting.narrative_debug_log import log_narrative_call
+
+logger = logging.getLogger(__name__)
+
+# Content-addressed by a hash of the full prompt (see app/core/cache.py's
+# module docstring for why this is safe: if any input to the prompt
+# changes -- financials, valuation, sentiment, news, the DETERMINED
+# RECOMMENDATION -- the prompt itself changes, so the key changes and
+# it's a natural miss, never a stale hit). 24h TTL is purely a storage
+# bound; it's not what keeps this correct.
+NARRATIVE_CACHE_TTL_SECONDS = 24 * 3600
+
+# How close a reported next_earnings_date has to be (in either
+# direction is impossible here -- MarketDataLoader.get_next_earnings_date()
+# only ever returns future/today dates -- so this is purely "how many
+# days out") before it's forced into the prompt as its own prominent
+# block instead of being left to compete for attention with the 249
+# retrieved news headlines. Confirmed on a real MSFT run published the
+# day before earnings, with the options market pricing a 7% move, that
+# the narrative never mentioned the earnings date at all even though a
+# news item naming it was among those selected.
+EARNINGS_PROXIMITY_DAYS = 7
 
 NARRATIVE_SECTIONS = [
     "Executive Summary",
@@ -158,6 +182,83 @@ def _news_data_block(context: ResearchContext) -> str:
     return "\n".join(lines)
 
 
+def _as_number(value) -> Optional[float]:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def _fmt_pct(fraction_value) -> str:
+    """valuation_summary.py stores WACC/terminal growth as raw fractions
+    (0.1062, not 10.62) -- see pdf_report_builder.py's own `v * 100`
+    before formatting for the same reason."""
+    number = _as_number(fraction_value)
+    return f"{number * 100:.2f}%" if number is not None else "Unavailable"
+
+
+def _growth_divergence_block(growth: dict) -> str:
+    """
+    FCF Growth (%) is already a bare number in the GROWTH line above --
+    easy to walk past when revenue/net income are both growing right
+    next to it. Confirmed on a real MSFT run: Revenue +14.93%, Net
+    Income +15.54%, FCF -3.32% -- exactly the divergence a DCF (a
+    free-cash-flow-based model) reacts to -- and the narrative never
+    mentioned FCF at all, despite it being the actual reason the DCF
+    verdict disagreed with the rest of the report. Forces it into its
+    own labeled block with an explicit instruction rather than trusting
+    the model to notice a negative number sitting next to two positive
+    ones.
+    """
+    fcf_growth = _as_number(growth.get("FCF Growth (%)"))
+    if fcf_growth is None or fcf_growth >= 0:
+        return ""
+
+    other_growth = (
+        _as_number(growth.get("Revenue Growth (%)")),
+        _as_number(growth.get("Net Income Growth (%)")),
+    )
+    if not any(g is not None and g > 0 for g in other_growth):
+        return ""
+
+    return (
+        f"\nGROWTH DIVERGENCE: Free Cash Flow growth is {fcf_growth}% (trend: "
+        f"{growth.get('FCF Trend', 'Unknown')}) while revenue and/or net income are "
+        f"growing -- this divergence is very likely why a DCF (a free-cash-flow-based "
+        f"model) disagrees with other valuation signals here. You MUST name this "
+        f"divergence explicitly in your narrative (e.g. rising capital spending or "
+        f"working capital consuming cash despite profit growth -- check NEWS/RESEARCH "
+        f"CONTEXT below for the specific driver) as a likely explanation for any "
+        f"valuation gap -- do not just restate the growth numbers without explaining "
+        f"what the FCF decline means for the valuation."
+    )
+
+
+def _earnings_proximity_block(next_earnings_date) -> str:
+    """
+    Confirmed on a real MSFT run published the day before earnings,
+    with the options market pricing a +/-7% move, that an imminent
+    earnings date sitting among the 249 retrieved news headlines never
+    made it into the narrative -- forced into its own labeled block
+    instead, gated to EARNINGS_PROXIMITY_DAYS so a routine earnings
+    date months out doesn't clutter every report.
+    """
+    if not next_earnings_date:
+        return ""
+    days_until = (next_earnings_date - date.today()).days
+    if not (0 <= days_until <= EARNINGS_PROXIMITY_DAYS):
+        return ""
+
+    when = "today" if days_until == 0 else f"in {days_until} day(s)"
+    return (
+        f"\nUPCOMING EARNINGS: This company reports earnings on "
+        f"{next_earnings_date.isoformat()} ({when}) -- imminent relative to this "
+        f"report. You MUST mention this explicitly in Executive Summary and/or Market "
+        f"and Earnings Analysis, and note that the valuation/recommendation above could "
+        f"move materially on the results -- do not present it as if it will hold "
+        f"regardless of what's reported."
+    )
+
+
 def _build_prompt(context: ResearchContext, report_data: dict) -> str:
 
     overview = report_data["company_overview"]
@@ -169,13 +270,15 @@ def _build_prompt(context: ResearchContext, report_data: dict) -> str:
     data_block = f"""COMPANY: {overview['name']} ({report_data['ticker']}) -- {overview['sector']} / {overview['industry']}
 BUSINESS: {overview['business_summary'] or 'Not available.'}
 
-GROWTH: Revenue growth {growth['Revenue Growth (%)']}%, trend: {growth['Revenue Trend']}
-VALUATION: Intrinsic value {valuation['Intrinsic Value (per share)']}, current price {valuation['Current Price']}, upside {valuation['Upside (%)']}%
+GROWTH: Revenue growth {growth['Revenue Growth (%)']}%, trend: {growth['Revenue Trend']}; Free Cash Flow growth {growth['FCF Growth (%)']}%, trend: {growth.get('FCF Trend', 'Unknown')}
+VALUATION: Intrinsic value {valuation['Intrinsic Value (per share)']}, current price {valuation['Current Price']}, upside {valuation['Upside (%)']}% -- DCF assumptions: WACC {_fmt_pct(valuation.get('WACC'))}, terminal growth {_fmt_pct(valuation.get('Terminal Growth Rate'))}
 MARKET: Current price {market['current_price']}
 MANAGEMENT SENTIMENT (from SEC filing tone): {market['sentiment_label']} ({market['sentiment_confidence']})
 MARKET/MEDIA SENTIMENT (from recent news tone): {market['news_sentiment_label']} ({market['news_sentiment_confidence']})
 DETERMINED RECOMMENDATION: {recommendation['rating']} -- {recommendation['basis']}
 {"CONFIDENCE CAVEAT: " + recommendation["confidence_flag"] if recommendation.get("confidence_flag") else ""}
+{_growth_divergence_block(growth)}
+{_earnings_proximity_block(market.get('next_earnings_date'))}
 
 {_news_data_block(context)}
 
@@ -201,6 +304,7 @@ Rules:
 - When a sentence is based on a specific item from RESEARCH CONTEXT's evidence, tag the end of it with that item's number, e.g. "...enterprise adoption accelerated [Evidence 4]." When based on a specific news item, tag it the same way, e.g. "...facing a antitrust probe [News 2]."
 - Risk Analysis specifically: use the "News by risk category" list above. For each category with news, cite the specific [News N] item(s) for that risk -- do not write generic risk boilerplate ("faces competition," "regulatory uncertainty") without a citation. For a category listed as "none found," say plainly that no recent news-based signal was found for that risk type -- do not invent one.
 - Market and Earnings Analysis specifically: if MANAGEMENT SENTIMENT and MARKET/MEDIA SENTIMENT differ, say so explicitly -- that divergence is itself worth noting, not something to paper over by picking one.
+- If a GROWTH DIVERGENCE or UPCOMING EARNINGS block appears above, you MUST address it explicitly in the section(s) it names -- these are the report's own most important facts and are not optional to skip for space.
 - No outside knowledge about the company's products, competitors, or history beyond what's in the DATA. Do not invent management quotes or numbers.
 - The Investment Thesis section MUST match the DETERMINED RECOMMENDATION and the framing guidance above -- do not contradict either.
 - Keep the whole response under 500 words.
@@ -291,6 +395,13 @@ def _split_sections(text: str) -> Dict[str, str]:
     as a substring of ordinary prose), trimming the model's drift the
     same way the previous single-blob report did.
 
+    If a heading appears more than once, the FIRST occurrence wins --
+    a duplicate heading is the model drifting (restarting or repeating
+    a section rather than moving on), not intentional structure, and a
+    later repeat is more likely to be truncated or off-topic than the
+    original. A warning is logged so a recurring duplicate can be
+    noticed and investigated rather than silently resolved every time.
+
     Tolerates more than the literal "# Heading" the prompt asks for:
     inspecting real output showed the model sometimes prefaces its
     response with a fake "formatting example" using **bold** headings
@@ -310,13 +421,17 @@ def _split_sections(text: str) -> Dict[str, str]:
     """
     text = _ensure_headings_start_own_line(text)
 
+    # Every occurrence of every heading, not just the first per name --
+    # this is what lets a repeated heading act as a real boundary: the
+    # first "# Executive Summary"'s content has to stop at the SECOND
+    # "# Executive Summary" (or any other heading) that follows it, not
+    # run past it into the duplicate's own content.
     positions = []
     for section in NARRATIVE_SECTIONS:
-        matches = list(re.finditer(
+        for m in re.finditer(
             rf"^[#*\s]*{re.escape(section)}[*:\s]*$", text, re.IGNORECASE | re.MULTILINE
-        ))
-        if matches:
-            positions.append((matches[-1].start(), matches[-1].end(), section))
+        ):
+            positions.append((m.start(), m.end(), section))
 
     positions.sort(key=lambda p: p[0])
 
@@ -325,6 +440,22 @@ def _split_sections(text: str) -> Dict[str, str]:
         content_start = end
         content_end = positions[i + 1][0] if i + 1 < len(positions) else len(text)
         content = text[content_start:content_end].strip()
+
+        if name in sections:
+            # A repeated heading is model drift, not intentional
+            # structure -- the prompt asks for each section exactly
+            # once. The FIRST occurrence was already kept above; a
+            # later duplicate means the model restarted or repeated
+            # the section, and its content is truncated or off-topic
+            # more often than the original, so it's discarded rather
+            # than overwriting the complete first section.
+            logger.warning(
+                "narrative_builder: duplicate heading %r found in model "
+                "output -- keeping the first occurrence, discarding this "
+                "later one as drift",
+                name,
+            )
+            continue
 
         kept_lines = []
         for line in content.split("\n"):
@@ -345,7 +476,12 @@ def build_narrative_sections(context: ResearchContext, report_data: dict) -> Dic
     """
     prompt = _build_prompt(context, report_data)
 
-    raw = get_shared_generator().generate(prompt, max_new_tokens=700)
+    cache_key = make_key("narrative", context.ticker, prompt)
+    raw = cache_get(cache_key)
+
+    if raw is None:
+        raw = get_llm_provider().generate(prompt, max_new_tokens=700)
+        cache_set(cache_key, raw, ttl_seconds=NARRATIVE_CACHE_TTL_SECONDS)
 
     sections = _split_sections(raw)
 

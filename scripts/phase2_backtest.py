@@ -46,6 +46,7 @@ sentiment reconstruction.
 
 import argparse
 import json
+import random
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
@@ -294,6 +295,150 @@ def score(row):
     return score_rating(row["recommendation"], row["realized_return_pct"])
 
 
+# ---------------------------------------------------------- baselines & precision/recall
+#
+# All of this operates on `scored` rows (see main()) -- the exact same
+# set OVERALL ACCURACY is computed on, so "the model beat/lost to
+# always-Buy by N points" is a real apples-to-apples comparison, not
+# two different denominators that happen to look similar. score_rating's
+# three branches (Buy: >BUY_THRESHOLD, Sell: <SELL_THRESHOLD, Hold: the
+# closed band between) are mutually exclusive and jointly exhaustive
+# over any real-valued realized_return_pct -- every function below
+# leans on that.
+
+def _true_class(realized_return_pct):
+    """The actual outcome a prediction is trying to hit, using the
+    exact same bands score_rating() already scores Buy/Hold/Sell
+    against -- Buy is "trying to predict Up", Hold "Flat", Sell "Down".
+    Not a new definition invented for this: it's score_rating's own
+    three branches, named and exposed so precision/recall can be
+    computed against them directly instead of only ever collapsing to
+    a single correct/incorrect bit."""
+    if realized_return_pct > BUY_THRESHOLD:
+        return "Up"
+    if realized_return_pct < SELL_THRESHOLD:
+        return "Down"
+    return "Flat"
+
+
+_PREDICTED_TO_ACTUAL = {"Buy": "Up", "Hold": "Flat", "Sell": "Down"}
+
+
+def _base_rate(scored_rows):
+    """{"Up": n, "Down": n, "Flat": n} -- what fraction of `scored_rows`
+    actually landed in each band, independent of what the model said.
+    Always-Buy/Always-Hold/Always-Sell's accuracy (below) is this exact
+    same count, restated as a score against the model's own scoring
+    rule -- computing both from one pass keeps them from silently
+    drifting apart."""
+    counts = {"Up": 0, "Down": 0, "Flat": 0}
+    for r in scored_rows:
+        counts[_true_class(r["realized_return_pct"])] += 1
+    return counts
+
+
+def _naive_baseline_accuracy(scored_rows, fixed_rating):
+    """Accuracy of a rater that ALWAYS says `fixed_rating`, scored the
+    same way the real model is -- a Buy/Hold/Sell prediction's accuracy
+    is nothing more than "how often did the market agree" if the model
+    itself doesn't beat this."""
+    scores = [score_rating(fixed_rating, r["realized_return_pct"]) for r in scored_rows]
+    valid_scores = [s for s in scores if s is not None]
+    if not valid_scores:
+        return None
+    return 100 * sum(valid_scores) / len(valid_scores)
+
+
+def _random_uniform_baseline_accuracy(scored_rows, trials=2000, seed=42):
+    """
+    Monte Carlo estimate (fixed seed -- reproducible across runs, not
+    a different number every time this script executes) of a uniform-
+    random Buy/Hold/Sell guesser's accuracy on this exact sample.
+
+    Worth stating plainly: score_rating's three bands are mutually
+    exclusive and exhaustive, so a uniform guess's TRUE expected
+    accuracy is exactly 1/3 (33.3%) on ANY sample, regardless of its
+    actual up/flat/down mix -- this isn't estimating something unknown,
+    it's demonstrating that a naive "spread your guesses evenly" rater
+    carries no information about the specific tickers under test.
+    Simulating it anyway (many trials, averaged) gives a concrete,
+    reproducible number for this run instead of only asserting the
+    theory, and its closeness to 33.3% is itself a check that the
+    simulation is doing what it claims.
+    """
+    rng = random.Random(seed)
+    trial_accuracies = []
+    for _ in range(trials):
+        correct = 0
+        n = 0
+        for r in scored_rows:
+            guess = rng.choice(("Buy", "Hold", "Sell"))
+            result = score_rating(guess, r["realized_return_pct"])
+            if result is None:
+                continue
+            n += 1
+            correct += result
+        if n:
+            trial_accuracies.append(100 * correct / n)
+    if not trial_accuracies:
+        return None
+    return sum(trial_accuracies) / len(trial_accuracies)
+
+
+def _precision_recall(scored_rows):
+    """
+    Per-class precision/recall for the Buy/Hold/Sell predictions
+    against the Up/Flat/Down actual outcome (_PREDICTED_TO_ACTUAL) --
+    a real 3x3 confusion matrix instead of collapsing everything into
+    one accuracy number, so (for example) a model that's precise on
+    Buy but never actually catches most real Up moves (low recall)
+    doesn't look identical to one that's both precise and complete.
+
+    precision = correct / times the model predicted this class
+    recall    = correct / times this class actually happened
+    Either can be None (not "0%") when its own denominator is zero --
+    a class the model never predicted has undefined precision, not 0%.
+    """
+    results = {}
+    for pred_class, actual_class in _PREDICTED_TO_ACTUAL.items():
+        predicted_rows = [r for r in scored_rows if r["recommendation"] == pred_class]
+        actual_rows = [r for r in scored_rows if _true_class(r["realized_return_pct"]) == actual_class]
+        true_positives = sum(
+            1 for r in predicted_rows if _true_class(r["realized_return_pct"]) == actual_class
+        )
+        results[pred_class] = {
+            "precision": true_positives / len(predicted_rows) if predicted_rows else None,
+            "recall": true_positives / len(actual_rows) if actual_rows else None,
+            "predicted_n": len(predicted_rows),
+            "actual_n": len(actual_rows),
+        }
+    return results
+
+
+def _avg_return(rows):
+    values = [r["realized_return_pct"] for r in rows if r["realized_return_pct"] is not None]
+    return sum(values) / len(values) if values else None
+
+
+def _return_spread(scored_rows):
+    """
+    Average realized return of Buy calls minus average of Sell calls --
+    a ranking/discrimination metric, not a directional one. Buy/Sell
+    accuracy against a fixed +/-5% threshold rewards being loudly
+    right and can make a model that's directionally timid (or just
+    unlucky on threshold placement) look like it has no skill, even if
+    it reliably ranks Buys above Sells. A model that's mediocre on the
+    binary labels but shows a clearly positive spread here IS carrying
+    real information -- it just isn't being rewarded for it by a hard
+    threshold. Returns (buy_avg, sell_avg, spread), any of which can be
+    None if that class was never predicted.
+    """
+    buy_avg = _avg_return([r for r in scored_rows if r["recommendation"] == "Buy"])
+    sell_avg = _avg_return([r for r in scored_rows if r["recommendation"] == "Sell"])
+    spread = (buy_avg - sell_avg) if buy_avg is not None and sell_avg is not None else None
+    return buy_avg, sell_avg, spread
+
+
 def _parse_args():
     parser = argparse.ArgumentParser(description="Point-in-time backtest of the recommendation pipeline.")
     # AS_OF_MONTHS_AGO / EXIT_MONTHS_AGO let this same point-in-time
@@ -421,12 +566,53 @@ def main():
         overall_acc = 100 * sum(1 for r in scored if r["correct"]) / len(scored)
         print(f"\nOVERALL ACCURACY: {overall_acc:.1f}% ({sum(1 for r in scored if r['correct'])}/{len(scored)})")
 
-        print("\nBy recommendation type:")
-        for rec_type in ("Buy", "Hold", "Sell"):
-            group = [r for r in scored if r["recommendation"] == rec_type]
-            if group:
-                acc = 100 * sum(1 for r in group if r["correct"]) / len(group)
-                print(f"  {rec_type:<6} {acc:5.1f}% ({sum(1 for r in group if r['correct'])}/{len(group)})")
+        # ---- naive baselines + base rate (same `scored` set/denominator as above) ----
+        base_rate = _base_rate(scored)
+        n_scored = len(scored)
+        print(f"\nBASE RATE ({n_scored} scored tickers, independent of any recommendation):")
+        print(f"  Up   (>+{BUY_THRESHOLD:.0f}%): {100*base_rate['Up']/n_scored:5.1f}% ({base_rate['Up']}/{n_scored})")
+        print(f"  Down (<{SELL_THRESHOLD:.0f}%): {100*base_rate['Down']/n_scored:5.1f}% ({base_rate['Down']}/{n_scored})")
+        print(f"  Flat ({SELL_THRESHOLD:.0f}% to +{BUY_THRESHOLD:.0f}%): {100*base_rate['Flat']/n_scored:5.1f}% ({base_rate['Flat']}/{n_scored})")
+
+        print(f"\nNAIVE BASELINES (scored the same way as OVERALL ACCURACY, same {n_scored} tickers):")
+        fixed_baseline_accs = {}
+        for label, fixed_rating in (("Always Buy", "Buy"), ("Always Hold", "Hold"), ("Always Sell", "Sell")):
+            acc = _naive_baseline_accuracy(scored, fixed_rating)
+            fixed_baseline_accs[fixed_rating] = acc
+            print(f"  {label:<18} {acc:5.1f}%")
+        random_acc = _random_uniform_baseline_accuracy(scored)
+        print(f"  {'Random (uniform)':<18} {random_acc:5.1f}%  (2000-trial Monte Carlo, seed=42 -- "
+              f"theoretical expectation is exactly 33.3% on any sample, since Buy/Hold/Sell's bands "
+              f"are mutually exclusive and exhaustive)")
+        print(f"  (Always-Buy/Hold/Sell above are exactly the BASE RATE percentages, restated as "
+              f"accuracy against the model's own scoring rule -- this is what the model has to beat "
+              f"to mean anything more than \"the market did X anyway.\")")
+        best_fixed_baseline = max(v for v in fixed_baseline_accs.values() if v is not None)
+        print(f"  Model vs. best naive baseline: {overall_acc - best_fixed_baseline:+.1f} points")
+
+        # ---- return-magnitude / ranking metric ----
+        # See _return_spread's docstring: a ranking signal, not a
+        # directional one -- distinct from (and not reducible to)
+        # accuracy against the +/-5% threshold above.
+        buy_avg, sell_avg, spread = _return_spread(scored)
+        print(f"\nRETURN SPREAD (ranking signal, independent of the +/-{BUY_THRESHOLD:.0f}% accuracy threshold):")
+        print(f"  Avg realized return of Buy calls:  {buy_avg:+6.2f}%" if buy_avg is not None else "  Avg realized return of Buy calls:  N/A (no Buy calls)")
+        print(f"  Avg realized return of Sell calls: {sell_avg:+6.2f}%" if sell_avg is not None else "  Avg realized return of Sell calls: N/A (no Sell calls)")
+        if spread is not None:
+            print(f"  Spread (Buy avg - Sell avg):       {spread:+6.2f} points "
+                  f"({'Buys outperformed Sells -- the ranking carries information even where the binary label does not' if spread > 0 else 'Buys did NOT outperform Sells -- no evidence of ranking skill on this sample'})")
+        else:
+            print("  Spread: N/A (need both a Buy and a Sell call to compare)")
+
+        # ---- per-class precision / recall ----
+        print("\nPER-CLASS PRECISION / RECALL (Buy->Up, Hold->Flat, Sell->Down):")
+        print(f"  {'Class':<8}{'Precision':>12}{'Recall':>10}{'Predicted N':>14}{'Actual N':>11}")
+        precision_recall = _precision_recall(scored)
+        for cls in ("Buy", "Hold", "Sell"):
+            stats = precision_recall[cls]
+            prec_str = f"{100*stats['precision']:.1f}%" if stats["precision"] is not None else "N/A"
+            recall_str = f"{100*stats['recall']:.1f}%" if stats["recall"] is not None else "N/A"
+            print(f"  {cls:<8}{prec_str:>12}{recall_str:>10}{stats['predicted_n']:>14}{stats['actual_n']:>11}")
 
         print("\nBy DCF availability:")
         for avail, label in ((True, "DCF-based calls"), (False, "Fallback (relative-valuation) calls")):
@@ -472,24 +658,6 @@ def main():
         print(f"\nErrored tickers ({len(errored)}):")
         for r in errored:
             print(f"  {r['ticker']:<7} {r['error']}")
-
-    # ---------------- market base-rate comparison ----------------
-    # Same ticker universe, same 12-month window -- what fraction
-    # would have qualified as "up" / "down" / "flat" by the same
-    # +/-5% bands, independent of what the tool recommended? This is
-    # the naive baseline the tool's Buy/Sell accuracy has to beat to
-    # mean anything more than "the market went up/down anyway."
-    returns = [r["realized_return_pct"] for r in valid if r["realized_return_pct"] is not None]
-    if returns:
-        up = sum(1 for x in returns if x > BUY_THRESHOLD)
-        down = sum(1 for x in returns if x < SELL_THRESHOLD)
-        flat = len(returns) - up - down
-        print(f"\nMARKET BASE RATE (same {len(returns)} tickers, same 12mo window, independent of any recommendation):")
-        print(f"  Up   (>+{BUY_THRESHOLD:.0f}%):  {100*up/len(returns):5.1f}% ({up}/{len(returns)})")
-        print(f"  Down (<{SELL_THRESHOLD:.0f}%):  {100*down/len(returns):5.1f}% ({down}/{len(returns)})")
-        print(f"  Flat ({SELL_THRESHOLD:.0f}% to +{BUY_THRESHOLD:.0f}%): {100*flat/len(returns):5.1f}% ({flat}/{len(returns)})")
-        print(f"  (A tool with no real skill that always said \"Buy\" would score ~{100*up/len(returns):.1f}% on this "
-              f"universe/window; always \"Sell\" would score ~{100*down/len(returns):.1f}%.)")
 
 
 if __name__ == "__main__":

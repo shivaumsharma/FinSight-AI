@@ -31,19 +31,7 @@ from app.core.research_context import ResearchContext
 from app.core.company_resolver import resolve_companies, is_comparison_question
 from app.planner import Planner
 from app.tools.tool_registry import ToolRegistry
-
-TRAILING_TOOLS = ["institutional_consensus_tool", "news_tool", "report_tool", "evaluation_tool"]
-
-
-class NoCompanyDetectedError(Exception):
-    """
-    Raised when no publicly listed company can be identified in the
-    question. FinSight only performs company/investment research --
-    it never falls back to a default ticker or attempts to answer a
-    general finance question. The UI is expected to check
-    resolve_companies() itself before ever calling ResearchAgent, so
-    this mainly guards other/future callers that skip that check.
-    """
+from app.agents.agent_constants import TRAILING_TOOLS, NoCompanyDetectedError
 
 
 class ResearchAgent:

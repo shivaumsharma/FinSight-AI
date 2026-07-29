@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tune_recommendation_config import (
     RESULTS_PATH, BAND_WIDTHS, DCF_WEIGHTS, SCORE_CAP,
+    PROD_BAND_WIDTH, PROD_DCF_WEIGHT,
     score_rating, rating_from_score, load_rows,
 )
 
@@ -42,11 +43,12 @@ N_TRIALS = 500
 TRAIN_FRACTION = 0.7
 RANDOM_SEED = 42
 
-# Current production config, for the head-to-head comparison -- the
-# values actually shipped in report_data_builder.py right now (band=
-# 7.5, dcf_weight=0.8), not the pre-this-session baseline (15, 0.6).
-PROD_BAND_WIDTH = 7.5
-PROD_DCF_WEIGHT = 0.8
+# PROD_BAND_WIDTH/PROD_DCF_WEIGHT imported from tune_recommendation_config,
+# not re-hardcoded here -- this file's own copy was correct, but
+# tune_recommendation_config.py's own "current production config" print
+# statement had drifted stale (still said 15.0/0.6) for a full session
+# after the (15.0, 0.6) -> (7.5, 0.8) retune before that was caught.
+# One source of truth now so the two scripts can't disagree again.
 
 
 def score_subset(rows, band_width, dcf_weight):
