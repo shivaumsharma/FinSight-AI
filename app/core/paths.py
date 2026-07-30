@@ -28,3 +28,4 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", Path(__file__).resolve().parent.paren
 DB_PATH = DATA_DIR / "jobs.db"
 REPORTS_DIR = DATA_DIR / "reports"
 LLM_LOG_DIR = DATA_DIR / "llm_logs"
+RESEARCH_LOG_DIR = DATA_DIR / "logs"

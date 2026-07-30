@@ -60,12 +60,27 @@ def context_to_api_dict(context: ResearchContext) -> Dict[str, Any]:
     if context.normalized_financials is not None and not context.normalized_financials.empty:
         normalized_financials_json = context.normalized_financials.to_json(orient="split", date_format="iso")
 
+    raw_wacc = (context.valuation_results or {}).get("raw_wacc")
+    # Coerced to a plain float (not left as a possible numpy/pandas scalar
+    # or NaN) -- json.dumps in db.py already crashed once this session on
+    # an unexamined field type (a raw `date`), so every new field added
+    # here is checked, not assumed JSON-safe.
+    try:
+        raw_wacc = float(raw_wacc) if raw_wacc is not None and not pd.isna(raw_wacc) else None
+    except (TypeError, ValueError):
+        raw_wacc = None
+
     return {
         "ticker": context.ticker,
         "mode": context.mode,
         "peer_ticker": context.metadata.get("peer_ticker"),
         "report_data": report_data,
         "normalized_financials": normalized_financials_json,
+        # Not part of report_data (which only carries the display-formatted
+        # "Raw WACC" percentage string) -- the raw fraction, needed by
+        # streamlit_app.py's What-If DCF sliders to seed the WACC slider's
+        # default/range the same way the real DCF computed it.
+        "raw_wacc": raw_wacc,
         "tool_trace": context.tool_trace,
     }
 

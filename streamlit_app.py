@@ -8,20 +8,27 @@ general-purpose financial chatbot. There is no ticker input box and no
 default company -- the user asks a question naming a real, publicly
 listed company, FinSight resolves the company itself (see
 app/core/company_resolver.py), and if none is found, no analysis
-begins at all. Validation happens before ResearchAgent.run() ever
-touches yfinance/SEC/the LLM -- NoCompanyDetectedError and
-TickerNotFoundError are the only two ways this can fail, and both are
-caught here with a plain-language message; no internal exception or
-raw data-provider error ever reaches the user.
+begins at all. Validation happens server-side before any research
+starts -- NO_COMPANY_DETECTED and TICKER_NOT_FOUND (see
+app/api/errors.py) are the only two error codes special-cased below
+with a plain-language message; every other code falls back to a
+generic one built from the API's own message.
+
+Thin client: this used to run the full research pipeline in-process
+(ResearchAgent().run(...)), loading torch/transformers/chromadb
+locally. As of this rewrite it calls the FastAPI service (app/api/)
+over HTTP instead -- submit a job, poll for completion, download the
+PDF -- the same way any other client (curl, a future mobile app)
+would use it. Nothing here imports the agent/tool stack anymore.
 """
 
+import os
 import time
 
+import requests
 import streamlit as st
 
-from app.agents.research_agent import ResearchAgent, NoCompanyDetectedError
-from app.core.logger import ResearchLogger
-from app.data.market_data import TickerNotFoundError
+from app.api.serialization import financial_df_from_json
 from app.valuation.what_if_dcf import (
     compute_what_if, DEFAULT_TERMINAL_GROWTH_RATE, GROWTH_RATE_MIN, GROWTH_RATE_MAX,
     TERMINAL_GROWTH_MIN, TERMINAL_GROWTH_MAX, WACC_OFFSET,
@@ -29,6 +36,16 @@ from app.valuation.what_if_dcf import (
 from app.valuation.fcff_engine import FCFFEngine
 
 st.set_page_config(page_title="Finsight AI", layout="wide")
+
+# Points at the FastAPI service (app/api/) -- defaults to local dev
+# (`uvicorn app.api.main:app`, no auth). In any real deployment, set
+# both via this app's own env/secrets config (e.g. Hugging Face
+# Spaces' repo secrets) to the deployed API's URL and its real
+# X-API-Key -- never hardcode a key here.
+API_BASE_URL = os.environ.get("FINSIGHT_API_URL", "http://localhost:8000").rstrip("/")
+API_KEY = os.environ.get("FINSIGHT_API_KEY", "")
+
+POLL_INTERVAL_SECONDS = 3
 
 RATING_COLORS = {
     "Buy": "green",
@@ -91,6 +108,39 @@ with st.form("query_form"):
     submitted = st.form_submit_button("Run Research Agent")
 
 # ---------------------------------------------------
+# API CLIENT HELPERS
+# ---------------------------------------------------
+
+def _headers():
+    headers = {"Content-Type": "application/json"}
+    if API_KEY:
+        headers["X-API-Key"] = API_KEY
+    return headers
+
+
+def _submit_job(question: str):
+    """Returns (job_id, error_code, error_message) -- job_id is None on failure."""
+    resp = requests.post(
+        f"{API_BASE_URL}/v1/research", json={"question": question}, headers=_headers(), timeout=30,
+    )
+    if resp.status_code != 200:
+        body = resp.json()
+        return None, body.get("code"), body.get("message")
+    return resp.json()["job_id"], None, None
+
+
+def _poll_job(job_id: str) -> dict:
+    """Blocks until the job reaches status done/error. Caller wraps this in st.spinner."""
+    while True:
+        resp = requests.get(f"{API_BASE_URL}/v1/research/{job_id}", headers=_headers(), timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        if data["status"] in ("done", "error"):
+            return data
+        time.sleep(POLL_INTERVAL_SECONDS)
+
+
+# ---------------------------------------------------
 # MAIN PIPELINE
 # ---------------------------------------------------
 
@@ -99,32 +149,50 @@ if submitted and query:
     start = time.time()
 
     try:
-        with st.spinner("Planning and executing research..."):
-            context = ResearchAgent().run(question=query)
-    except NoCompanyDetectedError:
+        job_id, error_code, error_message = _submit_job(query)
+    except requests.RequestException as e:
+        st.error(f"Couldn't reach the research service: {e}")
+        st.stop()
+
+    if error_code == "NO_COMPANY_DETECTED":
         st.error(
             "FinSight AI specializes in company and investment research. No "
             "publicly listed company was detected in your query. Please "
             "provide a company name to begin the analysis."
         )
         st.stop()
-    except TickerNotFoundError as e:
-        st.error(
-            f"Couldn't find market data for '{e}'. The company may be "
-            "delisted, foreign-listed, or the name didn't resolve to a "
-            "real ticker -- please check the spelling and try again."
-        )
+    elif error_code is not None:
+        st.error(f"Something went wrong while researching this: {error_message}")
         st.stop()
-    except Exception as e:
-        st.error(f"Something went wrong while researching this: {e}")
+
+    try:
+        with st.spinner("Planning and executing research..."):
+            data = _poll_job(job_id)
+    except requests.RequestException as e:
+        st.error(f"Couldn't reach the research service: {e}")
+        st.stop()
+
+    if data["status"] == "error":
+        if data.get("error_code") == "TICKER_NOT_FOUND":
+            st.error(
+                f"Couldn't find market data for this company: {data.get('error_message', '')} "
+                "The company may be delisted, foreign-listed, or the name didn't resolve to a "
+                "real ticker -- please check the spelling and try again."
+            )
+        else:
+            st.error(f"Something went wrong while researching this: {data.get('error_message')}")
         st.stop()
 
     end = time.time()
 
-    ResearchLogger().save(context)
+    result = data["result"]
+    report_data = result.get("report_data") or {}
 
-    report_data = context.report_data or {}
-    valuation_results = context.valuation_results or {}
+    try:
+        pdf_resp = requests.get(f"{API_BASE_URL}/v1/research/{job_id}/pdf", headers=_headers(), timeout=30)
+        pdf_bytes = pdf_resp.content if pdf_resp.status_code == 200 else None
+    except requests.RequestException:
+        pdf_bytes = None
 
     # What-if sliders (below) need to survive future reruns triggered
     # by moving a slider -- Streamlit reruns the whole script on every
@@ -134,13 +202,14 @@ if submitted and query:
     # network/LLM calls) so each slider move only re-runs the cheap
     # DCF recompute in what_if_dcf.py, not the full pipeline.
     whatif = None
-    financial_df = context.normalized_financials
-    if valuation_results.get("dcf_available") and financial_df is not None and not financial_df.empty:
+    financial_df = financial_df_from_json(result.get("normalized_financials"))
+    dcf_available = report_data.get("valuation_analysis", {}).get("DCF Available")
+    if dcf_available and financial_df is not None and not financial_df.empty:
         try:
             shares = financial_df["shares_outstanding"].dropna().iloc[-1]
             debt = financial_df["total_debt"].dropna().iloc[-1]
             cash_bal = financial_df["cash"].dropna().iloc[-1]
-            current_price = valuation_results.get("current_price")
+            current_price = report_data.get("market_earnings_snapshot", {}).get("current_price")
             if shares and current_price:
                 whatif = {
                     "financial_df": financial_df,
@@ -148,7 +217,7 @@ if submitted and query:
                     "cash": cash_bal,
                     "shares_outstanding": shares,
                     "current_price": current_price,
-                    "raw_wacc": valuation_results.get("raw_wacc"),
+                    "raw_wacc": result.get("raw_wacc"),
                     "relative_score": report_data.get("recommendation", {}).get("relative_score"),
                     "revenue_cagr": FCFFEngine(financial_df).calculate_revenue_cagr(),
                 }
@@ -157,10 +226,10 @@ if submitted and query:
 
     st.session_state["report"] = {
         "report_data": report_data,
-        "ticker": context.ticker,
-        "mode": context.mode,
-        "peer_ticker": context.metadata.get("peer_ticker"),
-        "pdf_bytes": context.pdf_bytes,
+        "ticker": result.get("ticker"),
+        "mode": result.get("mode"),
+        "peer_ticker": result.get("peer_ticker"),
+        "pdf_bytes": pdf_bytes,
         "latency": end - start,
         "whatif": whatif,
     }

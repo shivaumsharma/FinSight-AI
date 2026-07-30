@@ -32,7 +32,8 @@ from typing import Callable, Optional
 from app.api import db
 from app.api.serialization import context_to_api_dict
 from app.core.llm_provider import LLMProviderError, get_llm_provider, is_local_provider
-from app.core.paths import REPORTS_DIR  # noqa: F401 -- re-exported; see app/core/paths.py
+from app.core.logger import ResearchLogger
+from app.core.paths import REPORTS_DIR, RESEARCH_LOG_DIR  # noqa: F401 -- re-exported; see app/core/paths.py
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -120,6 +121,18 @@ def _run_job(job_id: str, question: str, orchestrator_name: str,
             from app.data.market_data import TickerNotFoundError
             agent = (agent_factory or ORCHESTRATORS[orchestrator_name])()
             context = agent.run(question)
+
+            # Moved here from streamlit_app.py: this needs to happen for
+            # every job regardless of which client submitted it (Streamlit,
+            # a future mobile client, curl), not just Streamlit-originated
+            # ones -- was previously called client-side, which only worked
+            # because Streamlit ran the pipeline in-process and had the raw
+            # ResearchContext to hand. See app/core/logger.py's own
+            # docstring for why this logging exists at all.
+            try:
+                ResearchLogger(log_directory=str(RESEARCH_LOG_DIR)).save(context)
+            except Exception as e:
+                print(f"[job {job_id}] ResearchLogger.save failed (non-fatal): {e}")
 
             pdf_path = None
             if context.pdf_bytes:
