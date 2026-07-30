@@ -106,19 +106,48 @@ def _run_job(job_id: str, question: str, orchestrator_name: str,
     """
     db.mark_running(job_id)
 
-    # Reset before the run, read after -- safe as a shared-singleton
-    # reset specifically BECAUSE _resolve_max_workers() defaults to a
-    # single worker even in hosted mode (see this module's docstring).
-    # Concurrent jobs would need per-job usage tracking, which this
-    # does not attempt -- a documented limitation of today's default,
-    # not an oversight; raising MAX_CONCURRENT_JOBS without also fixing
-    # this would make usage numbers meaningless across overlapping jobs.
-    provider = get_llm_provider()
-    provider.reset_usage()
-
     try:
         try:
+            # Imported first, before anything below that can raise --
+            # `except TickerNotFoundError` further down references this
+            # name, and Python resolves that reference by checking every
+            # except clause in order against the raised exception, which
+            # means it evaluates the *name* TickerNotFoundError even when
+            # a completely different exception (e.g. LLMProviderError from
+            # get_llm_provider() below) is what's actually propagating.
+            # Because this import is inside the function, Python treats
+            # TickerNotFoundError as a local variable for the function's
+            # entire scope -- if nothing has bound it yet when an
+            # exception fires, that lookup itself raises UnboundLocalError,
+            # masking the real exception and falling through to the
+            # outer safety net as an opaque INTERNAL_ERROR instead of the
+            # real error code. (Exactly the class of bug this function's
+            # own docstring already warns about from a past incident --
+            # re-caused here by originally placing get_llm_provider()
+            # before this import instead of after it.)
             from app.data.market_data import TickerNotFoundError
+
+            # Reset before the run, read after -- safe as a shared-singleton
+            # reset specifically BECAUSE _resolve_max_workers() defaults to a
+            # single worker even in hosted mode (see this module's docstring).
+            # Concurrent jobs would need per-job usage tracking, which this
+            # does not attempt -- a documented limitation of today's default,
+            # not an oversight; raising MAX_CONCURRENT_JOBS without also fixing
+            # this would make usage numbers meaningless across overlapping jobs.
+            #
+            # Inside this try (not above it, where it lived before) --
+            # get_llm_provider() raises LLMProviderError when hosted config
+            # is missing/bad, and that used to happen before any exception
+            # handling was in scope at all, so it escaped _run_job entirely
+            # uncaught -- silently dropped by concurrent.futures, leaving the
+            # job stuck at RUNNING until the timeout sweep catches it minutes
+            # later. Caught in CI (no real hosted credentials configured)
+            # via test_run_job_maps_llm_provider_error_to_structured_code --
+            # passed locally only because a real .env with working
+            # LLM_BASE_URL/LLM_API_KEY/LLM_MODEL masked it.
+            provider = get_llm_provider()
+            provider.reset_usage()
+
             agent = (agent_factory or ORCHESTRATORS[orchestrator_name])()
             context = agent.run(question)
 
