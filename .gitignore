@@ -59,3 +59,6 @@ scripts/backtest_results_*.json
 # Local secrets (Finnhub API key, etc.) -- never commit real values.
 # Copy .env.example to .env and fill in your own key.
 .env
+# Next.js frontend (web/) -- has its own .gitignore for build artifacts;
+# this repo-root .gitignore only needs to keep node_modules/ out.
+web/node_modules/
