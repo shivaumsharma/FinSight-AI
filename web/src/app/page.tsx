@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useResearch } from "@/lib/useResearch";
 import ReportView from "@/components/ReportView";
 import ResearchProgress from "@/components/ResearchProgress";
+import InstallPrompt from "@/components/InstallPrompt";
 
 const QUICK_TICKERS = ["AAPL", "NVDA", "TSLA", "MSFT"];
 
@@ -20,6 +21,8 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-bg">
       <div className="mx-auto max-w-2xl px-5 py-8">
+        <InstallPrompt />
+
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border pb-3">
           <span className="font-mono text-base font-bold tracking-wide text-text">FINSIGHT</span>
