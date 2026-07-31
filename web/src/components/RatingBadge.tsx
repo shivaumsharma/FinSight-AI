@@ -1,27 +1,28 @@
 const COLORS: Record<string, string> = {
-  Buy: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300",
-  Hold: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-  Sell: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
-  "Insufficient Data": "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300",
+  Buy: "text-accent border-accent",
+  Hold: "text-warn border-warn",
+  Sell: "text-danger border-danger",
+  "Insufficient Data": "text-muted border-dim",
 };
 
-export function ratingTextColor(rating: string): string {
+export function ratingColorClass(rating: string): string {
   switch (rating) {
     case "Buy":
-      return "text-green-600 dark:text-green-400";
+      return "text-accent";
     case "Hold":
-      return "text-amber-600 dark:text-amber-400";
+      return "text-warn";
     case "Sell":
-      return "text-red-600 dark:text-red-400";
+      return "text-danger";
     default:
-      return "text-gray-500 dark:text-gray-400";
+      return "text-muted";
   }
 }
 
-export default function RatingBadge({ rating }: { rating: string }) {
+export default function RatingBadge({ rating, size = "md" }: { rating: string; size?: "sm" | "md" }) {
   const cls = COLORS[rating] || COLORS["Insufficient Data"];
+  const sizing = size === "sm" ? "px-2 py-0.5 text-[10px]" : "px-3 py-1 text-sm";
   return (
-    <span className={`inline-block rounded-full px-4 py-1 text-lg font-semibold ${cls}`}>
+    <span className={`inline-block rounded font-mono font-bold uppercase tracking-wide border ${cls} ${sizing}`}>
       {rating}
     </span>
   );

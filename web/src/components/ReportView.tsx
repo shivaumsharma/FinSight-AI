@@ -1,12 +1,75 @@
-import RatingBadge, { ratingTextColor } from "./RatingBadge";
-import Collapsible from "./Collapsible";
+import RatingBadge, { ratingColorClass } from "./RatingBadge";
+import Tabs from "./Tabs";
 import type { ResearchResult } from "@/lib/types";
 
-function StatCard({ label, value }: { label: string; value: React.ReactNode }) {
+function StatTile({ label, value, valueClass }: { label: string; value: React.ReactNode; valueClass?: string }) {
   return (
-    <div className="rounded-lg bg-gray-50 px-4 py-3 dark:bg-gray-900">
-      <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</div>
-      <div className="mt-1 text-lg font-semibold text-gray-900 dark:text-gray-100">{value}</div>
+    <div className="flex-1 rounded-lg border border-border bg-card px-3 py-2.5">
+      <div className="font-mono text-[10px] text-muted">{label}</div>
+      <div className={`mt-0.5 font-mono text-sm font-bold ${valueClass || "text-text"}`}>{value}</div>
+    </div>
+  );
+}
+
+function ToneTile({ label, tone }: { label: string; tone: string }) {
+  const lower = (tone || "").toLowerCase();
+  const cls = lower.includes("positive")
+    ? "text-accent"
+    : lower.includes("negative")
+    ? "text-danger"
+    : "text-warn";
+  return (
+    <div className="flex flex-1 items-center justify-between rounded-lg border border-border bg-card px-3 py-2">
+      <span className="font-mono text-[10px] text-muted">{label}</span>
+      <span className={`font-mono text-[10px] font-bold uppercase ${cls}`}>{tone || "Unavailable"}</span>
+    </div>
+  );
+}
+
+// report_data_builder.py hands back raw numbers for every field here --
+// nothing is pre-formatted server-side (confirmed against a real job
+// response: WACC=0.1100821..., "Intrinsic Value (per share)"=96.6947...).
+// The old Streamlit UI never rendered these fields directly (only the
+// PDF builder formatted them), so this formatting never existed until
+// now. Dispatches on the field's *name*, not a value heuristic, since
+// the key vocabulary is fixed and small (report_data_builder.py's
+// build_report_data()) -- a fraction like WACC and a percentage-point
+// value like "Revenue Growth (%)" are both plain floats and
+// indistinguishable by magnitude alone.
+const FRACTION_KEYS = new Set(["WACC", "Raw WACC", "Terminal Growth Rate"]);
+const DOLLAR_LARGE_KEYS = new Set(["Revenue", "EBIT", "Net Income", "Free Cash Flow", "Enterprise Value", "Equity Value"]);
+const DOLLAR_SMALL_KEYS = new Set(["Current Price", "Intrinsic Value (per share)", "EPS"]);
+
+function fmtLargeDollar(v: number): string {
+  const abs = Math.abs(v);
+  if (abs >= 1e9) return `$${(v / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `$${(v / 1e6).toFixed(2)}M`;
+  return `$${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+
+function formatFieldValue(key: string, value: unknown): string {
+  if (value === null || value === undefined) return "N/A";
+  if (typeof value !== "number") return String(value);
+
+  if (FRACTION_KEYS.has(key)) return `${(value * 100).toFixed(2)}%`;
+  if (key.endsWith("(%)")) return `${value.toFixed(2)}%`;
+  if (DOLLAR_LARGE_KEYS.has(key)) return fmtLargeDollar(value);
+  if (DOLLAR_SMALL_KEYS.has(key)) return `$${value.toFixed(2)}`;
+  if (key === "Debt to Equity") return `${value.toFixed(2)}x`;
+  return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function KeyValueGrid({ data }: { data: Record<string, unknown> | undefined }) {
+  if (!data) return null;
+  const entries = Object.entries(data).filter(([, v]) => v !== null && v !== undefined);
+  return (
+    <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
+      {entries.map(([k, v]) => (
+        <div key={k}>
+          <div className="font-mono text-[10px] uppercase tracking-wide text-muted">{k}</div>
+          <div className="font-mono text-sm text-text">{formatFieldValue(k, v)}</div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -21,6 +84,14 @@ function fmtMoney(n: number | null | undefined): string {
   return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+const NARRATIVE_SECTIONS = [
+  "Executive Summary",
+  "Business Analysis",
+  "Market and Earnings Analysis",
+  "Risk Analysis",
+  "Investment Thesis",
+] as const;
+
 export default function ReportView({
   result,
   jobId,
@@ -33,156 +104,262 @@ export default function ReportView({
   const rd = result.report_data || {};
   const rec = rd.recommendation || { rating: "Insufficient Data", basis: "" };
   const confidence = rd.confidence_scores || {};
+  const market = rd.market_earnings_snapshot || {};
   const valuation = rd.valuation_analysis || {};
   const monteCarlo = valuation.monte_carlo;
   const mlClassifier = valuation.ml_classifier;
   const consensus = rd.institutional_consensus?.recommendation_consensus;
   const news = rd.news_sources || {};
-  const summary = rd.narrative?.["Executive Summary"];
+  const company = (rd.company_overview as Record<string, unknown>) || {};
+
+  const upside = valuation["Upside (%)"];
+  const upsideNum = typeof upside === "string" ? parseFloat(upside) : (upside as number | undefined);
 
   return (
-    <div className="mt-8 space-y-6">
-      {rd.mode === "comparison" && result.peer_ticker && (
-        <div className="rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800 dark:bg-blue-950 dark:text-blue-300">
-          Comparing {result.ticker} vs {result.peer_ticker}
+    <div className="mt-8">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="font-mono text-lg font-bold text-text">{result.ticker}</div>
+          <div className="text-xs text-muted">
+            {String(company.name || "")}
+            {company.sector ? ` · ${company.sector}` : ""}
+          </div>
         </div>
-      )}
-
-      <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Report Ready</h2>
-
-      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
-        <strong>This report is a predictive analytical signal generated by an automated research tool, not
-        personalized investment advice.</strong> Past performance and model outputs are not guarantees of future
-        results. Consult a licensed financial advisor before making investment decisions.
+        {result.mode === "comparison" && result.peer_ticker && (
+          <div className="rounded bg-card px-3 py-1 text-xs text-muted">vs {result.peer_ticker}</div>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-        <div className="md:col-span-1 space-y-3">
+      <div className="mt-4 rounded-lg border border-amber-900/60 bg-amber-950/40 px-4 py-3 text-xs text-warn">
+        <strong>Predictive analytical signal, not personalized investment advice.</strong> Past performance and
+        model outputs are not guarantees of future results. Consult a licensed financial advisor before making
+        investment decisions.
+      </div>
+
+      {/* Verdict card -- border color set inline since it's chosen from
+          a runtime value (rating); a Tailwind class built via template
+          string wouldn't survive Tailwind's static build-time scan. */}
+      <div
+        className="mt-4 flex items-center justify-between rounded-lg border bg-card px-4 py-3"
+        style={{
+          borderColor:
+            rec.rating === "Buy"
+              ? "var(--accent)"
+              : rec.rating === "Sell"
+              ? "var(--danger)"
+              : rec.rating === "Hold"
+              ? "var(--warn)"
+              : "var(--border)",
+        }}
+      >
+        <div>
           <RatingBadge rating={rec.rating} />
-          <p className="text-sm text-gray-600 dark:text-gray-400">{rec.basis}</p>
-          {rec.composite_score !== null && rec.composite_score !== undefined && (
-            <div className="grid grid-cols-3 gap-2">
-              <StatCard label="DCF Score" value={fmtScore(rec.dcf_score)} />
-              <StatCard label="Relative Score" value={fmtScore(rec.relative_score)} />
-              <StatCard label="Composite" value={fmtScore(rec.composite_score)} />
-            </div>
-          )}
-          {rec.confidence_flag && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
-              <strong>Low-confidence signal:</strong> {rec.confidence_flag}
-            </div>
-          )}
+          <div className="mt-1 text-[10.5px] text-muted">
+            composite {fmtScore(rec.composite_score)} · overall score {confidence["Overall Score"] ?? "N/A"}
+          </div>
         </div>
-        <div className="md:col-span-2 grid grid-cols-3 gap-2 content-start">
-          <StatCard label="Overall Score" value={confidence["Overall Score"] ?? "N/A"} />
-          <StatCard label="Grounding" value={confidence["Grounding (%)"] ?? "N/A"} />
-          <StatCard label="Latency" value={latencySeconds ? `${latencySeconds.toFixed(1)}s` : "N/A"} />
-        </div>
-      </div>
-
-      {summary && (
-        <Collapsible title="Executive Summary preview" defaultOpen>
-          <p className="whitespace-pre-wrap text-sm text-gray-800 dark:text-gray-200">{summary}</p>
-        </Collapsible>
-      )}
-
-      {monteCarlo && (
-        <Collapsible title="Monte Carlo Simulation (intrinsic value distribution)">
-          <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-            {monteCarlo.n_samples.toLocaleString()} samples over growth rate / WACC / terminal growth -- a
-            distribution around the DCF point estimate, not another verdict. Not yet folded into the recommendation
-            composite above.
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            <StatCard label="Mean Intrinsic Value" value={fmtMoney(monteCarlo.mean)} />
-            <StatCard label="Median" value={fmtMoney(monteCarlo.median)} />
-            <StatCard label="Probability Undervalued" value={`${(monteCarlo.prob_undervalued * 100).toFixed(1)}%`} />
-          </div>
-          <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-            90% CI: {fmtMoney(monteCarlo.ci_lower)} - {fmtMoney(monteCarlo.ci_upper)} | 25th-75th percentile:{" "}
-            {fmtMoney(monteCarlo.p25)} - {fmtMoney(monteCarlo.p75)} | Std Dev: {fmtMoney(monteCarlo.std_dev)}
-          </p>
-        </Collapsible>
-      )}
-
-      {mlClassifier && (
-        <Collapsible title="ML Valuation Classifier (informational only)">
-          <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-            Trained on FinSight&apos;s own point-in-time backtest data. <strong>Not part of the recommendation
-            above</strong> -- it has no accuracy track record yet, unlike DCF and relative valuation, both of which
-            have been backtested.
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            <StatCard label="ML Verdict" value={mlClassifier.verdict} />
-            <StatCard
-              label="Confidence"
-              value={`${((mlClassifier.probabilities[mlClassifier.verdict] || 0) * 100).toFixed(1)}%`}
-            />
-          </div>
-          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-            Model: {mlClassifier.model_name.replace(/_/g, " ")}
-          </p>
-        </Collapsible>
-      )}
-
-      {consensus && (
-        <Collapsible title="Institutional Consensus Score" defaultOpen>
-          <div className="mb-3">
-            <div className="text-3xl font-bold text-gray-900 dark:text-gray-100">{consensus.score}%</div>
-            <div className="font-medium text-gray-600 dark:text-gray-400">{consensus.label}</div>
-          </div>
-          <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">{consensus.methodology}</p>
-          <div className="mb-3 space-y-1">
-            <div className="font-semibold text-sm text-gray-900 dark:text-gray-100">Market Consensus</div>
-            {consensus.institutional_ratings.map((r, i) => (
-              <div key={i} className="flex justify-between text-sm">
-                <span className="text-gray-700 dark:text-gray-300">{r.firm}</span>
-                <span className={`font-semibold ${ratingTextColor(r.rating.charAt(0).toUpperCase() + r.rating.slice(1).toLowerCase())}`}>
-                  {r.rating}
-                </span>
-              </div>
-            ))}
-          </div>
-          <div className="mb-2">
-            <div className="font-semibold text-sm text-gray-900 dark:text-gray-100">FinSight Recommendation</div>
-            <RatingBadge rating={consensus.finsight_rating} />
-          </div>
-          <div>
-            <div className="font-semibold text-sm text-gray-900 dark:text-gray-100">Market Summary</div>
-            <p className="text-sm text-gray-700 dark:text-gray-300">{consensus.summary}</p>
-          </div>
-        </Collapsible>
-      )}
-
-      <Collapsible title={`News Sources Used in This Analysis (${news.total_retrieved || 0} retrieved, ${news.total_selected || 0} used)`}>
-        {!news.total_retrieved ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">No recent news coverage was found for this company.</p>
-        ) : (
-          <div className="space-y-3">
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Every article retrieved is shown here, not just the ones used in the analysis above -- so you can judge
-              whether the selection looks reasonable, not only what the model chose to reference.
-            </p>
-            {news.all_articles?.map((a, i) => (
-              <div key={i} className="text-sm">
-                <a href={a.url} target="_blank" rel="noreferrer" className="font-medium text-blue-600 hover:underline dark:text-blue-400">
-                  {a.headline}
-                </a>
-                <div className="text-xs text-gray-500 dark:text-gray-400">
-                  {a.source} — {a.date} — {a.used_in_analysis ? "✅ Used" : "⬜ Retrieved, not used"}
-                </div>
-              </div>
-            ))}
+        {upsideNum !== undefined && !Number.isNaN(upsideNum) && (
+          <div className="text-right">
+            <div className="font-mono text-[10px] text-muted">UPSIDE</div>
+            <div className={`font-mono text-lg font-bold ${upsideNum >= 0 ? "text-accent" : "text-danger"}`}>
+              {upsideNum >= 0 ? "+" : ""}
+              {upsideNum.toFixed(1)}%
+            </div>
           </div>
         )}
-      </Collapsible>
+      </div>
+      <p className="mt-2 text-xs text-muted">{rec.basis}</p>
+      {rec.confidence_flag && (
+        <div className="mt-2 rounded-lg border border-amber-900/60 bg-amber-950/40 px-3 py-2 text-xs text-warn">
+          <strong>Low-confidence signal:</strong> {rec.confidence_flag}
+        </div>
+      )}
+
+      {/* Stat tiles */}
+      <div className="mt-3 flex gap-2">
+        <StatTile label="PRICE" value={fmtMoney(market.current_price)} />
+        <StatTile label="INTRINSIC" value={formatFieldValue("Intrinsic Value (per share)", valuation["Intrinsic Value (per share)"])} />
+        <StatTile label="WACC" value={formatFieldValue("WACC", valuation["WACC"])} />
+      </div>
+      <div className="mt-2 flex gap-2">
+        <ToneTile label="SEC TONE (MGMT)" tone={market.sentiment_label || ""} />
+        <ToneTile label="NEWS TONE" tone={market.news_sentiment_label || ""} />
+      </div>
+      {latencySeconds !== null && (
+        <div className="mt-2 text-right text-[10px] font-mono text-dim">generated in {latencySeconds.toFixed(1)}s</div>
+      )}
+
+      {/* Tabs */}
+      <div className="mt-6">
+        <Tabs
+          tabs={[
+            {
+              label: "Overview",
+              content: (
+                <div>
+                  <div className="mb-2 font-mono text-[11px] font-bold tracking-wide text-muted">
+                    EXECUTIVE SUMMARY
+                  </div>
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-text/90">
+                    {rd.narrative?.["Executive Summary"] || "Not available."}
+                  </p>
+                </div>
+              ),
+            },
+            {
+              label: "Financials",
+              content: (
+                <div className="space-y-5">
+                  <div>
+                    <div className="mb-2 font-mono text-[11px] font-bold tracking-wide text-muted">STATEMENT</div>
+                    <KeyValueGrid data={rd.financial_statement_analysis} />
+                  </div>
+                  <div>
+                    <div className="mb-2 font-mono text-[11px] font-bold tracking-wide text-muted">RATIOS</div>
+                    <KeyValueGrid data={rd.ratio_analysis} />
+                  </div>
+                  <div>
+                    <div className="mb-2 font-mono text-[11px] font-bold tracking-wide text-muted">GROWTH</div>
+                    <KeyValueGrid data={rd.growth_analysis} />
+                  </div>
+                </div>
+              ),
+            },
+            {
+              label: "DCF",
+              content: (
+                <div className="space-y-5">
+                  {valuation["DCF Available"] === false ? (
+                    <p className="text-sm text-muted">{String(valuation["DCF Unavailable Reason"] || "DCF unavailable for this company.")}</p>
+                  ) : (
+                    <KeyValueGrid
+                      data={{
+                        "Enterprise Value": valuation["Enterprise Value"],
+                        "Equity Value": valuation["Equity Value"],
+                        "Intrinsic Value (per share)": valuation["Intrinsic Value (per share)"],
+                        "Current Price": valuation["Current Price"],
+                        "Upside (%)": valuation["Upside (%)"],
+                        WACC: valuation["WACC"],
+                        "Raw WACC": valuation["Raw WACC"],
+                        "Terminal Growth Rate": valuation["Terminal Growth Rate"],
+                      }}
+                    />
+                  )}
+
+                  {monteCarlo && (
+                    <div>
+                      <div className="mb-2 font-mono text-[11px] font-bold tracking-wide text-muted">
+                        MONTE CARLO ({monteCarlo.n_samples.toLocaleString()} samples)
+                      </div>
+                      <div className="flex gap-2">
+                        <StatTile label="MEAN" value={fmtMoney(monteCarlo.mean)} />
+                        <StatTile label="MEDIAN" value={fmtMoney(monteCarlo.median)} />
+                        <StatTile label="P(UNDERVALUED)" value={`${(monteCarlo.prob_undervalued * 100).toFixed(1)}%`} />
+                      </div>
+                      <p className="mt-2 text-[11px] text-muted">
+                        90% CI: {fmtMoney(monteCarlo.ci_lower)} - {fmtMoney(monteCarlo.ci_upper)}
+                      </p>
+                    </div>
+                  )}
+
+                  {mlClassifier && (
+                    <div>
+                      <div className="mb-2 font-mono text-[11px] font-bold tracking-wide text-muted">
+                        ML CLASSIFIER (informational only)
+                      </div>
+                      <div className="flex gap-2">
+                        <StatTile label="VERDICT" value={mlClassifier.verdict} />
+                        <StatTile
+                          label="CONFIDENCE"
+                          value={`${((mlClassifier.probabilities[mlClassifier.verdict] || 0) * 100).toFixed(1)}%`}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ),
+            },
+            {
+              label: "Narrative",
+              content: (
+                <div className="space-y-5">
+                  {NARRATIVE_SECTIONS.map((section) =>
+                    rd.narrative?.[section] ? (
+                      <div key={section}>
+                        <div className="mb-2 font-mono text-[11px] font-bold tracking-wide text-muted">
+                          {section.toUpperCase()}
+                        </div>
+                        <p className="whitespace-pre-wrap text-sm leading-relaxed text-text/90">{rd.narrative[section]}</p>
+                      </div>
+                    ) : null
+                  )}
+                </div>
+              ),
+            },
+            {
+              label: "Sources",
+              content: (
+                <div className="space-y-6">
+                  {consensus && (
+                    <div>
+                      <div className="mb-2 font-mono text-[11px] font-bold tracking-wide text-muted">
+                        INSTITUTIONAL CONSENSUS
+                      </div>
+                      <div className="font-mono text-2xl font-bold text-text">{consensus.score}%</div>
+                      <div className="text-xs text-muted">{consensus.label}</div>
+                      <p className="mt-2 text-[11px] text-muted">{consensus.methodology}</p>
+                      <div className="mt-3 space-y-1">
+                        {consensus.institutional_ratings.map((r, i) => (
+                          <div key={i} className="flex justify-between text-xs">
+                            <span className="text-text/80">{r.firm}</span>
+                            <span
+                              className={`font-mono font-bold ${ratingColorClass(
+                                r.rating.charAt(0).toUpperCase() + r.rating.slice(1).toLowerCase()
+                              )}`}
+                            >
+                              {r.rating}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-3 text-xs text-muted">{consensus.summary}</p>
+                    </div>
+                  )}
+
+                  <div>
+                    <div className="mb-2 font-mono text-[11px] font-bold tracking-wide text-muted">
+                      NEWS SOURCES ({news.total_retrieved || 0} retrieved, {news.total_selected || 0} used)
+                    </div>
+                    {!news.total_retrieved ? (
+                      <p className="text-xs text-muted">No recent news coverage was found for this company.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {news.all_articles?.map((a, i) => (
+                          <div key={i} className="text-xs">
+                            <a href={a.url} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
+                              {a.headline}
+                            </a>
+                            <div className="text-[10px] text-muted">
+                              {a.source} — {a.date} — {a.used_in_analysis ? "Used" : "Retrieved, not used"}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ),
+            },
+          ]}
+        />
+      </div>
 
       <a
         href={`/api/research/${jobId}/pdf`}
         download={`${result.ticker}_FinSight_Research_Report.pdf`}
-        className="inline-block rounded-lg bg-gray-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
+        className="mt-6 inline-block rounded-lg bg-accent px-5 py-2.5 font-mono text-xs font-bold text-bg hover:opacity-90"
       >
-        Download Full Research Report (PDF)
+        EXPORT PDF
       </a>
     </div>
   );
