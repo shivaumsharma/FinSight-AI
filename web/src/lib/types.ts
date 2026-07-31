@@ -27,6 +27,15 @@ export interface MarketEarningsSnapshot {
 export interface ValuationAnalysis {
   "DCF Available"?: boolean;
   "DCF Unavailable Reason"?: string | null;
+  "Enterprise Value"?: string | number;
+  "Equity Value"?: string | number;
+  "Intrinsic Value (per share)"?: string | number;
+  "Current Price"?: string | number;
+  "Upside (%)"?: string | number;
+  WACC?: string;
+  "Raw WACC"?: string | number;
+  "WACC Floor Note"?: string | null;
+  "Terminal Growth Rate"?: string | number;
   monte_carlo?: {
     n_samples: number;
     mean: number;
@@ -69,12 +78,28 @@ export interface NewsSources {
   }[];
 }
 
+export type NarrativeSection =
+  | "Executive Summary"
+  | "Business Analysis"
+  | "Market and Earnings Analysis"
+  | "Risk Analysis"
+  | "Investment Thesis";
+
 export interface ReportData {
   recommendation?: RecommendationData;
-  confidence_scores?: { "Overall Score"?: number | string; "Grounding (%)"?: number | string };
-  narrative?: { "Executive Summary"?: string; [key: string]: unknown };
+  confidence_scores?: {
+    "Overall Score"?: number | string;
+    "Grounding (%)"?: number | string;
+    "Retrieval (%)"?: number | string;
+    "Citation Coverage (%)"?: number | string;
+    "Completeness (%)"?: number | string;
+  };
+  narrative?: Partial<Record<NarrativeSection, string>>;
   market_earnings_snapshot?: MarketEarningsSnapshot;
   valuation_analysis?: ValuationAnalysis;
+  financial_statement_analysis?: Record<string, number | string>;
+  ratio_analysis?: Record<string, number | string>;
+  growth_analysis?: Record<string, number | string>;
   institutional_consensus?: InstitutionalConsensus;
   news_sources?: NewsSources;
   [key: string]: unknown;
