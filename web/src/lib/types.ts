@@ -86,6 +86,9 @@ export type NarrativeSection =
   | "Investment Thesis";
 
 export interface ReportData {
+  currency?: string;
+  currency_symbol?: string;
+  filing_evidence_note?: string | null;
   recommendation?: RecommendationData;
   confidence_scores?: {
     "Overall Score"?: number | string;

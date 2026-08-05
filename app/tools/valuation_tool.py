@@ -45,6 +45,7 @@ class ValuationTool(BaseTool):
             market_cap=context.market_cap,
             beta=context.beta,
             ticker=context.ticker,
+            currency=(context.company_info or {}).get("currency"),
         )
 
         results = pipeline.run_valuation()

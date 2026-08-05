@@ -40,6 +40,15 @@ CACHE_DIR = BASE_DIR / "filings_cache"
 COMPANY_INDEX_CACHE = CACHE_DIR / "company_index.json"
 COMPANY_INDEX_TTL_SECONDS = 7 * 24 * 3600
 
+# NSE's own free, public, no-auth equity list -- same shape of problem
+# as SEC's company_tickers.json (symbol + company name), just covering
+# India's primary exchange instead of the US. BSE isn't covered: NSE is
+# the more liquid listing for virtually every major Indian name, and a
+# second exchange index isn't worth the added ambiguity for v1.
+NSE_INDEX_CACHE = CACHE_DIR / "nse_company_index.json"
+NSE_INDEX_TTL_SECONDS = 7 * 24 * 3600
+NSE_EQUITY_LIST_URL = "https://archives.nseindia.com/content/equities/EQUITY_L.csv"
+
 # Companies whose common/colloquial name doesn't closely resemble
 # their official SEC registrant name -- fuzzy matching alone would
 # miss these.
@@ -152,6 +161,77 @@ def _load_index() -> dict:
     data["tickers"] = set(data["tickers"])
     _index = data
     return _index
+
+
+def _fetch_nse_index() -> dict:
+    resp = requests.get(NSE_EQUITY_LIST_URL, headers=HEADERS, timeout=15)
+    resp.raise_for_status()
+
+    tickers = set()
+    title_to_ticker = {}
+
+    lines = resp.text.splitlines()
+    header = [c.strip().upper() for c in lines[0].split(",")]
+    symbol_idx = header.index("SYMBOL")
+    name_idx = header.index("NAME OF COMPANY")
+
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        cols = line.split(",")
+        if len(cols) <= max(symbol_idx, name_idx):
+            continue
+        symbol = cols[symbol_idx].strip()
+        name = cols[name_idx].strip()
+        if not symbol or not name:
+            continue
+        # .NS suffix so the resolved ticker flows straight into
+        # yfinance correctly downstream (same convention yfinance
+        # itself uses for NSE-listed symbols).
+        ticker = f"{symbol}.NS"
+        tickers.add(ticker)
+        if name not in title_to_ticker:
+            title_to_ticker[name] = ticker
+
+    return {
+        "tickers": sorted(tickers),
+        "title_to_ticker": title_to_ticker,
+    }
+
+
+_nse_index = None
+
+
+def _load_nse_index() -> dict:
+    global _nse_index
+    if _nse_index is not None:
+        return _nse_index
+
+    CACHE_DIR.mkdir(exist_ok=True)
+
+    if NSE_INDEX_CACHE.exists():
+        age = time.time() - NSE_INDEX_CACHE.stat().st_mtime
+        if age < NSE_INDEX_TTL_SECONDS:
+            with open(NSE_INDEX_CACHE, "r", encoding="utf-8") as f:
+                _nse_index = json.load(f)
+                _nse_index["tickers"] = set(_nse_index["tickers"])
+                return _nse_index
+
+    try:
+        data = _fetch_nse_index()
+    except (requests.RequestException, ValueError, KeyError):
+        # NSE's archive endpoint is less consistently available than
+        # SEC's -- a fetch failure here should degrade to "no Indian
+        # companies resolved this run", not break US resolution, which
+        # doesn't depend on this index at all.
+        data = {"tickers": [], "title_to_ticker": {}}
+
+    with open(NSE_INDEX_CACHE, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+    data["tickers"] = set(data["tickers"])
+    _nse_index = data
+    return _nse_index
 
 
 def _extract_candidate_phrases(question: str) -> List[str]:
@@ -319,6 +399,28 @@ def _best_title_match(phrase: str, all_titles: List[str]):
     return tied[0]
 
 
+def _token_overlap_ratio(phrase: str, title: str) -> float:
+    """
+    Fraction of `phrase`'s distinct words (excluding joiners) that
+    also appear as whole words in `title`. WRatio alone can't tell
+    "most of the query's words are in this title" apart from "one
+    word happens to overlap and the rest of the score comes from
+    generic character-level similarity" -- the failure mode that let
+    "Bajaj Finance" match "Roma Green Finance Limited" purely on the
+    shared word "Finance" before an NSE index existed to supply the
+    real match. Used as a second, independent check alongside the
+    WRatio threshold, not a replacement for it.
+    """
+    phrase_words = {
+        w.lower() for w in _WORD_TOKEN.findall(phrase) if w.lower() not in _JOINERS
+    }
+    if not phrase_words:
+        return 1.0
+    title_words = {w.lower() for w in _WORD_TOKEN.findall(title)}
+    overlap = sum(1 for w in phrase_words if w in title_words)
+    return overlap / len(phrase_words)
+
+
 def resolve_companies(question: str) -> List[str]:
     """
     Extracts an ordered, de-duplicated list of tickers for companies
@@ -328,6 +430,7 @@ def resolve_companies(question: str) -> List[str]:
     """
 
     index = _load_index()
+    nse_index = _load_nse_index()
     found = []
 
     for token in _TICKER_TOKEN.findall(question):
@@ -339,7 +442,15 @@ def resolve_companies(question: str) -> List[str]:
         if alias in lowered and ticker not in found:
             found.append(ticker)
 
-    all_titles = list(index["title_to_ticker"].keys())
+    # SEC and NSE titles are matched as one combined universe so a
+    # genuine Indian company (e.g. "Bajaj Finance") scores against its
+    # real NSE listing rather than only ever being compared to
+    # unrelated US companies. Title collisions across the two lists
+    # are not a real-world concern (company registrant names don't
+    # coincide), so a plain merge (NSE wins on the practically-never
+    # collision) is fine.
+    title_to_ticker = {**index["title_to_ticker"], **nse_index["title_to_ticker"]}
+    all_titles = list(title_to_ticker.keys())
 
     # "and" is ambiguous: it's a legitimate internal word in some
     # company names, but in "Compare Amazon and Google" it's actually
@@ -371,7 +482,7 @@ def resolve_companies(question: str) -> List[str]:
 
         match = _best_title_match(phrase, all_titles)
         if match and match[1] >= FUZZY_MATCH_THRESHOLD:
-            ticker = index["title_to_ticker"][match[0]]
+            ticker = title_to_ticker[match[0]]
             if ticker not in found:
                 found.append(ticker)
 
@@ -379,8 +490,21 @@ def resolve_companies(question: str) -> List[str]:
         proposed_name = _llm_propose_company_name(question)
         if proposed_name:
             match = _best_title_match(proposed_name, all_titles)
-            if match and match[1] >= FUZZY_MATCH_THRESHOLD:
-                ticker = index["title_to_ticker"][match[0]]
+            # Stricter than the capitalized-phrase path above: this
+            # candidate came from the LLM, not directly from the
+            # question, so a bad proposal has already passed through
+            # one extra, less reliable step. Requiring most of the
+            # candidate's own words to actually appear in the matched
+            # title closes the coincidental-single-word-overlap gap
+            # that WRatio's scoring ceiling leaves open (see
+            # _best_title_match's docstring) for any name -- Indian
+            # or otherwise -- not covered by a known index.
+            if (
+                match
+                and match[1] >= FUZZY_MATCH_THRESHOLD
+                and _token_overlap_ratio(proposed_name, match[0]) > 0.5
+            ):
+                ticker = title_to_ticker[match[0]]
                 found.append(ticker)
 
     return found

@@ -4,6 +4,12 @@ import numpy as np
 
 class WACCEngine:
 
+  # risk_free_rate/market_risk_premium default to a US CAPM approximation
+  # (~10Y Treasury yield, ~long-run US equity risk premium). Callers with
+  # a non-USD company should pass currency-appropriate values instead of
+  # relying on these defaults -- see valuation_pipeline.py's
+  # RISK_FREE_RATE_BY_CURRENCY / MARKET_RISK_PREMIUM_BY_CURRENCY for the
+  # only place in this codebase that currently does so.
   def  __init__(self,financial_df,market_cap,beta,risk_free_rate=0.04,market_risk_premium=0.06):
     self.financial_df=financial_df
     self.market_cap=market_cap

@@ -28,9 +28,11 @@ from app.valuation.dcf_engine import DCFEngine
 from app.valuation.fcff_engine import FCFFEngine
 from app.reporting.report_data_builder import _dcf_score, _composite_score, _rating_from_score
 
-# Kept in sync with valuation_pipeline.DEFAULT_TERMINAL_GROWTH_RATE --
-# see that constant's comment for why 4%, not 3%.
+# Kept in sync with valuation_pipeline.DEFAULT_TERMINAL_GROWTH_RATE /
+# .TERMINAL_GROWTH_RATE_BY_CURRENCY -- see those constants' comments
+# for why 4%/5%, not 3%.
 DEFAULT_TERMINAL_GROWTH_RATE = 0.04
+TERMINAL_GROWTH_RATE_BY_CURRENCY = {"USD": DEFAULT_TERMINAL_GROWTH_RATE, "INR": 0.05}
 DEFAULT_FORECAST_YEARS = 10
 
 # Slider bounds. WACC's bounds are NOT here -- they're centered on
@@ -41,8 +43,16 @@ DEFAULT_FORECAST_YEARS = 10
 # no equivalent in the sensitivity grid (that grid only varies WACC x
 # terminal growth) -- reuses monte_carlo_dcf.GROWTH_RATE_CLIP, the
 # next-closest already-established bound for this exact parameter.
+#
+# Terminal-growth bounds are keyed by currency for the same reason the
+# default is: a fixed 1-5% slider range would clip INR's 5% default
+# right at its own ceiling, leaving no room to explore above it.
 GROWTH_RATE_MIN, GROWTH_RATE_MAX = -0.10, 0.30
 TERMINAL_GROWTH_MIN, TERMINAL_GROWTH_MAX = 0.01, 0.05
+TERMINAL_GROWTH_BOUNDS_BY_CURRENCY = {
+    "USD": (0.01, 0.05),
+    "INR": (0.02, 0.07),
+}
 WACC_OFFSET = 0.02  # +/- around the company's own raw WACC
 
 

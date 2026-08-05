@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from app.core.currency import currency_symbol
 from app.core.research_context import ResearchContext
 
 
@@ -333,6 +334,7 @@ def derive_recommendation(
     valuation_results: Dict[str, Any],
     sentiment_summary: Dict[str, Any] = None,
     news_sentiment_summary: Dict[str, Any] = None,
+    currency: str = "USD",
 ) -> Dict[str, str]:
     """
     Public (not module-private) since institutional_consensus_tool.py
@@ -437,10 +439,11 @@ def derive_recommendation(
         )
     if mc_wide_ci and rating in ("Buy", "Sell"):
         monte_carlo = valuation_results["monte_carlo"]
+        symbol = currency_symbol(currency)
         basis += (
             f" Note: the Monte Carlo simulation's 90% confidence interval for "
-            f"intrinsic value (${monte_carlo['ci_lower']:,.2f} - ${monte_carlo['ci_upper']:,.2f}) "
-            f"straddles the current price (${valuation_results['current_price']:,.2f}) -- "
+            f"intrinsic value ({symbol}{monte_carlo['ci_lower']:,.2f} - {symbol}{monte_carlo['ci_upper']:,.2f}) "
+            f"straddles the current price ({symbol}{valuation_results['current_price']:,.2f}) -- "
             f"the simulation itself doesn't confidently say over- or under-valued once "
             f"realistic growth/WACC/terminal-growth uncertainty is accounted for. Worth "
             f"weighing alongside the DCF point estimate above, not a reason to discount "
@@ -474,7 +477,7 @@ def derive_recommendation(
 
 def _confidence_flag(
     valuation_results: Dict[str, Any], current_price, rating: str,
-    disagreement: bool = False, mc_wide_ci: bool = False,
+    disagreement: bool = False, mc_wide_ci: bool = False, currency: str = "USD",
 ):
     """
     If the recommendation holds across the ENTIRE tested sensitivity
@@ -531,14 +534,15 @@ def _confidence_flag(
     sensitivity_df = valuation_results.get("sensitivity_analysis")
     if rating in ("Buy", "Sell") and current_price is not None and sensitivity_df is not None and not sensitivity_df.empty:
 
+        symbol = currency_symbol(currency)
         if rating == "Sell":
             best_case_value = sensitivity_df.values.max()
             if best_case_value < current_price:
                 gap = (best_case_value - current_price) / current_price * 100
                 flags.append(
                     f"Even the most bullish WACC/growth combination tested (implied value "
-                    f"${best_case_value:,.2f}) remains {gap:.1f}% below the current price "
-                    f"of ${current_price:,.2f}. This Sell call does not vary across the "
+                    f"{symbol}{best_case_value:,.2f}) remains {gap:.1f}% below the current price "
+                    f"of {symbol}{current_price:,.2f}. This Sell call does not vary across the "
                     f"tested sensitivity range -- that can mean the conclusion is robust, "
                     f"or that the model's assumptions (WACC, growth, or the FCF base) are "
                     f"miscalibrated for this company. Check the Institutional Consensus "
@@ -550,8 +554,8 @@ def _confidence_flag(
                 gap = (worst_case_value - current_price) / current_price * 100
                 flags.append(
                     f"Even the most bearish WACC/growth combination tested (implied value "
-                    f"${worst_case_value:,.2f}) remains {gap:.1f}% above the current price of "
-                    f"${current_price:,.2f}. This Buy call does not vary across the tested "
+                    f"{symbol}{worst_case_value:,.2f}) remains {gap:.1f}% above the current price of "
+                    f"{symbol}{current_price:,.2f}. This Buy call does not vary across the tested "
                     f"sensitivity range -- that can mean the conclusion is robust, or that the "
                     f"model's assumptions are miscalibrated for this company. Check the "
                     f"Institutional Consensus Score below before treating this as "
@@ -646,11 +650,33 @@ def build_report_data(context: ResearchContext) -> Dict[str, Any]:
     valuation_results = context.valuation_results or {}
     sentiment_summary = context.sentiment_summary or {}
     evaluation = context.evaluation or {}
+    currency = info.get("currency") or "USD"
 
-    recommendation = derive_recommendation(valuation_results, sentiment_summary, context.news_sentiment_summary)
+    recommendation = derive_recommendation(
+        valuation_results, sentiment_summary, context.news_sentiment_summary, currency
+    )
+
+    # NSE-listed tickers (see company_resolver.py's NSE index) carry a
+    # ".NS" suffix and structurally have no SEC filings -- RAGTool/
+    # SECEdgarClient already degrade gracefully with zero filings found
+    # (empty citations, sentiment skipped), but that looks identical to
+    # "we tried and found nothing" for a US ticker with genuinely thin
+    # coverage. Surfaced explicitly here so a reader sees this is
+    # expected market coverage, not a silent retrieval gap.
+    is_non_us_listing = (context.ticker or "").upper().endswith(".NS")
+    filing_evidence_note = (
+        "SEC filing evidence is unavailable for this market -- FinSight's evidence "
+        "retrieval currently covers SEC EDGAR (US-listed companies) only. Management "
+        "Sentiment below and its supporting citations don't apply here; market data, "
+        "valuation, and news sentiment are unaffected."
+        if is_non_us_listing else None
+    )
 
     return {
         "ticker": context.ticker,
+        "currency": currency,
+        "currency_symbol": currency_symbol(currency),
+        "filing_evidence_note": filing_evidence_note,
 
         "company_overview": {
             "name": info.get("company_name") or context.ticker,
@@ -733,6 +759,7 @@ def build_report_data(context: ResearchContext) -> Dict[str, Any]:
                 recommendation["rating"],
                 recommendation.get("signal_disagreement", False),
                 recommendation.get("mc_wide_ci", False),
+                currency,
             ),
         },
 

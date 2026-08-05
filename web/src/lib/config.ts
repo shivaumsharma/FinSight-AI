@@ -8,10 +8,17 @@
 export const FINSIGHT_API_URL = (process.env.FINSIGHT_API_URL || "http://localhost:8000").replace(/\/$/, "");
 export const FINSIGHT_API_KEY = process.env.FINSIGHT_API_KEY || "";
 
-export function backendHeaders(extra?: Record<string, string>): HeadersInit {
+// sessionToken carries the per-user identity (see src/lib/session.ts) --
+// FINSIGHT_API_KEY alone only proves "this deployment", not "this
+// user" (see app/api/main.py's own comment on why both auth layers
+// exist). Optional so routes that genuinely don't need a logged-in
+// user (there are none among /v1/research/* anymore, but a future
+// public route might) aren't forced to pass one.
+export function backendHeaders(sessionToken?: string, extra?: Record<string, string>): HeadersInit {
   return {
     "Content-Type": "application/json",
     ...(FINSIGHT_API_KEY ? { "X-API-Key": FINSIGHT_API_KEY } : {}),
+    ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
     ...extra,
   };
 }
