@@ -1,5 +1,6 @@
 import pandas as pd
 
+from app.core.currency import currency_symbol
 from app.valuation.dcf_engine import DCFEngine
 from app.valuation.fcff_engine import FCFFEngine
 from app.valuation.wacc_engine import WACCEngine
@@ -37,6 +38,40 @@ _MARKET_CAP_ROUNDING = 1e8  # nearest $100M
 # before/after for whether this alone meaningfully closes the gap.
 DEFAULT_TERMINAL_GROWTH_RATE = 0.04
 
+# CAPM inputs and terminal growth, keyed by the company's reporting
+# currency (from context.company_info["currency"], via yfinance) --
+# WACCEngine's cost-of-equity calculation and the terminal-growth
+# assumption above are both calibrated to US markets; using them
+# unmodified for an INR-denominated company would silently discount
+# Indian cash flows at a US risk-free rate/ERP, understating WACC and
+# overstating intrinsic value.
+#
+# INR risk-free rate approximates the 10Y Indian G-Sec yield, which
+# has run close to 7% through 2023-2025 (RBI data) -- consistently
+# above the US 10Y this file's own 4% approximates. INR equity risk
+# premium follows the pattern in Damodaran's India country-risk-
+# premium series: India's total ERP has typically run at or somewhat
+# above the US ERP, since India's higher trend growth is offset by
+# added country/currency risk -- kept equal to the risk-free rate
+# here as a round, defensible approximation, not a precisely
+# backtested figure the way DEFAULT_TERMINAL_GROWTH_RATE above is.
+#
+# INR terminal growth is deliberately NOT set to India's current
+# nominal GDP growth (historically 9-12%, well above the US analog
+# this file's 4% approximates) -- terminal growth is a "forever"
+# assumption in a Gordon-growth model, and standard DCF practice caps
+# it well below any single country's current growth rate on the
+# expectation that high-growth economies converge toward
+# steady-state over a multi-decade horizon (and a rate too close to
+# the discount rate makes the terminal-value math unstable regardless
+# -- see MIN_WACC_TERMINAL_SPREAD in dcf_engine.py). 5% is a
+# conservative middle estimate -- clearly above the US figure, well
+# below raw current growth -- pending the same kind of empirical
+# backtest (scripts/phase2_backtest.py) that justified 4% for the US.
+RISK_FREE_RATE_BY_CURRENCY = {"USD": 0.04, "INR": 0.07}
+MARKET_RISK_PREMIUM_BY_CURRENCY = {"USD": 0.06, "INR": 0.07}
+TERMINAL_GROWTH_RATE_BY_CURRENCY = {"USD": DEFAULT_TERMINAL_GROWTH_RATE, "INR": 0.05}
+
 # equity_value = enterprise_value - net_debt (DCFEngine.calculate_equity_value).
 # For a heavily-levered company, net_debt can sit close to (or above)
 # enterprise_value, making equity_value a small, unstable DIFFERENCE
@@ -72,7 +107,7 @@ SENSITIVITY_WACC_OFFSETS = [-0.02, -0.01, 0.0, 0.01, 0.02]
 
 
 class ValuationPipeline:
-  def __init__(self,financial_df,market_cap,beta,ticker=None):
+  def __init__(self,financial_df,market_cap,beta,ticker=None,currency=None):
     self.financial_df=(financial_df)
     self.market_cap=(market_cap)
     self.beta=(beta)
@@ -80,6 +115,18 @@ class ValuationPipeline:
     # (see _cache_key/make_key); no valuation math depends on it. None
     # (the default) still caches correctly, just with a less legible key.
     self.ticker=(ticker)
+    # Defaults to USD (unknown/missing currency behaves exactly as
+    # every ticker did before this parameter existed). Drives which
+    # row of RISK_FREE_RATE_BY_CURRENCY / MARKET_RISK_PREMIUM_BY_CURRENCY
+    # / TERMINAL_GROWTH_RATE_BY_CURRENCY this run uses; an unrecognized
+    # currency also falls back to the USD row rather than raising, so
+    # an unmapped currency degrades to today's behavior instead of
+    # breaking valuation entirely.
+    self.currency = currency or "USD"
+    self.risk_free_rate = RISK_FREE_RATE_BY_CURRENCY.get(self.currency, RISK_FREE_RATE_BY_CURRENCY["USD"])
+    self.market_risk_premium = MARKET_RISK_PREMIUM_BY_CURRENCY.get(self.currency, MARKET_RISK_PREMIUM_BY_CURRENCY["USD"])
+    self.terminal_growth_rate = TERMINAL_GROWTH_RATE_BY_CURRENCY.get(self.currency, DEFAULT_TERMINAL_GROWTH_RATE)
+    self.currency_symbol = currency_symbol(self.currency)
 
   def _cache_key(self):
     rounded_market_cap = (
@@ -91,7 +138,7 @@ class ValuationPipeline:
     )
     return make_key(
         "valuation", self.ticker or "unknown", financials_fingerprint,
-        rounded_market_cap, round(self.beta or 0, 2),
+        rounded_market_cap, round(self.beta or 0, 2), self.currency,
     )
 
   def run_valuation(self):
@@ -143,7 +190,7 @@ class ValuationPipeline:
     if base_fcff<=0:
         return self._unavailable_result(
             f"FCFF-DCF does not apply: normalized base free cash flow is "
-            f"negative (${base_fcff/1e6:,.0f}M) -- this company's working "
+            f"negative ({self.currency_symbol}{base_fcff/1e6:,.0f}M) -- this company's working "
             f"capital consumption structurally exceeds its profitability, "
             f"so a discounted cash flow model cannot produce a meaningful "
             f"intrinsic value here. The recommendation below is instead "
@@ -151,8 +198,14 @@ class ValuationPipeline:
         )
 
     revenue_forecasts=fcff_engine.forecast_revenue()
-    fcff_forecasts=fcff_engine.forecast_fcff(terminal_growth_rate=DEFAULT_TERMINAL_GROWTH_RATE)
-    wacc_engine=(WACCEngine(financial_df=self.financial_df,market_cap=self.market_cap,beta=self.beta))
+    fcff_forecasts=fcff_engine.forecast_fcff(terminal_growth_rate=self.terminal_growth_rate)
+    wacc_engine=(WACCEngine(
+        financial_df=self.financial_df,
+        market_cap=self.market_cap,
+        beta=self.beta,
+        risk_free_rate=self.risk_free_rate,
+        market_risk_premium=self.market_risk_premium,
+    ))
 
     raw_wacc=(wacc_engine.calculate_wacc())
 
@@ -180,7 +233,7 @@ class ValuationPipeline:
     dcf_engine=(DCFEngine(
         forecast_fcff_df=fcff_forecasts,
         discount_rate=raw_wacc,
-        terminal_growth_rate=DEFAULT_TERMINAL_GROWTH_RATE,
+        terminal_growth_rate=self.terminal_growth_rate,
     ))
 
     # The engine floors the WACC actually used internally if raw_wacc
@@ -207,9 +260,9 @@ class ValuationPipeline:
     # trustworthy of all.
     if enterprise_value <= 0 or equity_value / enterprise_value < MIN_EQUITY_TO_ENTERPRISE_VALUE_RATIO:
         return self._unavailable_result(
-            f"DCF is not applicable for this capital structure -- net debt (${net_debt:,.0f}) "
-            f"leaves an equity value (${equity_value:,.0f}) that's under "
-            f"{MIN_EQUITY_TO_ENTERPRISE_VALUE_RATIO:.0%} of the ${enterprise_value:,.0f} "
+            f"DCF is not applicable for this capital structure -- net debt ({self.currency_symbol}{net_debt:,.0f}) "
+            f"leaves an equity value ({self.currency_symbol}{equity_value:,.0f}) that's under "
+            f"{MIN_EQUITY_TO_ENTERPRISE_VALUE_RATIO:.0%} of the {self.currency_symbol}{enterprise_value:,.0f} "
             f"enterprise value this model computed: a small difference between two much "
             f"larger, individually uncertain numbers, not a reliable per-share value. This is "
             f"a coverage limitation of the enterprise-value DCF used here, not a data error -- "
@@ -242,7 +295,7 @@ class ValuationPipeline:
             fcff_engine=fcff_engine,
             base_growth_rate=fcff_engine.calculate_revenue_cagr(),
             base_wacc=wacc_used,
-            base_terminal_growth=DEFAULT_TERMINAL_GROWTH_RATE,
+            base_terminal_growth=self.terminal_growth_rate,
             total_debt=total_debt,
             cash=cash,
             shares_outstanding=shares_outstanding,
@@ -258,7 +311,7 @@ class ValuationPipeline:
     "raw_wacc": raw_wacc,
     "wacc_floored": wacc_info["floored"],
     "wacc_floor_note": wacc_floor_note,
-    "terminal_growth_rate": DEFAULT_TERMINAL_GROWTH_RATE,
+    "terminal_growth_rate": self.terminal_growth_rate,
     "sensitivity_analysis":sensitivity_analysis,
     "monte_carlo_values": monte_carlo_values,
     }
@@ -278,7 +331,7 @@ class ValuationPipeline:
           "raw_wacc": None,
           "wacc_floored": None,
           "wacc_floor_note": None,
-          "terminal_growth_rate": DEFAULT_TERMINAL_GROWTH_RATE,
+          "terminal_growth_rate": self.terminal_growth_rate,
           "sensitivity_analysis": None,
           "monte_carlo_values": None,
       }

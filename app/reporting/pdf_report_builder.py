@@ -93,7 +93,7 @@ def _dict_table(data: dict, formatters: Optional[dict] = None) -> Table:
     return table
 
 
-def _sensitivity_table(df) -> Optional[Table]:
+def _sensitivity_table(df, symbol: str = "$") -> Optional[Table]:
     if df is None or df.empty:
         return None
 
@@ -101,7 +101,7 @@ def _sensitivity_table(df) -> Optional[Table]:
     rows = [header]
     for idx, row in df.iterrows():
         label = f"{idx:.1%}" if isinstance(idx, float) else str(idx)
-        rows.append([label] + [f"${v:,.2f}" for v in row])
+        rows.append([label] + [f"{symbol}{v:,.2f}" for v in row])
 
     table = Table(rows)
     table.setStyle(TableStyle([
@@ -132,6 +132,7 @@ def build_pdf_report(report_data: dict) -> bytes:
     overview = report_data["company_overview"]
     narrative = report_data.get("narrative", {})
     recommendation = report_data["recommendation"]
+    symbol = report_data.get("currency_symbol", "$")
 
     story = []
 
@@ -186,7 +187,7 @@ def build_pdf_report(report_data: dict) -> bytes:
     overview_facts = {
         "Sector": overview["sector"],
         "Industry": overview["industry"],
-        "Market Cap": _fmt_number(overview["market_cap"], prefix="$"),
+        "Market Cap": _fmt_number(overview["market_cap"], prefix=symbol),
         "Employees": f"{overview['employees']:,}" if isinstance(overview["employees"], (int, float)) else "Unavailable",
         "Website": overview["website"] or "Unavailable",
     }
@@ -201,7 +202,7 @@ def build_pdf_report(report_data: dict) -> bytes:
     # ---------------- 4. Financial Statement Analysis ----------------
     story.append(Paragraph("4. Financial Statement Analysis", _SECTION_STYLE))
     fsa = report_data["financial_statement_analysis"]
-    story.append(_dict_table(fsa, {k: (lambda v: _fmt_number(v, prefix="$")) for k in fsa}))
+    story.append(_dict_table(fsa, {k: (lambda v: _fmt_number(v, prefix=symbol)) for k in fsa}))
 
     # ---------------- 5. Ratio Analysis ----------------
     story.append(Paragraph("5. Ratio Analysis", _SECTION_STYLE))
@@ -241,10 +242,10 @@ def build_pdf_report(report_data: dict) -> bytes:
                          "DCF Available", "DCF Unavailable Reason", "monte_carlo", "ml_classifier")
         }
         valuation_formatters = {
-            "Enterprise Value": lambda v: _fmt_number(v, prefix="$"),
-            "Equity Value": lambda v: _fmt_number(v, prefix="$"),
-            "Intrinsic Value (per share)": lambda v: _fmt_number(v, prefix="$"),
-            "Current Price": lambda v: _fmt_number(v, prefix="$"),
+            "Enterprise Value": lambda v: _fmt_number(v, prefix=symbol),
+            "Equity Value": lambda v: _fmt_number(v, prefix=symbol),
+            "Intrinsic Value (per share)": lambda v: _fmt_number(v, prefix=symbol),
+            "Current Price": lambda v: _fmt_number(v, prefix=symbol),
             "Upside (%)": _fmt_percent,
             "WACC": lambda v: _fmt_percent(v * 100) if isinstance(v, (int, float)) else v,
             "Raw WACC": lambda v: _fmt_percent(v * 100) if isinstance(v, (int, float)) else v,
@@ -258,7 +259,7 @@ def build_pdf_report(report_data: dict) -> bytes:
                 _BODY_STYLE,
             ))
 
-        sensitivity_table = _sensitivity_table(sensitivity_df)
+        sensitivity_table = _sensitivity_table(sensitivity_df, symbol)
         if sensitivity_table is not None:
             story.append(Spacer(1, 10))
             story.append(Paragraph("Intrinsic Value Sensitivity (WACC x Terminal Growth)", _BODY_STYLE))
@@ -272,11 +273,11 @@ def build_pdf_report(report_data: dict) -> bytes:
                 _BODY_STYLE,
             ))
             mc_fields = {
-                "Mean Intrinsic Value": f"${monte_carlo['mean']:,.2f}",
-                "Median Intrinsic Value": f"${monte_carlo['median']:,.2f}",
-                "Std Dev": f"${monte_carlo['std_dev']:,.2f}",
-                "25th-75th Percentile": f"${monte_carlo['p25']:,.2f} - ${monte_carlo['p75']:,.2f}",
-                "90% Confidence Interval": f"${monte_carlo['ci_lower']:,.2f} - ${monte_carlo['ci_upper']:,.2f}",
+                "Mean Intrinsic Value": f"{symbol}{monte_carlo['mean']:,.2f}",
+                "Median Intrinsic Value": f"{symbol}{monte_carlo['median']:,.2f}",
+                "Std Dev": f"{symbol}{monte_carlo['std_dev']:,.2f}",
+                "25th-75th Percentile": f"{symbol}{monte_carlo['p25']:,.2f} - {symbol}{monte_carlo['p75']:,.2f}",
+                "90% Confidence Interval": f"{symbol}{monte_carlo['ci_lower']:,.2f} - {symbol}{monte_carlo['ci_upper']:,.2f}",
                 "Probability Undervalued": f"{monte_carlo['prob_undervalued']:.1%}",
             }
             story.append(_dict_table(mc_fields))
@@ -313,12 +314,18 @@ def build_pdf_report(report_data: dict) -> bytes:
     story.append(Paragraph("8. Market and Earnings Analysis", _SECTION_STYLE))
     market = report_data["market_earnings_snapshot"]
     market_fields = {
-        "Current Price": _fmt_number(market["current_price"], prefix="$"),
-        "Market Cap": _fmt_number(market["market_cap"], prefix="$"),
+        "Current Price": _fmt_number(market["current_price"], prefix=symbol),
+        "Market Cap": _fmt_number(market["market_cap"], prefix=symbol),
         "Management Sentiment (SEC filings)": f"{market['sentiment_label']} ({market['sentiment_confidence']})",
         "Market/Media Sentiment (recent news)": f"{market['news_sentiment_label']} ({market['news_sentiment_confidence']})",
     }
     story.append(_dict_table(market_fields))
+    if report_data.get("filing_evidence_note"):
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(
+            f'<font color="#9a6700"><b>Note:</b></font> {report_data["filing_evidence_note"]}',
+            _BODY_STYLE,
+        ))
     story.append(Spacer(1, 8))
     story.append(Paragraph(narrative.get("Market and Earnings Analysis", "Not available."), _BODY_STYLE))
 

@@ -30,8 +30,8 @@ import streamlit as st
 
 from app.api.serialization import financial_df_from_json
 from app.valuation.what_if_dcf import (
-    compute_what_if, DEFAULT_TERMINAL_GROWTH_RATE, GROWTH_RATE_MIN, GROWTH_RATE_MAX,
-    TERMINAL_GROWTH_MIN, TERMINAL_GROWTH_MAX, WACC_OFFSET,
+    compute_what_if, GROWTH_RATE_MIN, GROWTH_RATE_MAX,
+    TERMINAL_GROWTH_RATE_BY_CURRENCY, TERMINAL_GROWTH_BOUNDS_BY_CURRENCY, WACC_OFFSET,
 )
 from app.valuation.fcff_engine import FCFFEngine
 
@@ -348,10 +348,17 @@ if "report" in st.session_state:
                     key="whatif_wacc",
                 )
             with wg3:
+                whatif_currency = report_data.get("currency") or "USD"
+                terminal_min, terminal_max = TERMINAL_GROWTH_BOUNDS_BY_CURRENCY.get(
+                    whatif_currency, TERMINAL_GROWTH_BOUNDS_BY_CURRENCY["USD"]
+                )
+                terminal_default = TERMINAL_GROWTH_RATE_BY_CURRENCY.get(
+                    whatif_currency, TERMINAL_GROWTH_RATE_BY_CURRENCY["USD"]
+                )
                 whatif_terminal_pct = st.slider(
                     "Terminal Growth Rate",
-                    min_value=TERMINAL_GROWTH_MIN * 100, max_value=TERMINAL_GROWTH_MAX * 100,
-                    value=DEFAULT_TERMINAL_GROWTH_RATE * 100,
+                    min_value=terminal_min * 100, max_value=terminal_max * 100,
+                    value=terminal_default * 100,
                     step=0.25, format="%.2f%%",
                     key="whatif_terminal",
                 )
