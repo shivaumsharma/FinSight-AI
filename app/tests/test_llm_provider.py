@@ -156,7 +156,19 @@ def test_logging_failure_does_not_break_the_real_call(monkeypatch, tmp_path):
 
 # ---------------------------------------------------------------- HostedProvider config
 
-def test_hosted_provider_requires_all_three_env_vars():
+def test_hosted_provider_requires_all_three_env_vars(monkeypatch):
+    # Explicit monkeypatch.delenv, not reliance on a pristine
+    # environment -- base_url=None/api_key=None/model=None only means
+    # "fall back to env vars", so this test previously passed only by
+    # accident of test-collection order (nothing having called
+    # load_dotenv() yet). Any test file that legitimately needs real
+    # .env values (e.g. test_company_resolver.py's LLM-proposal-
+    # fallback tests) breaks that assumption the moment it runs first
+    # alphabetically, same as the neighboring test below already
+    # guards against.
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
     with pytest.raises(LLMProviderError):
         HostedProvider(base_url=None, api_key=None, model=None)
 
