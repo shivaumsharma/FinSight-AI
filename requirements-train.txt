@@ -1,0 +1,27 @@
+# RLVR/GRPO training-only dependencies (scripts/train_grpo.py) -- see
+# app/training/ and the project plan doc. Deliberately a THIRD
+# requirements file, not folded into requirements.txt (deploy) or
+# requirements-dev.txt (pytest/CI): these are heavy, GPU-oriented
+# packages a training run needs, that neither the deployed app nor the
+# test suite has any reason to install.
+#
+# Unlike requirements.txt, this file does NOT pin the CPU-only PyTorch
+# wheel index (--extra-index-url .../whl/cpu) -- a real GRPO training
+# run needs a CUDA build of torch, and per the project plan doc's
+# platform note, that means installing this file on the rented Linux
+# GPU box, not the Windows dev machine (bitsandbytes' Windows support
+# has historically been unreliable). The CPU wiring smoke test
+# (train_grpo.py --model Qwen/Qwen2.5-0.5B-Instruct --max-steps 2) can
+# still install this locally on CPU-only torch if needed -- torch
+# itself installs fine CPU-only, it's just slow, which is fine for a
+# 2-step smoke test on a tiny model.
+
+torch
+transformers>=4.46
+accelerate
+datasets
+trl>=0.12
+peft
+bitsandbytes
+sentencepiece
+huggingface_hub
