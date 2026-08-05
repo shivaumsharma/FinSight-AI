@@ -1,6 +1,41 @@
+"use client";
+
+import { useState } from "react";
 import RatingBadge, { ratingColorClass } from "./RatingBadge";
 import Tabs from "./Tabs";
 import type { ResearchResult } from "@/lib/types";
+
+function ShareButton({ jobId }: { jobId: string }) {
+  const [state, setState] = useState<"idle" | "sharing" | "copied" | "error">("idle");
+
+  async function handleShare() {
+    setState("sharing");
+    try {
+      const resp = await fetch(`/api/research/${jobId}/pdf/share`, { method: "POST" });
+      if (!resp.ok) throw new Error("share request failed");
+      const { url } = await resp.json();
+      await navigator.clipboard.writeText(url);
+      setState("copied");
+      setTimeout(() => setState("idle"), 2000);
+    } catch {
+      setState("error");
+      setTimeout(() => setState("idle"), 2000);
+    }
+  }
+
+  const label = { idle: "SHARE", sharing: "...", copied: "LINK COPIED", error: "COULDN'T SHARE" }[state];
+
+  return (
+    <button
+      type="button"
+      onClick={handleShare}
+      disabled={state === "sharing"}
+      className="mt-6 ml-2 inline-block rounded-lg border border-border bg-card px-5 py-2.5 font-mono text-xs font-bold text-text hover:border-accent disabled:opacity-60"
+    >
+      {label}
+    </button>
+  );
+}
 
 function StatTile({ label, value, valueClass }: { label: string; value: React.ReactNode; valueClass?: string }) {
   return (
@@ -40,26 +75,26 @@ const FRACTION_KEYS = new Set(["WACC", "Raw WACC", "Terminal Growth Rate"]);
 const DOLLAR_LARGE_KEYS = new Set(["Revenue", "EBIT", "Net Income", "Free Cash Flow", "Enterprise Value", "Equity Value"]);
 const DOLLAR_SMALL_KEYS = new Set(["Current Price", "Intrinsic Value (per share)", "EPS"]);
 
-function fmtLargeDollar(v: number): string {
+function fmtLargeDollar(v: number, symbol: string): string {
   const abs = Math.abs(v);
-  if (abs >= 1e9) return `$${(v / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `$${(v / 1e6).toFixed(2)}M`;
-  return `$${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  if (abs >= 1e9) return `${symbol}${(v / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `${symbol}${(v / 1e6).toFixed(2)}M`;
+  return `${symbol}${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 }
 
-function formatFieldValue(key: string, value: unknown): string {
+function formatFieldValue(key: string, value: unknown, symbol: string): string {
   if (value === null || value === undefined) return "N/A";
   if (typeof value !== "number") return String(value);
 
   if (FRACTION_KEYS.has(key)) return `${(value * 100).toFixed(2)}%`;
   if (key.endsWith("(%)")) return `${value.toFixed(2)}%`;
-  if (DOLLAR_LARGE_KEYS.has(key)) return fmtLargeDollar(value);
-  if (DOLLAR_SMALL_KEYS.has(key)) return `$${value.toFixed(2)}`;
+  if (DOLLAR_LARGE_KEYS.has(key)) return fmtLargeDollar(value, symbol);
+  if (DOLLAR_SMALL_KEYS.has(key)) return `${symbol}${value.toFixed(2)}`;
   if (key === "Debt to Equity") return `${value.toFixed(2)}x`;
   return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
-function KeyValueGrid({ data }: { data: Record<string, unknown> | undefined }) {
+function KeyValueGrid({ data, symbol }: { data: Record<string, unknown> | undefined; symbol: string }) {
   if (!data) return null;
   const entries = Object.entries(data).filter(([, v]) => v !== null && v !== undefined);
   return (
@@ -67,7 +102,7 @@ function KeyValueGrid({ data }: { data: Record<string, unknown> | undefined }) {
       {entries.map(([k, v]) => (
         <div key={k}>
           <div className="font-mono text-[10px] uppercase tracking-wide text-muted">{k}</div>
-          <div className="font-mono text-sm text-text">{formatFieldValue(k, v)}</div>
+          <div className="font-mono text-sm text-text">{formatFieldValue(k, v, symbol)}</div>
         </div>
       ))}
     </div>
@@ -79,9 +114,9 @@ function fmtScore(n: number | null | undefined): string {
   return `${n >= 0 ? "+" : ""}${n.toFixed(1)}`;
 }
 
-function fmtMoney(n: number | null | undefined): string {
+function fmtMoney(n: number | null | undefined, symbol: string): string {
   if (n === null || n === undefined) return "N/A";
-  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${symbol}${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 const NARRATIVE_SECTIONS = [
@@ -102,6 +137,7 @@ export default function ReportView({
   latencySeconds: number | null;
 }) {
   const rd = result.report_data || {};
+  const symbol = rd.currency_symbol || "$";
   const rec = rd.recommendation || { rating: "Insufficient Data", basis: "" };
   const confidence = rd.confidence_scores || {};
   const market = rd.market_earnings_snapshot || {};
@@ -177,14 +213,19 @@ export default function ReportView({
 
       {/* Stat tiles */}
       <div className="mt-3 flex gap-2">
-        <StatTile label="PRICE" value={fmtMoney(market.current_price)} />
-        <StatTile label="INTRINSIC" value={formatFieldValue("Intrinsic Value (per share)", valuation["Intrinsic Value (per share)"])} />
-        <StatTile label="WACC" value={formatFieldValue("WACC", valuation["WACC"])} />
+        <StatTile label="PRICE" value={fmtMoney(market.current_price, symbol)} />
+        <StatTile label="INTRINSIC" value={formatFieldValue("Intrinsic Value (per share)", valuation["Intrinsic Value (per share)"], symbol)} />
+        <StatTile label="WACC" value={formatFieldValue("WACC", valuation["WACC"], symbol)} />
       </div>
       <div className="mt-2 flex gap-2">
         <ToneTile label="SEC TONE (MGMT)" tone={market.sentiment_label || ""} />
         <ToneTile label="NEWS TONE" tone={market.news_sentiment_label || ""} />
       </div>
+      {rd.filing_evidence_note && (
+        <div className="mt-2 rounded-lg border border-amber-900/60 bg-amber-950/40 px-3 py-2 text-xs text-warn">
+          <strong>Note:</strong> {rd.filing_evidence_note}
+        </div>
+      )}
       {latencySeconds !== null && (
         <div className="mt-2 text-right text-[10px] font-mono text-dim">generated in {latencySeconds.toFixed(1)}s</div>
       )}
@@ -212,15 +253,15 @@ export default function ReportView({
                 <div className="space-y-5">
                   <div>
                     <div className="mb-2 font-mono text-[11px] font-bold tracking-wide text-muted">STATEMENT</div>
-                    <KeyValueGrid data={rd.financial_statement_analysis} />
+                    <KeyValueGrid data={rd.financial_statement_analysis} symbol={symbol} />
                   </div>
                   <div>
                     <div className="mb-2 font-mono text-[11px] font-bold tracking-wide text-muted">RATIOS</div>
-                    <KeyValueGrid data={rd.ratio_analysis} />
+                    <KeyValueGrid data={rd.ratio_analysis} symbol={symbol} />
                   </div>
                   <div>
                     <div className="mb-2 font-mono text-[11px] font-bold tracking-wide text-muted">GROWTH</div>
-                    <KeyValueGrid data={rd.growth_analysis} />
+                    <KeyValueGrid data={rd.growth_analysis} symbol={symbol} />
                   </div>
                 </div>
               ),
@@ -243,6 +284,7 @@ export default function ReportView({
                         "Raw WACC": valuation["Raw WACC"],
                         "Terminal Growth Rate": valuation["Terminal Growth Rate"],
                       }}
+                      symbol={symbol}
                     />
                   )}
 
@@ -252,12 +294,12 @@ export default function ReportView({
                         MONTE CARLO ({monteCarlo.n_samples.toLocaleString()} samples)
                       </div>
                       <div className="flex gap-2">
-                        <StatTile label="MEAN" value={fmtMoney(monteCarlo.mean)} />
-                        <StatTile label="MEDIAN" value={fmtMoney(monteCarlo.median)} />
+                        <StatTile label="MEAN" value={fmtMoney(monteCarlo.mean, symbol)} />
+                        <StatTile label="MEDIAN" value={fmtMoney(monteCarlo.median, symbol)} />
                         <StatTile label="P(UNDERVALUED)" value={`${(monteCarlo.prob_undervalued * 100).toFixed(1)}%`} />
                       </div>
                       <p className="mt-2 text-[11px] text-muted">
-                        90% CI: {fmtMoney(monteCarlo.ci_lower)} - {fmtMoney(monteCarlo.ci_upper)}
+                        90% CI: {fmtMoney(monteCarlo.ci_lower, symbol)} - {fmtMoney(monteCarlo.ci_upper, symbol)}
                       </p>
                     </div>
                   )}
@@ -361,6 +403,7 @@ export default function ReportView({
       >
         EXPORT PDF
       </a>
+      <ShareButton jobId={jobId} />
     </div>
   );
 }

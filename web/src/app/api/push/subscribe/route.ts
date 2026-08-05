@@ -2,17 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { FINSIGHT_API_URL, backendHeaders } from "@/lib/config";
 import { getSessionToken } from "@/lib/session";
 
-// Proxies POST /v1/research on the FastAPI backend. Runs server-side
-// so FINSIGHT_API_KEY and the session token (backendHeaders) never
-// reach the browser.
+// Proxies POST /v1/push/subscribe. Body is the browser's own
+// PushSubscription.toJSON() output ({endpoint, keys: {p256dh, auth}})
+// forwarded unmodified -- see usePushNotifications.ts's subscribe().
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const sessionToken = await getSessionToken();
 
-  const resp = await fetch(`${FINSIGHT_API_URL}/v1/research`, {
+  const resp = await fetch(`${FINSIGHT_API_URL}/v1/push/subscribe`, {
     method: "POST",
     headers: backendHeaders(sessionToken),
-    body: JSON.stringify({ question: body.question }),
+    body: JSON.stringify(body),
   });
 
   const data = await resp.json();

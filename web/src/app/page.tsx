@@ -2,15 +2,65 @@
 
 import { useState } from "react";
 import { useResearch } from "@/lib/useResearch";
+import { usePushNotifications } from "@/lib/usePushNotifications";
 import ReportView from "@/components/ReportView";
 import ResearchProgress from "@/components/ResearchProgress";
 import InstallPrompt from "@/components/InstallPrompt";
+import AuthGate from "@/components/AuthGate";
 
 const QUICK_TICKERS = ["AAPL", "NVDA", "TSLA", "MSFT"];
 
 export default function Home() {
+  return <AuthGate>{({ userId, logout }) => <ResearchPage userId={userId} onLogout={logout} />}</AuthGate>;
+}
+
+// Purely additive to the header -- not gating anything, not shown at
+// all when the browser doesn't support push (still "checking" is
+// treated the same as unsupported for a beat, avoiding a flash of the
+// button before the initial support/permission check resolves).
+function NotificationToggle() {
+  const { status, subscribe, unsubscribe } = usePushNotifications();
+
+  if (status === "unsupported" || status === "checking") return null;
+
+  if (status === "denied") {
+    return (
+      <span
+        className="font-mono text-[10px] text-dim"
+        title="Notifications are blocked in your browser settings for this site"
+      >
+        NOTIFICATIONS BLOCKED
+      </span>
+    );
+  }
+
+  if (status === "subscribed") {
+    return (
+      <button
+        type="button"
+        onClick={unsubscribe}
+        title="Notifications on -- click to turn off"
+        className="font-mono text-[10px] font-bold text-accent hover:text-muted"
+      >
+        NOTIFICATIONS ON
+      </button>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={subscribe}
+      className="font-mono text-[10px] font-bold text-muted hover:text-accent"
+    >
+      ENABLE NOTIFICATIONS
+    </button>
+  );
+}
+
+function ResearchPage({ userId, onLogout }: { userId: string; onLogout: () => void }) {
   const [query, setQuery] = useState("");
-  const { status, jobId, result, errorMessage, latencySeconds, submit } = useResearch();
+  const { status, jobId, result, errorMessage, latencySeconds, fromCache, submit } = useResearch();
 
   const isBusy = status === "submitting" || status === "running";
 
@@ -26,9 +76,22 @@ export default function Home() {
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border pb-3">
           <span className="font-mono text-base font-bold tracking-wide text-text">FINSIGHT</span>
-          <span className="flex h-7 w-7 items-center justify-center rounded-full border border-border font-mono text-[11px] text-muted">
-            AI
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-[10px] text-dim" title={userId}>
+              {userId.slice(0, 8)}
+            </span>
+            <NotificationToggle />
+            <button
+              type="button"
+              onClick={onLogout}
+              className="font-mono text-[10px] font-bold text-muted hover:text-danger"
+            >
+              LOGOUT
+            </button>
+            <span className="flex h-7 w-7 items-center justify-center rounded-full border border-border font-mono text-[11px] text-muted">
+              AI
+            </span>
+          </div>
         </div>
 
         {!isBusy && status !== "done" && (
@@ -88,6 +151,12 @@ export default function Home() {
         {status === "error" && errorMessage && (
           <div className="mt-6 rounded-lg border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-danger">
             {errorMessage}
+          </div>
+        )}
+
+        {status === "done" && fromCache && (
+          <div className="mt-6 rounded-lg border border-amber-900/60 bg-amber-950/40 px-4 py-3 text-xs text-warn">
+            You&apos;re offline -- showing your last report. Reconnect to run new research.
           </div>
         )}
 

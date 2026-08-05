@@ -18,6 +18,11 @@ JOB_NOT_FOUND = "JOB_NOT_FOUND"
 JOB_NOT_DONE = "JOB_NOT_DONE"
 INTERRUPTED = "INTERRUPTED"
 TIMEOUT = "TIMEOUT"
+UNAUTHORIZED = "UNAUTHORIZED"
+INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
+EMAIL_ALREADY_REGISTERED = "EMAIL_ALREADY_REGISTERED"
+FORBIDDEN = "FORBIDDEN"
+RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED"
 
 
 class APIError(Exception):
@@ -48,4 +53,44 @@ def job_not_done(job_id: str, status_value: str) -> APIError:
     return APIError(
         JOB_NOT_DONE, f"Job '{job_id}' is not done yet (status: {status_value}).",
         status_code=status.HTTP_409_CONFLICT,
+    )
+
+
+def unauthorized() -> APIError:
+    return APIError(
+        UNAUTHORIZED, "Missing or invalid session. Please log in.",
+        status_code=status.HTTP_401_UNAUTHORIZED,
+    )
+
+
+def invalid_credentials() -> APIError:
+    # Deliberately the same message whether the email doesn't exist or
+    # the password is wrong -- distinguishing the two in the response
+    # would let an attacker enumerate registered emails one guess at a
+    # time.
+    return APIError(
+        INVALID_CREDENTIALS, "Incorrect email or password.",
+        status_code=status.HTTP_401_UNAUTHORIZED,
+    )
+
+
+def email_already_registered() -> APIError:
+    return APIError(
+        EMAIL_ALREADY_REGISTERED, "An account with this email already exists.",
+        status_code=status.HTTP_409_CONFLICT,
+    )
+
+
+def forbidden(job_id: str) -> APIError:
+    return APIError(
+        FORBIDDEN, f"Job '{job_id}' does not belong to the current user.",
+        status_code=status.HTTP_403_FORBIDDEN,
+    )
+
+
+def rate_limit_exceeded(daily_limit: int) -> APIError:
+    return APIError(
+        RATE_LIMIT_EXCEEDED,
+        f"Daily limit of {daily_limit} research jobs reached. Please try again tomorrow.",
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
     )

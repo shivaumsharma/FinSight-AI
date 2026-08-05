@@ -29,7 +29,7 @@ still-in-memory PDF blob would have quietly defeated.
 import os
 from typing import Callable, Optional
 
-from app.api import db
+from app.api import auth, db
 from app.api.serialization import context_to_api_dict
 from app.core.llm_provider import LLMProviderError, get_llm_provider, is_local_provider
 from app.core.logger import ResearchLogger
@@ -82,6 +82,70 @@ ORCHESTRATORS = {
     "hand_rolled": _hand_rolled_factory,
     "langgraph": _langgraph_factory,
 }
+
+
+def _notify_job_complete(job_id: str) -> None:
+    """
+    Best-effort Web Push notification for one terminal job -- called
+    from _run_job's outermost finally block (see there) so it fires
+    exactly once regardless of which completion path was taken, never
+    from any of the individual mark_done/mark_error call sites
+    directly (four call sites that could each independently forget to
+    notify, or notify twice, is worse than one that can't).
+
+    Re-reads the job's own row from SQLite rather than being passed
+    the result/error in-memory -- this runs after every branch above
+    has already committed its outcome to the database, so the DB row
+    is the one source of truth regardless of which branch ran.
+
+    A failure ANYWHERE in this function (a subscription's push service
+    unreachable, a malformed row, pywebpush itself raising) must never
+    propagate -- same "non-fatal" principle already applied to
+    ResearchLogger.save() a few lines up in _run_job. Whether a user
+    got notified is never why a research job's own recorded status
+    changes.
+    """
+    try:
+        from pywebpush import WebPushException
+
+        job = db.get_job(job_id)
+        if job is None or job["user_id"] == "anonymous":
+            return
+
+        subscriptions = db.get_push_subscriptions(job["user_id"])
+        if not subscriptions:
+            return
+
+        if job["status"] == db.STATUS_DONE:
+            result = job["result"] or {}
+            ticker = result.get("ticker", "your report")
+            rating = (
+                result.get("report_data", {}).get("recommendation", {}).get("rating")
+            )
+            title = f"{ticker} report ready"
+            body = f"Rating: {rating}" if rating else "Your research report is ready."
+        else:
+            title = "Research job failed"
+            body = job.get("error_message") or "Something went wrong while researching this."
+
+        for sub in subscriptions:
+            try:
+                auth.send_push_notification(sub, title, body, job["status"])
+            except WebPushException as e:
+                status_code = getattr(e.response, "status_code", None)
+                if status_code in (404, 410):
+                    # The push service itself says this subscription is
+                    # permanently dead (browser unsubscribed, or the
+                    # subscription simply expired on its end) -- not a
+                    # transient failure worth ever retrying.
+                    db.remove_push_subscription(sub["endpoint"])
+                else:
+                    print(f"[job {job_id}] push notification failed for one subscription (non-fatal): {e}")
+            except Exception as e:
+                print(f"[job {job_id}] push notification failed for one subscription (non-fatal): {e}")
+
+    except Exception as e:
+        print(f"[job {job_id}] _notify_job_complete failed entirely (non-fatal): {e}")
 
 
 def _run_job(job_id: str, question: str, orchestrator_name: str,
@@ -200,6 +264,13 @@ def _run_job(job_id: str, question: str, orchestrator_name: str,
             db.mark_error(job_id, "INTERNAL_ERROR", f"Unhandled error in job runner: {e}")
         except Exception:
             pass
+
+    finally:
+        # Runs after every branch above, success or any of the error
+        # paths -- see _notify_job_complete's own docstring for why
+        # this is the one place it's called from, not each mark_done/
+        # mark_error site individually.
+        _notify_job_complete(job_id)
 
 
 def submit_job(

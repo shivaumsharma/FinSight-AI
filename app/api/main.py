@@ -3,18 +3,26 @@ main.py
 
 FastAPI service boundary in front of the research pipeline -- step 1 of
 a staged, mobile-aware rollout (see the approved plan for the full
-context and the later steps deliberately NOT in this pass: real per-
-user auth/rate-limiting, push notifications, signed PDF URLs,
-positioning/disclaimer language -- hosted inference and a single-
-shared-secret API key check, see below, are now both in place).
-streamlit_app.py is unchanged by
-this file and still calls ResearchAgent/LangGraphResearchAgent
-in-process directly -- rewiring it to call this API instead is a later
-step, done deliberately minimally when it happens, since Streamlit is
-staying a debug tool, not becoming the product.
+context and the later step deliberately NOT in this pass: push
+notifications -- hosted inference, the shared-secret API key check,
+real per-user auth/rate-limiting, signed PDF share links, and
+disclaimer language, see below, are now all in place). streamlit_app.py
+is unchanged by this file and still calls ResearchAgent/
+LangGraphResearchAgent in-process directly -- rewiring it to call this
+API instead is a later step, done deliberately minimally when it
+happens, since Streamlit is staying a debug tool, not becoming the
+product.
+
+Two auth layers, not one, stacked deliberately (see _API_KEY's own
+comment below for the full reasoning): X-API-Key gates the deployment
+itself (anyone allowed to call this service at all), the session-token
+Depends(auth.get_current_user) on /v1/research/* identifies *which*
+user is calling and scopes rate-limiting/job ownership to them. Auth
+endpoints (/v1/auth/*) still sit behind X-API-Key -- signup/login are
+not exempted -- but obviously can't require a session token themselves.
 
 Startup does two things before the app accepts any request:
-1. db.init_db() -- create the jobs table if it doesn't exist.
+1. db.init_db() -- create the jobs/users/sessions tables if they don't exist.
 2. db.reconcile_interrupted_jobs() -- any row left PENDING/RUNNING from
    a previous process is guaranteed orphaned (see db.py's docstring
    for why), so it gets marked INTERRUPTED here rather than silently
@@ -28,19 +36,41 @@ force-kill the actual stuck worker thread).
 """
 
 import os
+import re
 import threading
 import time
 from contextlib import asynccontextmanager
+from typing import Optional
 
-from fastapi import FastAPI, Query, Request
+from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
-from app.api import db, errors, jobs
+from app.api import auth, db, errors, jobs
 from app.core.company_resolver import resolve_companies
 
 TIMEOUT_SWEEP_INTERVAL_SECONDS = 60
+
+# How many research jobs one user may start per rolling 24h window --
+# see db.count_recent_jobs's own docstring for why this needs no new
+# table. Env-configurable so a deployment can tighten/loosen it without
+# a code change.
+DAILY_JOB_LIMIT = int(os.environ.get("DAILY_JOB_LIMIT", db.DEFAULT_DAILY_JOB_LIMIT))
+RATE_LIMIT_WINDOW_SECONDS = 24 * 3600
+
+# How long a login/signup session stays valid -- env-configurable
+# (previously hardcoded to db.DEFAULT_SESSION_TTL_SECONDS regardless of
+# any env var; this closes that gap).
+SESSION_TTL_SECONDS = int(os.environ.get("SESSION_TTL_SECONDS", db.DEFAULT_SESSION_TTL_SECONDS))
+
+# How long a signed PDF share link (see auth.sign_pdf_url) stays valid
+# after being generated -- 7 days by default, long enough to be useful
+# for sharing a report with someone, short enough to bound how long an
+# unauthenticated link stays live.
+PDF_SHARE_TTL_SECONDS = int(os.environ.get("PDF_SHARE_TTL_SECONDS", 7 * 24 * 3600))
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # Comma-separated origins, e.g. "https://app.example.com,https://staging.example.com".
 # Empty/unset means no browser origin is allowed cross-origin -- safe by
@@ -135,8 +165,126 @@ class ResearchRequest(BaseModel):
     question: str
 
 
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+
+    @field_validator("email")
+    @classmethod
+    def _valid_email(cls, v: str) -> str:
+        # Deliberately loose (no DNS/MX check, no full RFC 5322
+        # grammar) -- this only needs to catch obvious typos before
+        # they become an unrecoverable account (no email is ever
+        # actually sent to it in this pass), not validate deliverability.
+        if not _EMAIL_RE.match(v):
+            raise ValueError("Not a valid email address.")
+        return v.lower()
+
+    @field_validator("password")
+    @classmethod
+    def _min_length(cls, v: str) -> str:
+        # 8 chars is NIST 800-63B's own minimum, not an arbitrary
+        # round number -- that guidance explicitly recommends length
+        # over composition rules (no forced uppercase/digit/symbol),
+        # so this is deliberately the ONLY password rule here.
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters.")
+        return v
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class PushSubscriptionKeys(BaseModel):
+    p256dh: str
+    auth: str
+
+
+class PushSubscriptionRequest(BaseModel):
+    # Matches the shape of the browser's own PushSubscription.toJSON()
+    # exactly (endpoint + keys.{p256dh,auth}) -- the frontend forwards
+    # that object unmodified rather than this API inventing its own
+    # field names for the same three values.
+    endpoint: str
+    keys: PushSubscriptionKeys
+
+
+class PushUnsubscribeRequest(BaseModel):
+    endpoint: str
+
+
 @app.get("/health")
 def health():
+    return {"status": "ok"}
+
+
+@app.post("/v1/auth/signup")
+def signup(body: SignupRequest):
+    if db.get_user_by_email(body.email) is not None:
+        raise errors.email_already_registered()
+
+    password_hash, salt = auth.hash_password(body.password)
+    user_id = db.create_user(body.email, password_hash, salt)
+    token = db.create_session(user_id, ttl_seconds=SESSION_TTL_SECONDS)
+    return {"session_token": token}
+
+
+@app.post("/v1/auth/login")
+def login(body: LoginRequest):
+    user = db.get_user_by_email(body.email.lower())
+    # Same failure path (and same errors.invalid_credentials() message)
+    # whether the email doesn't exist or the password is wrong -- see
+    # that error constructor's own comment on why.
+    if user is None or not auth.verify_password(body.password, user["password_hash"], user["salt"]):
+        raise errors.invalid_credentials()
+
+    token = db.create_session(user["user_id"], ttl_seconds=SESSION_TTL_SECONDS)
+    return {"session_token": token}
+
+
+@app.post("/v1/auth/logout")
+def logout(authorization: str = Header(default=None)):
+    # Deletes only the session named by this specific token, not every
+    # session this user holds (see db.py's sessions-table comment on
+    # why session_token is the primary key) -- so doesn't need
+    # Depends(auth.get_current_user) at all, just the raw token.
+    token = auth.extract_bearer_token(authorization)
+    db.delete_session(token)
+    return {"status": "ok"}
+
+
+@app.get("/v1/auth/me")
+def me(current_user: str = Depends(auth.get_current_user)):
+    return {"user_id": current_user}
+
+
+@app.get("/v1/push/vapid-public-key")
+def push_vapid_public_key():
+    # Not a secret -- the browser needs this to call
+    # pushManager.subscribe({applicationServerKey: ...}); it identifies
+    # this server as the sender, it doesn't authorize anything on its
+    # own (that's what the matching VAPID_PRIVATE_KEY does when this
+    # server later signs an actual push message). No auth required.
+    return {"public_key": auth.VAPID_PUBLIC_KEY}
+
+
+@app.post("/v1/push/subscribe")
+def push_subscribe(body: PushSubscriptionRequest, current_user: str = Depends(auth.get_current_user)):
+    db.add_push_subscription(current_user, body.endpoint, body.keys.p256dh, body.keys.auth)
+    return {"status": "ok"}
+
+
+@app.post("/v1/push/unsubscribe")
+def push_unsubscribe(body: PushUnsubscribeRequest, current_user: str = Depends(auth.get_current_user)):
+    # Deliberately does not check that this endpoint belongs to
+    # current_user before deleting -- an unsubscribe request for a
+    # subscription that either doesn't exist or belongs to someone else
+    # is already a no-op via db.remove_push_subscription's own
+    # unconditional DELETE, and leaking whether a given endpoint string
+    # belongs to another account isn't a distinction worth making here.
+    db.remove_push_subscription(body.endpoint)
     return {"status": "ok"}
 
 
@@ -144,20 +292,27 @@ def health():
 def submit_research(
     body: ResearchRequest,
     orchestrator: str = Query("hand_rolled", pattern="^(hand_rolled|langgraph)$"),
+    current_user: str = Depends(auth.get_current_user),
 ):
     companies = resolve_companies(body.question)
     if not companies:
         raise errors.no_company_detected(body.question)
 
-    job_id = jobs.submit_job(question=body.question, orchestrator=orchestrator)
+    recent = db.count_recent_jobs(current_user, time.time() - RATE_LIMIT_WINDOW_SECONDS)
+    if recent >= DAILY_JOB_LIMIT:
+        raise errors.rate_limit_exceeded(DAILY_JOB_LIMIT)
+
+    job_id = jobs.submit_job(question=body.question, orchestrator=orchestrator, user_id=current_user)
     return {"job_id": job_id}
 
 
 @app.get("/v1/research/{job_id}")
-def get_research(job_id: str):
+def get_research(job_id: str, current_user: str = Depends(auth.get_current_user)):
     job = db.get_job(job_id)
     if job is None:
         raise errors.job_not_found(job_id)
+    if job["user_id"] != current_user:
+        raise errors.forbidden(job_id)
 
     response = {
         "job_id": job["job_id"],
@@ -173,11 +328,51 @@ def get_research(job_id: str):
     return response
 
 
-@app.get("/v1/research/{job_id}/pdf")
-def get_research_pdf(job_id: str):
+@app.post("/v1/research/{job_id}/pdf/share")
+def share_research_pdf(job_id: str, current_user: str = Depends(auth.get_current_user)):
+    """Mints a time-limited, signature-verified link to this job's PDF
+    that works with NO session at all (see get_research_pdf below) --
+    for sharing a report with someone who doesn't have a FinSight
+    account. Only the report's own owner may mint one; the same
+    ownership check get_research_pdf itself uses."""
     job = db.get_job(job_id)
     if job is None:
         raise errors.job_not_found(job_id)
+    if job["user_id"] != current_user:
+        raise errors.forbidden(job_id)
+    if job["status"] != db.STATUS_DONE or not job["pdf_path"]:
+        raise errors.job_not_done(job_id, job["status"])
+
+    expires_at, signature = auth.sign_pdf_url(job_id, PDF_SHARE_TTL_SECONDS)
+    return {
+        "url": f"/v1/research/{job_id}/pdf?exp={expires_at}&sig={signature}",
+        "expires_at": expires_at,
+    }
+
+
+@app.get("/v1/research/{job_id}/pdf")
+def get_research_pdf(
+    job_id: str,
+    exp: Optional[int] = Query(None),
+    sig: Optional[str] = Query(None),
+    current_user: Optional[str] = Depends(auth.get_current_user_optional),
+):
+    """Two independent ways in, either is sufficient: a real session
+    belonging to the job's owner (existing behavior, unchanged), OR a
+    valid, unexpired exp/sig pair from share_research_pdf above (new --
+    deliberately skips the ownership check entirely in this branch,
+    since possessing a valid signature for this exact job_id *is* the
+    authorization, the same way a valid session already is)."""
+    job = db.get_job(job_id)
+    if job is None:
+        raise errors.job_not_found(job_id)
+
+    if current_user is not None:
+        if job["user_id"] != current_user:
+            raise errors.forbidden(job_id)
+    elif not (exp is not None and sig is not None and auth.verify_pdf_signature(job_id, exp, sig)):
+        raise errors.unauthorized()
+
     if job["status"] != db.STATUS_DONE or not job["pdf_path"]:
         raise errors.job_not_done(job_id, job["status"])
 
