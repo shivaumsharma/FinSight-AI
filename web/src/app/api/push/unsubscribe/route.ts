@@ -2,18 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { FINSIGHT_API_URL, backendHeaders } from "@/lib/config";
 import { getSessionToken } from "@/lib/session";
 
-// Proxies GET /v1/research/{job_id} -- polled by the client every few
-// seconds while a job is running/queued.
-export async function GET(
-  request: NextRequest,
-  context: { params: Promise<{ jobId: string }> }
-) {
-  const { jobId } = await context.params;
+// Proxies POST /v1/push/unsubscribe.
+export async function POST(request: NextRequest) {
+  const body = await request.json();
   const sessionToken = await getSessionToken();
 
-  const resp = await fetch(`${FINSIGHT_API_URL}/v1/research/${jobId}`, {
+  const resp = await fetch(`${FINSIGHT_API_URL}/v1/push/unsubscribe`, {
+    method: "POST",
     headers: backendHeaders(sessionToken),
-    cache: "no-store",
+    body: JSON.stringify(body),
   });
 
   const data = await resp.json();
