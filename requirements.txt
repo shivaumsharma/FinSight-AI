@@ -44,3 +44,12 @@ redis
 fastapi
 uvicorn
 httpx
+
+# Sends Web Push notifications on job completion (app/api/jobs.py's
+# _notify_job_complete). The one deliberate exception to this project's
+# "stdlib crypto over a new dependency" pattern (see app/api/auth.py's
+# PBKDF2 password hashing, HMAC PDF-link signing) -- Web Push's payload
+# encryption (RFC 8291: ECDH + HKDF + AES-128-GCM) is a meaningfully
+# bigger, more failure-prone thing to hand-roll than a single hash/HMAC
+# call. Pulls in py_vapid and cryptography as transitive dependencies.
+pywebpush

@@ -89,10 +89,25 @@ def client(tmp_path, monkeypatch):
         yield test_client
 
 
-def _poll_until_terminal(client, job_id, timeout=5.0):
+def _signup(client, email="alice@example.com", password="correcthorsebattery"):
+    """Signs up a fresh user and returns an Authorization header dict --
+    the shared setup for every test that needs a real logged-in user
+    rather than the old implicit "anonymous" default."""
+    resp = client.post("/v1/auth/signup", json={"email": email, "password": password})
+    assert resp.status_code == 200, resp.text
+    token = resp.json()["session_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def auth_headers(client):
+    return _signup(client)
+
+
+def _poll_until_terminal(client, job_id, headers, timeout=5.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        resp = client.get(f"/v1/research/{job_id}")
+        resp = client.get(f"/v1/research/{job_id}", headers=headers)
         if resp.json()["status"] in (db.STATUS_DONE, db.STATUS_ERROR):
             return resp
         time.sleep(0.05)
@@ -109,32 +124,43 @@ def test_health(client):
 
 # ---------------------------------------------------------------- API key middleware
 
-def test_v1_routes_open_when_no_api_key_configured(client, monkeypatch):
+def test_v1_routes_open_when_no_api_key_configured(client, monkeypatch, auth_headers):
     # Default test-fixture state: API_KEY was never set, so _API_KEY is
     # None -- existing/local-dev behavior, unchanged by this middleware.
+    # Still needs a real session token, though -- that's a separate,
+    # always-on layer (see main.py's module docstring on why both exist).
     monkeypatch.setattr(main, "_API_KEY", None)
-    resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"})
+    resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
     assert resp.status_code == 200
 
 
-def test_v1_routes_reject_missing_or_wrong_key_once_configured(client, monkeypatch):
+def test_v1_routes_reject_missing_or_wrong_key_once_configured(client, monkeypatch, auth_headers):
     monkeypatch.setattr(main, "_API_KEY", "the-real-key")
-    resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"})
+    # The X-API-Key middleware runs before route/dependency resolution,
+    # so it 401s here even with a perfectly valid session token --
+    # deployment-level gating short-circuits before per-user identity
+    # is ever checked.
+    resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
     assert resp.status_code == 401
     assert resp.json()["code"] == "UNAUTHORIZED"
 
     resp = client.post(
         "/v1/research", json={"question": "Should I invest in AAPL?"},
-        headers={"X-API-Key": "wrong-key"},
+        headers={**auth_headers, "X-API-Key": "wrong-key"},
     )
     assert resp.status_code == 401
 
 
 def test_v1_routes_accept_the_correct_key(client, monkeypatch):
+    # Sign up BEFORE the key is configured (default test-fixture state
+    # has no key set) -- signup itself also sits behind /v1, so doing
+    # it after would 401 before ever reaching the route.
+    headers = _signup(client)
     monkeypatch.setattr(main, "_API_KEY", "the-real-key")
+    headers["X-API-Key"] = "the-real-key"
     resp = client.post(
         "/v1/research", json={"question": "Should I invest in AAPL?"},
-        headers={"X-API-Key": "the-real-key"},
+        headers=headers,
     )
     assert resp.status_code == 200
 
@@ -147,12 +173,12 @@ def test_health_stays_open_even_when_api_key_is_configured(client, monkeypatch):
 
 # ---------------------------------------------------------------- submit/poll/done
 
-def test_submit_poll_done_returns_expected_result_shape(client):
-    submit_resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"})
+def test_submit_poll_done_returns_expected_result_shape(client, auth_headers):
+    submit_resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
     assert submit_resp.status_code == 200
     job_id = submit_resp.json()["job_id"]
 
-    final = _poll_until_terminal(client, job_id).json()
+    final = _poll_until_terminal(client, job_id, auth_headers).json()
 
     assert final["status"] == db.STATUS_DONE
     assert final["result"]["ticker"] == "AAPL"
@@ -166,60 +192,300 @@ def test_submit_poll_done_returns_expected_result_shape(client):
     ]
 
 
-def test_pdf_endpoint_returns_real_bytes_written_to_disk(client):
-    job_id = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}).json()["job_id"]
-    _poll_until_terminal(client, job_id)
+def test_submitted_job_is_tagged_with_the_real_user_not_anonymous(client, auth_headers):
+    # The whole point of this pass -- see db.py's jobs.user_id column,
+    # which existed and defaulted to "anonymous" before any of this
+    # was wired up.
+    job_id = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers
+    ).json()["job_id"]
 
-    pdf_resp = client.get(f"/v1/research/{job_id}/pdf")
+    me = client.get("/v1/auth/me", headers=auth_headers).json()
+    assert db.get_job(job_id)["user_id"] == me["user_id"]
+    assert db.get_job(job_id)["user_id"] != "anonymous"
+
+
+def test_pdf_endpoint_returns_real_bytes_written_to_disk(client, auth_headers):
+    job_id = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers
+    ).json()["job_id"]
+    _poll_until_terminal(client, job_id, auth_headers)
+
+    pdf_resp = client.get(f"/v1/research/{job_id}/pdf", headers=auth_headers)
     assert pdf_resp.status_code == 200
     assert pdf_resp.content == b"%PDF-1.4 fake pdf content for testing"
 
 
-def test_pdf_endpoint_409s_while_job_is_not_done(client, monkeypatch):
+def test_pdf_endpoint_409s_while_job_is_not_done(client, monkeypatch, auth_headers):
     # A stub agent that never actually finishes within the test -- just
     # check the row right after submission, before the background
     # thread has necessarily completed it.
-    job_id = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}).json()["job_id"]
-    resp = client.get(f"/v1/research/{job_id}/pdf")
+    job_id = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers
+    ).json()["job_id"]
+    resp = client.get(f"/v1/research/{job_id}/pdf", headers=auth_headers)
     # Could race with the (fast) stub finishing first -- only assert
     # the 409 case when it's actually still pending/running.
-    status = client.get(f"/v1/research/{job_id}").json()["status"]
+    status = client.get(f"/v1/research/{job_id}", headers=auth_headers).json()["status"]
     if status in (db.STATUS_PENDING, db.STATUS_RUNNING):
         assert resp.status_code == 409
         assert resp.json()["code"] == "JOB_NOT_DONE"
 
 
-def test_pipeline_error_surfaces_as_structured_error(client, monkeypatch):
+def test_pipeline_error_surfaces_as_structured_error(client, monkeypatch, auth_headers):
     monkeypatch.setitem(jobs.ORCHESTRATORS, "hand_rolled", _FailingStubAgent)
-    job_id = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}).json()["job_id"]
-    final = _poll_until_terminal(client, job_id).json()
+    job_id = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers
+    ).json()["job_id"]
+    final = _poll_until_terminal(client, job_id, auth_headers).json()
 
     assert final["status"] == db.STATUS_ERROR
     assert final["error_code"] == "PIPELINE_ERROR"
     assert "synthetic pipeline failure" in final["error_message"]
 
 
-def test_ticker_not_found_gets_its_own_error_code(client, monkeypatch):
+def test_ticker_not_found_gets_its_own_error_code(client, monkeypatch, auth_headers):
     monkeypatch.setitem(jobs.ORCHESTRATORS, "hand_rolled", _TickerNotFoundStubAgent)
-    job_id = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}).json()["job_id"]
-    final = _poll_until_terminal(client, job_id).json()
+    job_id = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers
+    ).json()["job_id"]
+    final = _poll_until_terminal(client, job_id, auth_headers).json()
 
     assert final["error_code"] == "TICKER_NOT_FOUND"
 
 
 # ---------------------------------------------------------------- validation
 
-def test_no_company_question_returns_structured_400(client):
-    resp = client.post("/v1/research", json={"question": "What is the stock market?"})
+def test_no_company_question_returns_structured_400(client, auth_headers):
+    resp = client.post("/v1/research", json={"question": "What is the stock market?"}, headers=auth_headers)
     assert resp.status_code == 400
     body = resp.json()
     assert body["code"] == "NO_COMPANY_DETECTED"
 
 
-def test_unknown_job_id_returns_structured_404(client):
-    resp = client.get("/v1/research/does-not-exist")
+def test_unknown_job_id_returns_structured_404(client, auth_headers):
+    resp = client.get("/v1/research/does-not-exist", headers=auth_headers)
     assert resp.status_code == 404
     assert resp.json()["code"] == "JOB_NOT_FOUND"
+
+
+# ---------------------------------------------------------------- per-user auth
+
+def test_signup_then_login_both_work(client):
+    _signup(client, email="carol@example.com", password="carolspassword")
+    resp = client.post("/v1/auth/login", json={"email": "carol@example.com", "password": "carolspassword"})
+    assert resp.status_code == 200
+    assert "session_token" in resp.json()
+
+
+def test_signup_rejects_a_duplicate_email(client):
+    _signup(client, email="dave@example.com")
+    resp = client.post("/v1/auth/signup", json={"email": "dave@example.com", "password": "anotherpassword"})
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "EMAIL_ALREADY_REGISTERED"
+
+
+def test_signup_rejects_a_short_password(client):
+    resp = client.post("/v1/auth/signup", json={"email": "short@example.com", "password": "short"})
+    assert resp.status_code == 422
+
+
+def test_login_rejects_wrong_password(client):
+    _signup(client, email="erin@example.com", password="erinspassword")
+    resp = client.post("/v1/auth/login", json={"email": "erin@example.com", "password": "wrong-password"})
+    assert resp.status_code == 401
+    assert resp.json()["code"] == "INVALID_CREDENTIALS"
+
+
+def test_protected_route_401s_with_no_session_token(client):
+    resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"})
+    assert resp.status_code == 401
+    assert resp.json()["code"] == "UNAUTHORIZED"
+
+
+def test_protected_route_401s_with_a_garbage_session_token(client):
+    resp = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"},
+        headers={"Authorization": "Bearer this-token-was-never-issued"},
+    )
+    assert resp.status_code == 401
+    assert resp.json()["code"] == "UNAUTHORIZED"
+
+
+def test_logout_invalidates_the_session(client, auth_headers):
+    resp = client.post("/v1/auth/logout", headers=auth_headers)
+    assert resp.status_code == 200
+
+    resp = client.get("/v1/auth/me", headers=auth_headers)
+    assert resp.status_code == 401
+
+
+def test_a_second_user_cannot_read_the_first_users_job(client, auth_headers):
+    job_id = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers
+    ).json()["job_id"]
+
+    other_user_headers = _signup(client, email="mallory@example.com", password="malloryspassword")
+    resp = client.get(f"/v1/research/{job_id}", headers=other_user_headers)
+    assert resp.status_code == 403
+    assert resp.json()["code"] == "FORBIDDEN"
+
+
+def test_a_second_user_cannot_download_the_first_users_pdf(client, auth_headers):
+    job_id = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers
+    ).json()["job_id"]
+    _poll_until_terminal(client, job_id, auth_headers)
+
+    other_user_headers = _signup(client, email="mallory2@example.com", password="malloryspassword")
+    resp = client.get(f"/v1/research/{job_id}/pdf", headers=other_user_headers)
+    assert resp.status_code == 403
+    assert resp.json()["code"] == "FORBIDDEN"
+
+
+# ---------------------------------------------------------------- signed PDF share links
+
+def test_share_link_grants_pdf_access_with_no_session_at_all(client, auth_headers):
+    job_id = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers
+    ).json()["job_id"]
+    _poll_until_terminal(client, job_id, auth_headers)
+
+    share_resp = client.post(f"/v1/research/{job_id}/pdf/share", headers=auth_headers)
+    assert share_resp.status_code == 200
+    share_url = share_resp.json()["url"]
+
+    # No Authorization header at all -- the whole point of a share link.
+    pdf_resp = client.get(share_url)
+    assert pdf_resp.status_code == 200
+    assert pdf_resp.content == b"%PDF-1.4 fake pdf content for testing"
+
+
+def test_only_the_owner_can_mint_a_share_link(client, auth_headers):
+    job_id = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers
+    ).json()["job_id"]
+
+    other_user_headers = _signup(client, email="mallory3@example.com", password="malloryspassword")
+    resp = client.post(f"/v1/research/{job_id}/pdf/share", headers=other_user_headers)
+    assert resp.status_code == 403
+    assert resp.json()["code"] == "FORBIDDEN"
+
+
+def test_share_link_rejects_a_tampered_signature(client, auth_headers):
+    job_id = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers
+    ).json()["job_id"]
+    _poll_until_terminal(client, job_id, auth_headers)
+
+    share_url = client.post(f"/v1/research/{job_id}/pdf/share", headers=auth_headers).json()["url"]
+    tampered_url = share_url[:-1] + ("0" if share_url[-1] != "0" else "1")
+
+    resp = client.get(tampered_url)
+    assert resp.status_code == 401
+    assert resp.json()["code"] == "UNAUTHORIZED"
+
+
+def test_share_link_rejects_a_signature_for_a_different_job(client, auth_headers):
+    job_id_1 = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers
+    ).json()["job_id"]
+    job_id_2 = client.post(
+        "/v1/research", json={"question": "Should I invest in MSFT?"}, headers=auth_headers
+    ).json()["job_id"]
+    _poll_until_terminal(client, job_id_1, auth_headers)
+    _poll_until_terminal(client, job_id_2, auth_headers)
+
+    # A valid signature minted for job_id_1 must not grant access to
+    # job_id_2's PDF, even though both are owned by the same user.
+    share_url = client.post(f"/v1/research/{job_id_1}/pdf/share", headers=auth_headers).json()["url"]
+    query_string = share_url.split("?", 1)[1]
+    resp = client.get(f"/v1/research/{job_id_2}/pdf?{query_string}")
+    assert resp.status_code == 401
+
+
+def test_share_link_expired_is_rejected(client, monkeypatch, auth_headers):
+    job_id = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers
+    ).json()["job_id"]
+    _poll_until_terminal(client, job_id, auth_headers)
+
+    monkeypatch.setattr(main, "PDF_SHARE_TTL_SECONDS", -10)
+    share_url = client.post(f"/v1/research/{job_id}/pdf/share", headers=auth_headers).json()["url"]
+
+    resp = client.get(share_url)
+    assert resp.status_code == 401
+
+
+def test_exceeding_the_daily_job_limit_is_rejected(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "DAILY_JOB_LIMIT", 2)
+
+    for _ in range(2):
+        resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
+        assert resp.status_code == 200
+
+    resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
+    assert resp.status_code == 429
+    assert resp.json()["code"] == "RATE_LIMIT_EXCEEDED"
+
+
+def test_rate_limit_is_scoped_per_user_not_global(client, monkeypatch, auth_headers):
+    # A second user hitting their own limit must not be affected by the
+    # first user's usage -- count_recent_jobs is keyed by user_id, not
+    # a single global counter.
+    monkeypatch.setattr(main, "DAILY_JOB_LIMIT", 1)
+
+    resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
+    assert resp.status_code == 200
+    resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
+    assert resp.status_code == 429
+
+    other_user_headers = _signup(client, email="ninacountsseparately@example.com", password="ninaspassword")
+    resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=other_user_headers)
+    assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------- push notifications
+
+def test_vapid_public_key_is_available_with_no_auth(client):
+    # Not a secret -- the browser needs it before a user has even
+    # logged in, to decide whether push is even supported/offered.
+    resp = client.get("/v1/push/vapid-public-key")
+    assert resp.status_code == 200
+    assert isinstance(resp.json()["public_key"], str)
+    assert len(resp.json()["public_key"]) > 0
+
+
+def test_push_subscribe_requires_a_session(client):
+    resp = client.post(
+        "/v1/push/subscribe",
+        json={"endpoint": "https://push.example.com/ep1", "keys": {"p256dh": "p", "auth": "a"}},
+    )
+    assert resp.status_code == 401
+
+
+def test_push_subscribe_then_unsubscribe_round_trip(client, auth_headers):
+    resp = client.post(
+        "/v1/push/subscribe",
+        json={"endpoint": "https://push.example.com/ep1", "keys": {"p256dh": "p256dh-val", "auth": "auth-val"}},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+
+    me = client.get("/v1/auth/me", headers=auth_headers).json()
+    subs = db.get_push_subscriptions(me["user_id"])
+    assert len(subs) == 1
+    assert subs[0]["endpoint"] == "https://push.example.com/ep1"
+    assert subs[0]["p256dh"] == "p256dh-val"
+
+    resp = client.post("/v1/push/unsubscribe", json={"endpoint": "https://push.example.com/ep1"}, headers=auth_headers)
+    assert resp.status_code == 200
+    assert db.get_push_subscriptions(me["user_id"]) == []
+
+
+def test_push_unsubscribe_on_an_unknown_endpoint_is_not_an_error(client, auth_headers):
+    resp = client.post("/v1/push/unsubscribe", json={"endpoint": "https://push.example.com/never-subscribed"}, headers=auth_headers)
+    assert resp.status_code == 200
 
 
 # ---------------------------------------------------------------- reconciliation
