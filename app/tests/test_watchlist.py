@@ -118,6 +118,42 @@ def test_adding_an_invalid_ticker_returns_ticker_not_found(client, monkeypatch, 
     assert client.get("/v1/watchlist", headers=auth_headers).json()["items"] == []
 
 
+def test_adding_a_fuzzy_company_name_falls_back_to_resolve_companies(client, monkeypatch, auth_headers):
+    # A raw ticker lookup on "Bajaj Finance" (not a ticker at all) must
+    # fail, then fall back to resolve_companies (the same NLP/NSE-aware
+    # resolver the main search bar uses) to turn it into a real ticker
+    # -- matches resolve_companies' own docstring example. WatchlistRequest's
+    # own validator uppercases the raw input before this ever runs (see
+    # main.py's WatchlistRequest._normalize_ticker), so the value this
+    # handler actually sees is "BAJAJ FINANCE", not the original casing
+    # -- confirmed separately that resolve_companies matches case-
+    # insensitively, so this doesn't break the fallback.
+    def flaky_quote(ticker):
+        if ticker == "BAJAJ FINANCE":
+            raise TickerNotFoundError(ticker)
+        assert ticker == "BAJFINANCE.NS"
+        return _fake_quote()
+
+    monkeypatch.setattr(main, "get_quote", flaky_quote)
+    monkeypatch.setattr(main, "resolve_companies", lambda q: ["BAJFINANCE.NS"])
+
+    resp = client.post("/v1/watchlist", json={"ticker": "Bajaj Finance"}, headers=auth_headers)
+    assert resp.status_code == 200
+
+    items = client.get("/v1/watchlist", headers=auth_headers).json()["items"]
+    # Stored under the RESOLVED ticker, not the raw fuzzy input.
+    assert [i["ticker"] for i in items] == ["BAJFINANCE.NS"]
+
+
+def test_fuzzy_name_that_resolves_to_nothing_still_404s_cleanly(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_quote", lambda ticker: (_ for _ in ()).throw(TickerNotFoundError(ticker)))
+    monkeypatch.setattr(main, "resolve_companies", lambda q: [])
+
+    resp = client.post("/v1/watchlist", json={"ticker": "not a real company"}, headers=auth_headers)
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "TICKER_NOT_FOUND"
+
+
 # ---------------------------------------------------------------- per-ticker isolation
 
 def test_one_bad_ticker_does_not_500_the_whole_watchlist(client, monkeypatch, auth_headers):

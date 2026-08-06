@@ -9,7 +9,10 @@ import type { WatchlistItem } from "@/lib/types";
 export default function Profile() {
   return (
     <AuthGate>
-      {({ email, createdAt, jobsUsedToday, dailyLimit, totalReports, sessionExpiresAt, logout, deleteAccount, deleteError }) => (
+      {({
+        email, createdAt, jobsUsedToday, dailyLimit, totalReports, sessionExpiresAt,
+        riskTolerance, setRiskTolerance, logout, deleteAccount, deleteError,
+      }) => (
         <ProfilePage
           email={email}
           createdAt={createdAt}
@@ -17,6 +20,8 @@ export default function Profile() {
           dailyLimit={dailyLimit}
           totalReports={totalReports}
           sessionExpiresAt={sessionExpiresAt}
+          riskTolerance={riskTolerance}
+          onSetRiskTolerance={setRiskTolerance}
           onLogout={logout}
           onDeleteAccount={deleteAccount}
           deleteError={deleteError}
@@ -87,6 +92,78 @@ function NotificationRow() {
           }`}
         />
       </button>
+    </div>
+  );
+}
+
+const RISK_LEVELS = ["Conservative", "Moderate", "Aggressive"] as const;
+const RISK_COLORS: Record<string, string> = {
+  Conservative: "text-accent border-accent",
+  Moderate: "text-warn border-warn",
+  Aggressive: "text-danger border-danger",
+};
+
+// Real, persisted preference (app/api/db.py's users.risk_tolerance) --
+// clicking cycles Conservative -> Moderate -> Aggressive -> back, same
+// interaction as a settings toggle in most mobile apps when there's no
+// room for a dropdown. NOT yet applied to the research pipeline's own
+// WACC/discount assumptions -- saved and reflected back honestly, not
+// wired into report generation in this pass.
+function RiskToleranceRow({
+  riskTolerance,
+  onChange,
+}: {
+  riskTolerance: string | null;
+  onChange: (level: string) => void;
+}) {
+  const current = riskTolerance || "Moderate";
+
+  function cycle() {
+    const next = RISK_LEVELS[(RISK_LEVELS.indexOf(current as (typeof RISK_LEVELS)[number]) + 1) % RISK_LEVELS.length];
+    onChange(next);
+  }
+
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3.5 py-3">
+      <div className="font-mono text-xs text-text">Risk tolerance</div>
+      <button
+        type="button"
+        onClick={cycle}
+        title="Click to cycle"
+        className={`rounded border px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wide ${RISK_COLORS[current]}`}
+      >
+        {current}
+      </button>
+    </div>
+  );
+}
+
+// Static, informational rows -- not editable toggles, because there's
+// no real alternate backend behavior for them to switch between: this
+// app only ever runs one valuation methodology (WACC/FCFF/DCF), and
+// quotes are already live (get_quote's 45s cache is a performance
+// detail, not a "refresh interval" a user actually controls). Showing
+// them as plain text describes what the app already does, rather than
+// implying a setting that doesn't exist.
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3.5 py-3">
+      <div className="font-mono text-xs text-text">{label}</div>
+      <div className="font-mono text-[11px] text-muted">{value}</div>
+    </div>
+  );
+}
+
+function ConnectedSourceRow({ label, linked }: { label: string; linked: boolean }) {
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3.5 py-3">
+      <div className="font-mono text-xs text-text">{label}</div>
+      <div className="flex items-center gap-1.5">
+        <span className={`h-1.5 w-1.5 rounded-full ${linked ? "bg-accent" : "bg-dim"}`} />
+        <span className={`font-mono text-[10px] font-bold uppercase tracking-wide ${linked ? "text-accent" : "text-dim"}`}>
+          {linked ? "Linked" : "Not connected"}
+        </span>
+      </div>
     </div>
   );
 }
@@ -176,6 +253,8 @@ function ProfilePage({
   dailyLimit,
   totalReports,
   sessionExpiresAt,
+  riskTolerance,
+  onSetRiskTolerance,
   onLogout,
   onDeleteAccount,
   deleteError,
@@ -186,6 +265,8 @@ function ProfilePage({
   dailyLimit: number | null;
   totalReports: number | null;
   sessionExpiresAt: number | null;
+  riskTolerance: string | null;
+  onSetRiskTolerance: (level: string) => Promise<void>;
   onLogout: () => void;
   onDeleteAccount: (password: string) => Promise<boolean>;
   deleteError: string | null;
@@ -256,8 +337,18 @@ function ProfilePage({
         )}
 
         <p className="mt-8 font-mono text-[10px] tracking-wide text-dim">PREFERENCES</p>
-        <div className="mt-2">
+        <div className="mt-2 space-y-2">
+          <RiskToleranceRow riskTolerance={riskTolerance} onChange={onSetRiskTolerance} />
           <NotificationRow />
+          <InfoRow label="Default valuation model" value="DCF · FCFF" />
+          <InfoRow label="Data refresh" value="REAL-TIME" />
+        </div>
+
+        <p className="mt-8 font-mono text-[10px] tracking-wide text-dim">CONNECTED SOURCES</p>
+        <div className="mt-2 space-y-2">
+          <ConnectedSourceRow label="SEC EDGAR" linked />
+          <ConnectedSourceRow label="yfinance market data" linked />
+          <ConnectedSourceRow label="Brokerage sync" linked={false} />
         </div>
 
         <p className="mt-8 font-mono text-[10px] tracking-wide text-dim">SESSION</p>
