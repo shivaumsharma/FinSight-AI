@@ -4,6 +4,10 @@ import { useEffect, useState } from "react";
 import RatingBadge from "./RatingBadge";
 import type { WatchlistItem } from "@/lib/types";
 
+function formatShortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 // Always renders, even with zero items -- the add-ticker input is the
 // primary way a user grows this list, so it needs to stay visible
 // rather than disappearing until something's already on it.
@@ -59,42 +63,51 @@ export default function Watchlist() {
 
       {items && items.length > 0 && (
         <div className="mt-2 flex flex-col gap-2">
-          {items.map((item) => (
-            <div
-              key={item.ticker}
-              className="flex items-center justify-between rounded-lg border border-border bg-card px-3.5 py-2.5"
-            >
-              <div className="flex items-center gap-2.5">
-                <span className="font-mono text-sm font-bold text-text">{item.ticker}</span>
-                {item.rating ? (
-                  <RatingBadge rating={item.rating} size="sm" />
-                ) : (
-                  <span className="font-mono text-[10px] text-dim">not yet researched</span>
-                )}
-              </div>
-              <div className="flex items-center gap-3">
-                {item.price !== null && (
-                  <div className="text-right">
-                    <div className="font-mono text-sm text-text">{item.price.toFixed(2)}</div>
-                    {item.change_pct !== null && (
-                      <div className={`font-mono text-[10px] ${item.change_pct >= 0 ? "text-accent" : "text-danger"}`}>
-                        {item.change_pct >= 0 ? "+" : ""}
-                        {item.change_pct.toFixed(2)}%
-                      </div>
+          {items.map((item) => {
+            const corporateActions = [
+              item.next_earnings_date && `Earnings ${formatShortDate(item.next_earnings_date)}`,
+              item.next_ex_dividend_date && `Ex-div ${formatShortDate(item.next_ex_dividend_date)}`,
+            ].filter(Boolean);
+
+            return (
+              <div key={item.ticker} className="rounded-lg border border-border bg-card px-3.5 py-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <span className="font-mono text-sm font-bold text-text">{item.ticker}</span>
+                    {item.rating ? (
+                      <RatingBadge rating={item.rating} size="sm" />
+                    ) : (
+                      <span className="font-mono text-[10px] text-dim">not yet researched</span>
                     )}
                   </div>
+                  <div className="flex items-center gap-3">
+                    {item.price !== null && (
+                      <div className="text-right">
+                        <div className="font-mono text-sm text-text">{item.price.toFixed(2)}</div>
+                        {item.change_pct !== null && (
+                          <div className={`font-mono text-[10px] ${item.change_pct >= 0 ? "text-accent" : "text-danger"}`}>
+                            {item.change_pct >= 0 ? "+" : ""}
+                            {item.change_pct.toFixed(2)}%
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleRemove(item.ticker)}
+                      title="Remove from watchlist"
+                      className="font-mono text-xs text-dim hover:text-danger"
+                    >
+                      &times;
+                    </button>
+                  </div>
+                </div>
+                {corporateActions.length > 0 && (
+                  <p className="mt-1.5 font-mono text-[10px] text-dim">{corporateActions.join(" · ")}</p>
                 )}
-                <button
-                  type="button"
-                  onClick={() => handleRemove(item.ticker)}
-                  title="Remove from watchlist"
-                  className="font-mono text-xs text-dim hover:text-danger"
-                >
-                  &times;
-                </button>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
