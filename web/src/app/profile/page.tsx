@@ -11,7 +11,8 @@ export default function Profile() {
     <AuthGate>
       {({
         email, createdAt, jobsUsedToday, dailyLimit, totalReports, sessionExpiresAt,
-        riskTolerance, setRiskTolerance, logout, deleteAccount, deleteError,
+        riskTolerance, setRiskTolerance, resetAt, waitlistFeatures, joinWaitlist,
+        logout, deleteAccount, deleteError,
       }) => (
         <ProfilePage
           email={email}
@@ -22,6 +23,9 @@ export default function Profile() {
           sessionExpiresAt={sessionExpiresAt}
           riskTolerance={riskTolerance}
           onSetRiskTolerance={setRiskTolerance}
+          resetAt={resetAt}
+          waitlistFeatures={waitlistFeatures}
+          onJoinWaitlist={joinWaitlist}
           onLogout={logout}
           onDeleteAccount={deleteAccount}
           deleteError={deleteError}
@@ -56,11 +60,79 @@ function formatDateTime(unixSeconds: number | null): string {
   });
 }
 
+// A static "as of page load" countdown, not a live-ticking one -- this
+// value doesn't need per-second accuracy (it's "resets in about 18
+// hours", not a race timer), so no setInterval/re-render machinery for
+// something a user glances at once.
+function formatCountdown(resetAt: number | null): string | null {
+  if (!resetAt) return null;
+  const diffMs = resetAt * 1000 - Date.now();
+  if (diffMs <= 0) return null;
+  const hours = Math.floor(diffMs / 3_600_000);
+  const minutes = Math.floor((diffMs % 3_600_000) / 60_000);
+  return `${hours}h ${minutes}m`;
+}
+
+// Minimal inline SVGs, not an icon library -- consistent with this
+// project's stated minimal-dependency stance elsewhere (stdlib
+// sqlite3 instead of an ORM, a hand-rolled service worker instead of
+// next-pwa). Each is ~12px, single-color, matches the mono/terminal
+// aesthetic instead of importing a mismatched icon set.
+function UsageIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M2 14V9M8 14V4M14 14V7" strokeLinecap="round" />
+    </svg>
+  );
+}
+function PreferencesIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M2 4h6M12 4h2M2 8h1M5 8h9M2 12h7M11 12h3" strokeLinecap="round" />
+      <circle cx="9" cy="4" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="3" cy="8" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="12" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+function SourcesIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path
+        d="M6.5 9.5L9.5 6.5M5 11L3.5 12.5a2.1 2.1 0 01-3-3L2 8M11 5l1.5-1.5a2.1 2.1 0 013 3L14 8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+function SessionIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <circle cx="8" cy="8" r="6" />
+      <path d="M8 5v3l2 2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function SectionHeader({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <div className="mt-8 flex items-center gap-1.5 text-dim">
+      {icon}
+      <p className="font-mono text-[10px] tracking-wide">{label}</p>
+    </div>
+  );
+}
+
 // Real toggle, not decorative -- reuses the same usePushNotifications
 // hook page.tsx's header toggle already calls, just with a
 // switch-style visual instead of a compact text button (matches this
 // page's row-based Preferences layout better than the header's
-// space-constrained one).
+// space-constrained one). Copy is deliberately specific about the one
+// real trigger this fires today (a completed research job) rather
+// than implying categories (earnings alerts, price alerts) that don't
+// exist as backend event types yet -- a toggle that claims to control
+// more than it does is worse than one that's honest about doing less.
 function NotificationRow() {
   const { status, subscribe, unsubscribe } = usePushNotifications();
 
@@ -72,17 +144,17 @@ function NotificationRow() {
   return (
     <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3.5 py-3">
       <div>
-        <div className="font-mono text-xs text-text">Push notifications</div>
-        {denied && (
-          <div className="mt-0.5 font-mono text-[10px] text-dim">Blocked in your browser settings</div>
-        )}
+        <div className="font-mono text-xs text-text">Research complete notifications</div>
+        <div className="mt-0.5 font-mono text-[10px] text-dim">
+          {denied ? "Blocked in your browser settings" : "Notifies you when a report finishes, even if you've closed the tab"}
+        </div>
       </div>
       <button
         type="button"
         disabled={denied}
         onClick={subscribed ? unsubscribe : subscribe}
         title={denied ? "Blocked in your browser settings for this site" : undefined}
-        className={`relative h-6 w-11 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
           subscribed ? "bg-accent" : "bg-border"
         }`}
       >
@@ -106,9 +178,9 @@ const RISK_COLORS: Record<string, string> = {
 // Real, persisted preference (app/api/db.py's users.risk_tolerance) --
 // clicking cycles Conservative -> Moderate -> Aggressive -> back, same
 // interaction as a settings toggle in most mobile apps when there's no
-// room for a dropdown. NOT yet applied to the research pipeline's own
-// WACC/discount assumptions -- saved and reflected back honestly, not
-// wired into report generation in this pass.
+// room for a dropdown. The title tooltip is explicit that this is
+// saved-but-not-yet-applied -- better than letting a user assume their
+// reports already changed because of it.
 function RiskToleranceRow({
   riskTolerance,
   onChange,
@@ -125,11 +197,16 @@ function RiskToleranceRow({
 
   return (
     <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3.5 py-3">
-      <div className="font-mono text-xs text-text">Risk tolerance</div>
+      <div
+        className="font-mono text-xs text-text"
+        title="Saved to your profile. Not yet applied to report generation -- DCF assumptions and ratings are the same regardless of this setting today."
+      >
+        Risk tolerance
+      </div>
       <button
         type="button"
         onClick={cycle}
-        title="Click to cycle"
+        title="Click to cycle · saved but not yet applied to reports"
         className={`rounded border px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wide ${RISK_COLORS[current]}`}
       >
         {current}
@@ -144,12 +221,48 @@ function RiskToleranceRow({
 // quotes are already live (get_quote's 45s cache is a performance
 // detail, not a "refresh interval" a user actually controls). Showing
 // them as plain text describes what the app already does, rather than
-// implying a setting that doesn't exist.
-function InfoRow({ label, value }: { label: string; value: string }) {
+// implying a setting that doesn't exist. `hint` powers a native title
+// tooltip -- explains the jargon (DCF/FCFF) without a new UI pattern.
+function InfoRow({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3.5 py-3">
+      <div className="font-mono text-xs text-text" title={hint}>
+        {label}
+      </div>
+      <div className="font-mono text-[11px] text-muted">{value}</div>
+    </div>
+  );
+}
+
+// Brokerage Sync gets a real action instead of a dead "Not Connected"
+// state -- clicking joins a genuine waitlist (app/api/db.py's
+// `waitlist` table), not a fake state change with nowhere for the
+// click to go.
+function WaitlistRow({
+  label,
+  feature,
+  joined,
+  onJoin,
+}: {
+  label: string;
+  feature: string;
+  joined: boolean;
+  onJoin: (feature: string) => void;
+}) {
   return (
     <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3.5 py-3">
       <div className="font-mono text-xs text-text">{label}</div>
-      <div className="font-mono text-[11px] text-muted">{value}</div>
+      {joined ? (
+        <span className="font-mono text-[10px] font-bold uppercase tracking-wide text-accent">On the list</span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onJoin(feature)}
+          className="rounded border border-border px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wide text-muted hover:border-accent hover:text-accent"
+        >
+          Join Waitlist
+        </button>
+      )}
     </div>
   );
 }
@@ -255,6 +368,9 @@ function ProfilePage({
   sessionExpiresAt,
   riskTolerance,
   onSetRiskTolerance,
+  resetAt,
+  waitlistFeatures,
+  onJoinWaitlist,
   onLogout,
   onDeleteAccount,
   deleteError,
@@ -267,6 +383,9 @@ function ProfilePage({
   sessionExpiresAt: number | null;
   riskTolerance: string | null;
   onSetRiskTolerance: (level: string) => Promise<void>;
+  resetAt: number | null;
+  waitlistFeatures: string[];
+  onJoinWaitlist: (feature: string) => void;
   onLogout: () => void;
   onDeleteAccount: (password: string) => Promise<boolean>;
   deleteError: string | null;
@@ -285,7 +404,9 @@ function ProfilePage({
 
   const used = jobsUsedToday ?? 0;
   const limit = dailyLimit ?? 0;
+  const remaining = Math.max(0, limit - used);
   const usagePct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+  const countdown = formatCountdown(resetAt);
 
   return (
     <div className="min-h-screen bg-bg">
@@ -294,6 +415,14 @@ function ProfilePage({
           <Link href="/" className="font-mono text-xs font-bold text-muted hover:text-accent">
             &larr; FINSIGHT
           </Link>
+          {/* Deliberately a small text link here, not the big red
+              full-width button this used to be -- Sign Out is not the
+              action this page should be loudest about; the Danger
+              Zone below stays the visually strongest destructive
+              action, which is the one that actually deserves it. */}
+          <button type="button" onClick={onLogout} className="font-mono text-[10px] text-dim hover:text-muted">
+            Sign out
+          </button>
         </div>
 
         <div className="mt-6 flex items-center gap-3.5">
@@ -306,18 +435,20 @@ function ProfilePage({
           </div>
         </div>
 
-        <p className="mt-8 font-mono text-[10px] tracking-wide text-dim">USAGE TODAY</p>
+        <SectionHeader icon={<UsageIcon />} label="USAGE TODAY" />
         <div className="mt-2 flex gap-3">
           <div className="flex-1 rounded-lg border border-border bg-card px-3.5 py-3">
-            <div className="font-mono text-[10px] text-muted">REPORTS RUN</div>
-            <div className="mt-0.5 font-mono text-sm font-bold text-text">
-              {used} / {limit}
+            <div className="font-mono text-[10px] text-muted">REPORTS REMAINING</div>
+            <div className="mt-0.5 font-mono text-lg font-bold text-text">{remaining}</div>
+            <div className="mt-0.5 font-mono text-[10px] text-dim">
+              {countdown ? `Resets in ${countdown}` : "of " + limit + " today"}
             </div>
           </div>
           <div className="flex-1 rounded-lg border border-border bg-card px-3.5 py-3">
             <div className="font-mono text-[10px] text-muted">WATCHLIST</div>
-            <div className="mt-0.5 font-mono text-sm font-bold text-text">
-              {watchlist === null ? "--" : `${watchlist.length} ticker${watchlist.length === 1 ? "" : "s"}`}
+            <div className="mt-0.5 font-mono text-lg font-bold text-text">{watchlist === null ? "--" : watchlist.length}</div>
+            <div className="mt-0.5 font-mono text-[10px] text-dim">
+              {watchlist === null ? "loading" : watchlist.length === 1 ? "ticker" : "tickers"}
             </div>
           </div>
         </div>
@@ -326,44 +457,47 @@ function ProfilePage({
           <div className="h-full rounded-full bg-accent" style={{ width: `${usagePct}%` }} />
         </div>
         <p className="mt-1.5 font-mono text-[10px] text-dim">
-          Resets on a rolling 24h window, not at a fixed time of day
+          Rolling 24h window, not a fixed reset time
           {totalReports !== null && ` · ${totalReports} report${totalReports === 1 ? "" : "s"} all-time`}.
         </p>
 
         {watchlist && watchlist.length > 0 && (
-          <p className="mt-2 font-mono text-[11px] text-muted">
-            {watchlist.map((w) => w.ticker).join(", ")}
-          </p>
+          <p className="mt-2 font-mono text-[11px] text-muted">{watchlist.map((w) => w.ticker).join(", ")}</p>
         )}
 
-        <p className="mt-8 font-mono text-[10px] tracking-wide text-dim">PREFERENCES</p>
+        <SectionHeader icon={<PreferencesIcon />} label="PREFERENCES" />
         <div className="mt-2 space-y-2">
           <RiskToleranceRow riskTolerance={riskTolerance} onChange={onSetRiskTolerance} />
           <NotificationRow />
-          <InfoRow label="Default valuation model" value="DCF · FCFF" />
-          <InfoRow label="Data refresh" value="REAL-TIME" />
+          <InfoRow
+            label="Valuation methodology"
+            value="DCF · FCFF"
+            hint="Discounted Cash Flow valuation using Free Cash Flow to Firm -- the only valuation model this app runs today, so it isn't a switchable setting."
+          />
+          <InfoRow
+            label="Quote freshness"
+            value="~45s"
+            hint="Watchlist prices are cached for up to 45 seconds to avoid hammering the market data provider on every page load. Report prices are always fetched fresh, never cached."
+          />
         </div>
 
-        <p className="mt-8 font-mono text-[10px] tracking-wide text-dim">CONNECTED SOURCES</p>
+        <SectionHeader icon={<SourcesIcon />} label="CONNECTED SOURCES" />
         <div className="mt-2 space-y-2">
           <ConnectedSourceRow label="SEC EDGAR" linked />
           <ConnectedSourceRow label="yfinance market data" linked />
-          <ConnectedSourceRow label="Brokerage sync" linked={false} />
+          <WaitlistRow
+            label="Brokerage sync"
+            feature="brokerage_sync"
+            joined={waitlistFeatures.includes("brokerage_sync")}
+            onJoin={onJoinWaitlist}
+          />
         </div>
 
-        <p className="mt-8 font-mono text-[10px] tracking-wide text-dim">SESSION</p>
+        <SectionHeader icon={<SessionIcon />} label="SESSION" />
         <div className="mt-2 rounded-lg border border-border bg-card px-3.5 py-3">
           <div className="font-mono text-xs text-text">Signed in until {formatDateTime(sessionExpiresAt)}</div>
           <div className="mt-0.5 font-mono text-[10px] text-dim">Logging in again resets this to 30 days out</div>
         </div>
-
-        <button
-          type="button"
-          onClick={onLogout}
-          className="mt-8 w-full rounded-lg border border-red-900/60 py-2.5 font-mono text-xs font-bold text-danger hover:bg-red-950/40"
-        >
-          SIGN OUT
-        </button>
 
         <DeleteAccountSection onDeleteAccount={onDeleteAccount} deleteError={deleteError} />
       </div>

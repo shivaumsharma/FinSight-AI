@@ -14,6 +14,8 @@ interface AuthState {
   totalReports: number | null;
   sessionExpiresAt: number | null;
   riskTolerance: string | null;
+  resetAt: number | null;
+  waitlistFeatures: string[];
   error: string | null;
 }
 
@@ -27,6 +29,8 @@ const UNAUTHENTICATED_STATE: AuthState = {
   totalReports: null,
   sessionExpiresAt: null,
   riskTolerance: null,
+  resetAt: null,
+  waitlistFeatures: [],
   error: null,
 };
 
@@ -51,6 +55,8 @@ export function useAuth() {
           totalReports: data.total_reports ?? null,
           sessionExpiresAt: data.session_expires_at ?? null,
           riskTolerance: data.risk_tolerance ?? null,
+          resetAt: data.reset_at ?? null,
+          waitlistFeatures: data.waitlist_features ?? [],
           error: null,
         });
       } else {
@@ -140,5 +146,18 @@ export function useAuth() {
     }).catch(() => {});
   }, []);
 
-  return { ...state, signup, login, logout, deleteAccount, setRiskTolerance };
+  // Optimistic, same reasoning as setRiskTolerance above -- a "Join
+  // Waitlist" click should feel instant, and the worst case on a
+  // failed request is the button reverting on the next /api/auth/me
+  // refetch, not a real correctness problem.
+  const joinWaitlist = useCallback(async (feature: string) => {
+    setState((s) => ({ ...s, waitlistFeatures: [...s.waitlistFeatures, feature] }));
+    await fetch("/api/waitlist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ feature }),
+    }).catch(() => {});
+  }, []);
+
+  return { ...state, signup, login, logout, deleteAccount, setRiskTolerance, joinWaitlist };
 }

@@ -179,6 +179,21 @@ def init_db() -> None:
             )
             """
         )
+        # Generic across any not-yet-built feature (Brokerage Sync
+        # today, whatever's next tomorrow) -- `feature` is a free-form
+        # slug, not a foreign key into some feature-registry table that
+        # doesn't exist. Real signal captured, not a dead "Not
+        # Connected" state with nowhere for the click to go.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS waitlist (
+                user_id TEXT NOT NULL,
+                feature TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY (user_id, feature)
+            )
+            """
+        )
 
 
 # ---------------------------------------------------------------- users/sessions
@@ -278,6 +293,20 @@ def count_recent_jobs(user_id: str, since: float) -> int:
     with _connect() as conn:
         row = conn.execute(
             "SELECT COUNT(*) FROM jobs WHERE user_id=? AND started_at > ?", (user_id, since)
+        ).fetchone()
+    return row[0]
+
+
+def oldest_job_time_in_window(user_id: str, since: float) -> Optional[float]:
+    """The started_at of the EARLIEST job counted by count_recent_jobs's
+    same rolling window -- for the Profile view's "resets in Xh Ym"
+    countdown. That job is the next one to age out of the window (it
+    ages out at this value + the window length), which is exactly when
+    jobs_used_today will next tick down by one. None if the user has no
+    jobs in the window (nothing to count down to)."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT MIN(started_at) FROM jobs WHERE user_id=? AND started_at > ?", (user_id, since)
         ).fetchone()
     return row[0]
 
@@ -555,3 +584,27 @@ def reconcile_timed_out_jobs(timeout_seconds: int = JOB_TIMEOUT_SECONDS) -> int:
              time.time(), STATUS_RUNNING, cutoff),
         )
         return cursor.rowcount
+
+
+# ---------------------------------------------------------------- waitlist
+
+def join_waitlist(user_id: str, feature: str) -> None:
+    """INSERT OR IGNORE, same idempotency pattern as add_watchlist_item
+    -- clicking "Join Waitlist" twice for the same feature is a no-op,
+    not an error."""
+    with _connect() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO waitlist (user_id, feature, created_at) VALUES (?, ?, ?)",
+            (user_id, feature, time.time()),
+        )
+
+
+def list_waitlist_features(user_id: str) -> list:
+    """Every feature this user has joined the waitlist for -- folded
+    into GET /v1/auth/me's response so the Profile page can render
+    "Join Waitlist" vs "On the list" without a second round-trip."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT feature FROM waitlist WHERE user_id=?", (user_id,)
+        ).fetchall()
+    return [r[0] for r in rows]
