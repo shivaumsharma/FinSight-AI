@@ -333,6 +333,35 @@ def test_auth_me_returns_profile_and_usage_fields(client, auth_headers):
     assert resp.json()["total_reports"] == 1
 
 
+def test_auth_me_reset_at_is_null_with_no_usage_and_set_after_a_job(client, auth_headers):
+    resp = client.get("/v1/auth/me", headers=auth_headers)
+    assert resp.json()["reset_at"] is None
+
+    before = time.time()
+    client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
+    resp = client.get("/v1/auth/me", headers=auth_headers)
+    reset_at = resp.json()["reset_at"]
+    # reset_at = the job's started_at + the 24h rate-limit window --
+    # started_at is "before", so reset_at must land just under 24h past it.
+    assert reset_at is not None
+    assert before + main.RATE_LIMIT_WINDOW_SECONDS <= reset_at <= before + main.RATE_LIMIT_WINDOW_SECONDS + 30
+
+
+def test_joining_waitlist_is_idempotent_and_reflected_in_auth_me(client, auth_headers):
+    resp = client.get("/v1/auth/me", headers=auth_headers)
+    assert resp.json()["waitlist_features"] == []
+
+    resp = client.post("/v1/waitlist", json={"feature": "brokerage_sync"}, headers=auth_headers)
+    assert resp.status_code == 200
+
+    # Joining twice must not error or duplicate.
+    resp = client.post("/v1/waitlist", json={"feature": "brokerage_sync"}, headers=auth_headers)
+    assert resp.status_code == 200
+
+    resp = client.get("/v1/auth/me", headers=auth_headers)
+    assert resp.json()["waitlist_features"] == ["brokerage_sync"]
+
+
 def test_risk_tolerance_defaults_to_moderate_and_is_persisted(client, auth_headers):
     resp = client.get("/v1/auth/me", headers=auth_headers)
     assert resp.json()["risk_tolerance"] == "Moderate"
