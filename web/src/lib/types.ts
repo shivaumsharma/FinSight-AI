@@ -158,6 +158,10 @@ export interface WatchlistItem {
   change_pct: number | null;
   rating: string | null;
   added_at: number;
+  next_earnings_date: string | null;
+  next_ex_dividend_date: string | null;
+  last_dividend_amount: number | null;
+  last_split: { date: string; ratio: number } | null;
 }
 
 // GET /v1/market/indices' item shape -- a fixed, curated list (see

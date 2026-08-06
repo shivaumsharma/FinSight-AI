@@ -41,6 +41,11 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "jobs.db")
     monkeypatch.setattr(jobs, "REPORTS_DIR", tmp_path / "reports")
     monkeypatch.setattr(jobs, "ORCHESTRATORS", {**jobs.ORCHESTRATORS, "hand_rolled": _StubAgent})
+    # Sane default so every GET /v1/watchlist call in this file doesn't
+    # need its own explicit patch just to avoid hitting real yfinance --
+    # tests that care about corporate-actions behavior specifically
+    # override this with their own monkeypatch.setattr call.
+    monkeypatch.setattr(main, "get_corporate_actions", lambda ticker: _fake_corporate_actions())
     with TestClient(app) as test_client:
         yield test_client
 
@@ -55,6 +60,17 @@ def auth_headers(client):
 
 def _fake_quote(price=200.0, change_pct=1.5):
     return {"price": price, "change_pct": change_pct}
+
+
+def _fake_corporate_actions(**overrides):
+    base = {
+        "next_earnings_date": "2026-10-30",
+        "next_ex_dividend_date": "2026-08-10",
+        "last_dividend_amount": 0.27,
+        "last_split": {"date": "2020-08-31", "ratio": 4.0},
+    }
+    base.update(overrides)
+    return base
 
 
 # ---------------------------------------------------------------- add/list/remove
@@ -178,6 +194,38 @@ def test_one_bad_ticker_does_not_500_the_whole_watchlist(client, monkeypatch, au
     assert items["AAPL"]["price"] == 200.0
     assert items["MSFT"]["price"] is None
     assert items["MSFT"]["change_pct"] is None
+
+
+# ---------------------------------------------------------------- corporate actions
+
+def test_watchlist_includes_corporate_actions(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
+    monkeypatch.setattr(main, "get_corporate_actions", lambda ticker: _fake_corporate_actions())
+    client.post("/v1/watchlist", json={"ticker": "AAPL"}, headers=auth_headers)
+
+    resp = client.get("/v1/watchlist", headers=auth_headers)
+    item = resp.json()["items"][0]
+    assert item["next_earnings_date"] == "2026-10-30"
+    assert item["next_ex_dividend_date"] == "2026-08-10"
+    assert item["last_dividend_amount"] == 0.27
+    assert item["last_split"] == {"date": "2020-08-31", "ratio": 4.0}
+
+
+def test_a_failed_corporate_actions_lookup_does_not_500_or_drop_the_price(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
+    client.post("/v1/watchlist", json={"ticker": "AAPL"}, headers=auth_headers)
+
+    def raise_error(ticker):
+        raise Exception("yfinance hiccup")
+
+    monkeypatch.setattr(main, "get_corporate_actions", raise_error)
+
+    resp = client.get("/v1/watchlist", headers=auth_headers)
+    assert resp.status_code == 200
+    item = resp.json()["items"][0]
+    assert item["price"] == 200.0
+    assert item["next_earnings_date"] is None
+    assert item["last_split"] is None
 
 
 # ---------------------------------------------------------------- last-known rating
