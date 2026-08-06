@@ -11,6 +11,8 @@ interface AuthState {
   createdAt: number | null;
   jobsUsedToday: number | null;
   dailyLimit: number | null;
+  totalReports: number | null;
+  sessionExpiresAt: number | null;
   error: string | null;
 }
 
@@ -21,6 +23,8 @@ const UNAUTHENTICATED_STATE: AuthState = {
   createdAt: null,
   jobsUsedToday: null,
   dailyLimit: null,
+  totalReports: null,
+  sessionExpiresAt: null,
   error: null,
 };
 
@@ -42,6 +46,8 @@ export function useAuth() {
           createdAt: data.created_at ?? null,
           jobsUsedToday: data.jobs_used_today ?? null,
           dailyLimit: data.daily_limit ?? null,
+          totalReports: data.total_reports ?? null,
+          sessionExpiresAt: data.session_expires_at ?? null,
           error: null,
         });
       } else {
@@ -97,5 +103,25 @@ export function useAuth() {
     setState(UNAUTHENTICATED_STATE);
   }, []);
 
-  return { ...state, signup, login, logout };
+  // Irreversible -- the backend re-verifies the password before
+  // deleting anything (see main.py's DELETE /v1/auth/me), this is just
+  // the client-side plumbing for that request plus clearing local
+  // state to logged-out on success, same as logout() above.
+  const deleteAccount = useCallback(async (password: string) => {
+    setState((s) => ({ ...s, error: null }));
+    const resp = await fetch("/api/auth/me", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    if (resp.ok) {
+      setState(UNAUTHENTICATED_STATE);
+      return true;
+    }
+    const body = await resp.json().catch(() => ({ message: "Something went wrong." }));
+    setState((s) => ({ ...s, error: body.message || "Couldn't delete account." }));
+    return false;
+  }, []);
+
+  return { ...state, signup, login, logout, deleteAccount };
 }

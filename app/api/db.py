@@ -244,6 +244,16 @@ def delete_session(token: str) -> None:
         conn.execute("DELETE FROM sessions WHERE session_token=?", (token,))
 
 
+def get_session_expiry(token: str) -> Optional[float]:
+    """For the Profile view's "signed in until" display -- a separate
+    query from get_session() rather than changing what that one
+    returns, since every other caller of get_session() only ever
+    wanted the user_id, not the expiry."""
+    with _connect() as conn:
+        row = conn.execute("SELECT expires_at FROM sessions WHERE session_token=?", (token,)).fetchone()
+    return row[0] if row is not None else None
+
+
 def count_recent_jobs(user_id: str, since: float) -> int:
     """Number of jobs `user_id` has started since the unix timestamp
     `since` -- the entire rate-limiting mechanism (see main.py's
@@ -254,6 +264,31 @@ def count_recent_jobs(user_id: str, since: float) -> int:
             "SELECT COUNT(*) FROM jobs WHERE user_id=? AND started_at > ?", (user_id, since)
         ).fetchone()
     return row[0]
+
+
+def count_all_jobs(user_id: str) -> int:
+    """All-time job count, unlike count_recent_jobs's rolling window --
+    for the Profile view's usage summary, not the rate limit itself."""
+    with _connect() as conn:
+        row = conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=?", (user_id,)).fetchone()
+    return row[0]
+
+
+def delete_user_account(user_id: str) -> None:
+    """Permanently removes this user and everything scoped to them --
+    every OTHER session (not just the one making this request), every
+    job, every watchlist item, every push subscription, then the user
+    row itself. All in one connection/transaction (_connect() commits
+    once at the end) so a mid-delete crash can't leave the account in
+    a half-deleted state -- either all of it is gone or none of it is.
+    Irreversible; main.py's DELETE /v1/auth/me requires a fresh
+    password confirmation before ever calling this."""
+    with _connect() as conn:
+        conn.execute("DELETE FROM jobs WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM watchlist WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM push_subscriptions WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM users WHERE user_id=?", (user_id,))
 
 
 # ---------------------------------------------------------------- push subscriptions

@@ -13,11 +13,18 @@ interface AuthedProps {
   createdAt: number | null;
   jobsUsedToday: number | null;
   dailyLimit: number | null;
+  totalReports: number | null;
+  sessionExpiresAt: number | null;
   logout: () => void;
+  deleteAccount: (password: string) => Promise<boolean>;
+  deleteError: string | null;
 }
 
 export default function AuthGate({ children }: { children: (auth: AuthedProps) => React.ReactNode }) {
-  const { status, userId, email: authedEmail, createdAt, jobsUsedToday, dailyLimit, error, signup, login, logout } = useAuth();
+  const {
+    status, userId, email: authedEmail, createdAt, jobsUsedToday, dailyLimit,
+    totalReports, sessionExpiresAt, error, signup, login, logout, deleteAccount,
+  } = useAuth();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -32,7 +39,14 @@ export default function AuthGate({ children }: { children: (auth: AuthedProps) =
   }
 
   if (status === "authenticated" && userId) {
-    return <>{children({ userId, email: authedEmail, createdAt, jobsUsedToday, dailyLimit, logout })}</>;
+    return (
+      <>
+        {children({
+          userId, email: authedEmail, createdAt, jobsUsedToday, dailyLimit,
+          totalReports, sessionExpiresAt, logout, deleteAccount, deleteError: error,
+        })}
+      </>
+    );
   }
 
   async function handleSubmit(e: React.FormEvent) {
