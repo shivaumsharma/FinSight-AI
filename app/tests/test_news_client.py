@@ -199,3 +199,108 @@ def test_ticker_matching_requires_word_boundaries_and_uppercase():
     # "IT" (Gartner) must not match the pronoun "it"/"It".
     assert _is_company_specific(_article("It was a quiet day for markets", "2026-07-20"), "IT", None) is False
     assert _is_company_specific(_article("IT spending outlook raised for 2026", "2026-07-20"), "IT", None) is True
+
+
+# ---------------------------------------------------------------- fetch_market_news
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+def _raw_item(headline, datetime_ts, source="Test Wire", url=None, summary=""):
+    return {
+        "headline": headline,
+        "datetime": datetime_ts,
+        "source": source,
+        "url": url or f"https://example.com/{headline}",
+        "summary": summary,
+    }
+
+
+def test_fetch_market_news_returns_articles_sorted_most_recent_first(tmp_path, monkeypatch):
+    import app.reporting.news_client as nc
+
+    monkeypatch.setattr(nc, "MARKET_NEWS_CACHE_FILE", tmp_path / "market_news.json")
+    monkeypatch.setattr(nc, "FINNHUB_API_KEY", "fake-key")
+    raw = [_raw_item("Older story", 1000), _raw_item("Newer story", 2000)]
+    monkeypatch.setattr(nc.requests, "get", lambda *a, **k: _FakeResponse(raw))
+
+    articles = nc.fetch_market_news()
+    assert [a["headline"] for a in articles] == ["Newer story", "Older story"]
+
+
+def test_fetch_market_news_returns_empty_without_an_api_key(tmp_path, monkeypatch):
+    import app.reporting.news_client as nc
+
+    monkeypatch.setattr(nc, "MARKET_NEWS_CACHE_FILE", tmp_path / "market_news.json")
+    monkeypatch.setattr(nc, "FINNHUB_API_KEY", None)
+
+    assert nc.fetch_market_news() == []
+
+
+def test_fetch_market_news_degrades_to_empty_on_a_network_failure(tmp_path, monkeypatch):
+    import app.reporting.news_client as nc
+    import requests as requests_module
+
+    monkeypatch.setattr(nc, "MARKET_NEWS_CACHE_FILE", tmp_path / "market_news.json")
+    monkeypatch.setattr(nc, "FINNHUB_API_KEY", "fake-key")
+
+    def raise_error(*a, **k):
+        raise requests_module.RequestException("boom")
+
+    monkeypatch.setattr(nc.requests, "get", raise_error)
+    assert nc.fetch_market_news() == []
+
+
+def test_fetch_market_news_deduplicates_by_url(tmp_path, monkeypatch):
+    import app.reporting.news_client as nc
+
+    monkeypatch.setattr(nc, "MARKET_NEWS_CACHE_FILE", tmp_path / "market_news.json")
+    monkeypatch.setattr(nc, "FINNHUB_API_KEY", "fake-key")
+    raw = [
+        _raw_item("Story A", 2000, url="https://example.com/a"),
+        _raw_item("Story A (duplicate)", 1500, url="https://example.com/a"),
+    ]
+    monkeypatch.setattr(nc.requests, "get", lambda *a, **k: _FakeResponse(raw))
+
+    articles = nc.fetch_market_news()
+    assert len(articles) == 1
+    assert articles[0]["headline"] == "Story A"
+
+
+def test_fetch_market_news_respects_the_limit(tmp_path, monkeypatch):
+    import app.reporting.news_client as nc
+
+    monkeypatch.setattr(nc, "MARKET_NEWS_CACHE_FILE", tmp_path / "market_news.json")
+    monkeypatch.setattr(nc, "FINNHUB_API_KEY", "fake-key")
+    raw = [_raw_item(f"Story {i}", 1000 + i, url=f"https://example.com/{i}") for i in range(10)]
+    monkeypatch.setattr(nc.requests, "get", lambda *a, **k: _FakeResponse(raw))
+
+    assert len(nc.fetch_market_news(limit=3)) == 3
+
+
+def test_fetch_market_news_uses_the_cache_within_the_ttl(tmp_path, monkeypatch):
+    import app.reporting.news_client as nc
+
+    cache_file = tmp_path / "market_news.json"
+    monkeypatch.setattr(nc, "MARKET_NEWS_CACHE_FILE", cache_file)
+    monkeypatch.setattr(nc, "FINNHUB_API_KEY", "fake-key")
+
+    calls = []
+
+    def fake_get(*a, **k):
+        calls.append(1)
+        return _FakeResponse([_raw_item("Cached story", 1000)])
+
+    monkeypatch.setattr(nc.requests, "get", fake_get)
+
+    nc.fetch_market_news()
+    nc.fetch_market_news()
+    assert len(calls) == 1
