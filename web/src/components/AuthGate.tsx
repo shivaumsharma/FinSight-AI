@@ -15,6 +15,8 @@ interface AuthedProps {
   dailyLimit: number | null;
   totalReports: number | null;
   sessionExpiresAt: number | null;
+  riskTolerance: string | null;
+  setRiskTolerance: (level: string) => Promise<void>;
   logout: () => void;
   deleteAccount: (password: string) => Promise<boolean>;
   deleteError: string | null;
@@ -23,7 +25,8 @@ interface AuthedProps {
 export default function AuthGate({ children }: { children: (auth: AuthedProps) => React.ReactNode }) {
   const {
     status, userId, email: authedEmail, createdAt, jobsUsedToday, dailyLimit,
-    totalReports, sessionExpiresAt, error, signup, login, logout, deleteAccount,
+    totalReports, sessionExpiresAt, riskTolerance, error, signup, login, logout,
+    deleteAccount, setRiskTolerance,
   } = useAuth();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
@@ -43,7 +46,8 @@ export default function AuthGate({ children }: { children: (auth: AuthedProps) =
       <>
         {children({
           userId, email: authedEmail, createdAt, jobsUsedToday, dailyLimit,
-          totalReports, sessionExpiresAt, logout, deleteAccount, deleteError: error,
+          totalReports, sessionExpiresAt, riskTolerance, setRiskTolerance,
+          logout, deleteAccount, deleteError: error,
         })}
       </>
     );

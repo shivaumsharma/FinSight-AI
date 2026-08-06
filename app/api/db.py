@@ -121,6 +121,17 @@ def init_db() -> None:
             )
             """
         )
+        # A real, persisted, user-editable preference -- NOT yet wired
+        # into the research pipeline's own behavior (that's a separate,
+        # larger feature: using it to bias WACC/discount assumptions or
+        # filter recommendations). Nullable so existing rows don't need
+        # backfilling; callers treat NULL as "Moderate" at read time
+        # (see main.py's GET /v1/auth/me), same nullable-with-no-
+        # backfill pattern as jobs.ticker/company_name/rating above.
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN risk_tolerance TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists
         # session_token is the primary key, not user_id -- a user can
         # hold multiple valid sessions at once (e.g. two browser tabs
         # each logging in independently), and logout must invalidate
@@ -205,6 +216,11 @@ def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT * FROM users WHERE user_id=?", (user_id,)).fetchone()
     return dict(row) if row is not None else None
+
+
+def set_risk_tolerance(user_id: str, risk_tolerance: str) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE users SET risk_tolerance=? WHERE user_id=?", (risk_tolerance, user_id))
 
 
 def create_session(user_id: str, ttl_seconds: int = DEFAULT_SESSION_TTL_SECONDS) -> str:

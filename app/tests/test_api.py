@@ -333,6 +333,25 @@ def test_auth_me_returns_profile_and_usage_fields(client, auth_headers):
     assert resp.json()["total_reports"] == 1
 
 
+def test_risk_tolerance_defaults_to_moderate_and_is_persisted(client, auth_headers):
+    resp = client.get("/v1/auth/me", headers=auth_headers)
+    assert resp.json()["risk_tolerance"] == "Moderate"
+
+    resp = client.patch("/v1/auth/risk-tolerance", json={"risk_tolerance": "Aggressive"}, headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["risk_tolerance"] == "Aggressive"
+
+    # Persisted -- a fresh /v1/auth/me call reflects it, not just the
+    # PATCH response itself.
+    resp = client.get("/v1/auth/me", headers=auth_headers)
+    assert resp.json()["risk_tolerance"] == "Aggressive"
+
+
+def test_risk_tolerance_rejects_an_invalid_level(client, auth_headers):
+    resp = client.patch("/v1/auth/risk-tolerance", json={"risk_tolerance": "YOLO"}, headers=auth_headers)
+    assert resp.status_code == 422
+
+
 def test_deleting_account_requires_the_correct_password(client, auth_headers):
     resp = client.request("DELETE", "/v1/auth/me", json={"password": "wrongpassword"}, headers=auth_headers)
     assert resp.status_code == 401

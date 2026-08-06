@@ -289,7 +289,34 @@ def me(authorization: str = Header(default=None), current_user: str = Depends(au
         "daily_limit": DAILY_JOB_LIMIT,
         "total_reports": db.count_all_jobs(current_user),
         "session_expires_at": session_expires_at,
+        # NULL on a fresh/pre-migration row defaults to "Moderate" here
+        # (read time), not backfilled in the DB -- same nullable
+        # pattern the jobs-table migration above already uses.
+        "risk_tolerance": user["risk_tolerance"] if user and user.get("risk_tolerance") else "Moderate",
     }
+
+
+_RISK_TOLERANCE_LEVELS = ("Conservative", "Moderate", "Aggressive")
+
+
+class RiskToleranceRequest(BaseModel):
+    risk_tolerance: str
+
+    @field_validator("risk_tolerance")
+    @classmethod
+    def _valid_level(cls, v: str) -> str:
+        if v not in _RISK_TOLERANCE_LEVELS:
+            raise ValueError(f"risk_tolerance must be one of {_RISK_TOLERANCE_LEVELS}")
+        return v
+
+
+@app.patch("/v1/auth/risk-tolerance")
+def update_risk_tolerance(body: RiskToleranceRequest, current_user: str = Depends(auth.get_current_user)):
+    # Persisted preference only -- not yet applied to the research
+    # pipeline's own WACC/discount assumptions or recommendation logic
+    # (a separate, larger feature). Real and saved, not decorative.
+    db.set_risk_tolerance(current_user, body.risk_tolerance)
+    return {"status": "ok", "risk_tolerance": body.risk_tolerance}
 
 
 class DeleteAccountRequest(BaseModel):
@@ -462,16 +489,28 @@ def get_watchlist(current_user: str = Depends(auth.get_current_user)):
 
 @app.post("/v1/watchlist")
 def add_to_watchlist(body: WatchlistRequest, current_user: str = Depends(auth.get_current_user)):
-    # get_quote() itself is the validity check here (not
-    # resolve_companies, which is NLP entity extraction over free text
-    # -- the wrong tool for a raw ticker string) -- any failure means
-    # this isn't a real, currently-listed ticker.
+    # Fast path: body.ticker is already a real, directly-quotable
+    # symbol ("AAPL", "TSLA"). Only when that fails do we fall back to
+    # resolve_companies -- the same NLP/NSE-aware resolver the main
+    # search bar uses -- so a fuzzy company name (including a non-US
+    # one, e.g. "Bajaj Finance" -> BAJFINANCE.NS, resolve_companies'
+    # own docstring example) works here too, not just a bare ticker.
+    # Without this fallback the watchlist quietly required stricter,
+    # more technical input than the rest of the app.
+    ticker = body.ticker
     try:
-        get_quote(body.ticker)
+        get_quote(ticker)
     except TickerNotFoundError:
-        raise errors.ticker_not_found(body.ticker)
+        resolved = resolve_companies(body.ticker)
+        if not resolved:
+            raise errors.ticker_not_found(body.ticker)
+        ticker = resolved[0]
+        try:
+            get_quote(ticker)
+        except TickerNotFoundError:
+            raise errors.ticker_not_found(body.ticker)
 
-    db.add_watchlist_item(current_user, body.ticker)
+    db.add_watchlist_item(current_user, ticker)
     return {"status": "ok"}
 
 
