@@ -228,6 +228,28 @@ class WatchlistRequest(BaseModel):
         return v.strip().upper()
 
 
+class PortfolioRequest(BaseModel):
+    ticker: str
+    quantity: float
+    avg_cost: float
+
+    @field_validator("ticker")
+    @classmethod
+    def _normalize_ticker(cls, v: str) -> str:
+        return v.strip().upper()
+
+    @field_validator("quantity", "avg_cost")
+    @classmethod
+    def _must_be_positive(cls, v: float) -> float:
+        # Self-reported entry, not a trade -- but zero/negative shares
+        # or cost basis can't correspond to any real holding, so reject
+        # it the same way SignupRequest rejects a too-short password:
+        # a field_validator ValueError, which FastAPI turns into a 422.
+        if v <= 0:
+            raise ValueError("Must be greater than zero.")
+        return v
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -578,4 +600,92 @@ def remove_from_watchlist(ticker: str, current_user: str = Depends(auth.get_curr
     # that isn't on the watchlist (or was already removed) is a no-op,
     # not an error.
     db.remove_watchlist_item(current_user, ticker.upper())
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------- portfolio (self-reported)
+#
+# Manual holdings entry + live-quote P&L calculation ONLY. No
+# brokerage connection, no order placement, no execution of any kind
+# -- this deliberately stops at "what would my P&L be if what I typed
+# in is accurate", the same category boundary the rest of this app
+# stays inside of everywhere else.
+
+@app.get("/v1/portfolio")
+def get_portfolio(current_user: str = Depends(auth.get_current_user)):
+    holdings = []
+    total_market_value = 0.0
+    total_cost_basis = 0.0
+    for row in db.get_portfolio_holdings(current_user):
+        ticker = row["ticker"]
+        quantity = row["quantity"]
+        avg_cost = row["avg_cost"]
+        try:
+            quote = get_quote(ticker)
+        except Exception:
+            # Same per-ticker isolation as the watchlist -- one
+            # bad/delisted holding must not 500 the whole portfolio.
+            quote = None
+
+        price = quote["price"] if quote else None
+        cost_basis = quantity * avg_cost
+        market_value = price * quantity if price is not None else None
+        unrealized_pnl = (market_value - cost_basis) if market_value is not None else None
+        unrealized_pnl_pct = (unrealized_pnl / cost_basis * 100) if unrealized_pnl is not None and cost_basis else None
+
+        if market_value is not None:
+            total_market_value += market_value
+        total_cost_basis += cost_basis
+
+        holdings.append({
+            "ticker": ticker,
+            "quantity": quantity,
+            "avg_cost": avg_cost,
+            "price": price,
+            "change_pct": quote["change_pct"] if quote else None,
+            "cost_basis": cost_basis,
+            "market_value": market_value,
+            "unrealized_pnl": unrealized_pnl,
+            "unrealized_pnl_pct": unrealized_pnl_pct,
+            "added_at": row["added_at"],
+        })
+
+    total_unrealized_pnl = total_market_value - total_cost_basis if holdings else None
+    total_unrealized_pnl_pct = (total_unrealized_pnl / total_cost_basis * 100) if total_unrealized_pnl and total_cost_basis else None
+
+    return {
+        "holdings": holdings,
+        "summary": {
+            "total_market_value": total_market_value if holdings else None,
+            "total_cost_basis": total_cost_basis if holdings else None,
+            "total_unrealized_pnl": total_unrealized_pnl,
+            "total_unrealized_pnl_pct": total_unrealized_pnl_pct,
+        },
+    }
+
+
+@app.post("/v1/portfolio")
+def add_or_update_portfolio_holding(body: PortfolioRequest, current_user: str = Depends(auth.get_current_user)):
+    # Same fast-path-then-resolve_companies-fallback validation as
+    # POST /v1/watchlist, so a fuzzy/Indian company name works here too.
+    ticker = body.ticker
+    try:
+        get_quote(ticker)
+    except TickerNotFoundError:
+        resolved = resolve_companies(body.ticker)
+        if not resolved:
+            raise errors.ticker_not_found(body.ticker)
+        ticker = resolved[0]
+        try:
+            get_quote(ticker)
+        except TickerNotFoundError:
+            raise errors.ticker_not_found(body.ticker)
+
+    db.upsert_portfolio_holding(current_user, ticker, body.quantity, body.avg_cost)
+    return {"status": "ok"}
+
+
+@app.delete("/v1/portfolio/{ticker}")
+def remove_portfolio_holding(ticker: str, current_user: str = Depends(auth.get_current_user)):
+    db.remove_portfolio_holding(current_user, ticker.upper())
     return {"status": "ok"}
