@@ -276,6 +276,39 @@ def test_suggest_companies_endpoint_defaults_to_empty_query(client, monkeypatch,
     assert resp.json()["suggestions"] == []
 
 
+# ---------------------------------------------------------------- market news
+
+def test_market_news_returns_articles(client, monkeypatch, auth_headers):
+    fake_articles = [{"headline": "Market rallies", "source": "Test Wire", "date": "2026-08-06", "url": "https://example.com/1", "summary": ""}]
+    monkeypatch.setattr(main, "fetch_market_news", lambda limit=15: fake_articles)
+
+    resp = client.get("/v1/news/market", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["articles"] == fake_articles
+
+
+def test_market_news_requires_a_session(client):
+    resp = client.get("/v1/news/market")
+    assert resp.status_code == 401
+
+
+def test_market_news_passes_through_the_limit(client, monkeypatch, auth_headers):
+    captured = {}
+
+    def fake_fetch(limit=15):
+        captured["limit"] = limit
+        return []
+
+    monkeypatch.setattr(main, "fetch_market_news", fake_fetch)
+    client.get("/v1/news/market?limit=5", headers=auth_headers)
+    assert captured["limit"] == 5
+
+
+def test_market_news_caps_the_limit_at_30(client, auth_headers):
+    resp = client.get("/v1/news/market?limit=100", headers=auth_headers)
+    assert resp.status_code == 422
+
+
 # ---------------------------------------------------------------- market indices
 
 def test_market_indices_returns_the_curated_list(client, monkeypatch, auth_headers):

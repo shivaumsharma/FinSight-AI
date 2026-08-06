@@ -50,6 +50,7 @@ from pydantic import BaseModel, field_validator
 from app.api import auth, db, errors, jobs
 from app.core.company_resolver import resolve_companies, suggest_companies
 from app.data.market_data import TickerNotFoundError, get_corporate_actions, get_quote
+from app.reporting.news_client import fetch_market_news
 
 TIMEOUT_SWEEP_INTERVAL_SECONDS = 60
 
@@ -557,6 +558,14 @@ def suggest_companies_endpoint(q: str = Query(default=""), current_user: str = D
     # "tata" should see real candidates to pick from (Tata Motors, Tata
     # Steel, ...) rather than having to already know the exact symbol.
     return {"suggestions": suggest_companies(q, limit=8)}
+
+
+@app.get("/v1/news/market")
+def get_market_news(limit: int = Query(default=15, le=30), current_user: str = Depends(auth.get_current_user)):
+    # Reuses the same Finnhub client the research pipeline's per-ticker
+    # Risk Analysis/Sentiment sections already depend on -- a separate,
+    # general (not-per-company) endpoint and cache, not a new provider.
+    return {"articles": fetch_market_news(limit=limit)}
 
 
 @app.get("/v1/market/indices")
