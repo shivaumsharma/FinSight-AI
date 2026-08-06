@@ -170,3 +170,28 @@ export interface IndexQuote {
   price: number | null;
   change_pct: number | null;
 }
+
+// GET /v1/portfolio's item shape. Self-reported quantity/avg_cost --
+// never synced from a real brokerage. market_value/unrealized_pnl are
+// null when the live quote fetch failed (same per-item isolation as
+// WatchlistItem/IndexQuote); cost_basis is always knowable since it
+// only depends on the user's own reported quantity/avg_cost.
+export interface PortfolioHolding {
+  ticker: string;
+  quantity: number;
+  avg_cost: number;
+  price: number | null;
+  change_pct: number | null;
+  cost_basis: number;
+  market_value: number | null;
+  unrealized_pnl: number | null;
+  unrealized_pnl_pct: number | null;
+  added_at: number;
+}
+
+export interface PortfolioSummary {
+  total_market_value: number | null;
+  total_cost_basis: number | null;
+  total_unrealized_pnl: number | null;
+  total_unrealized_pnl_pct: number | null;
+}

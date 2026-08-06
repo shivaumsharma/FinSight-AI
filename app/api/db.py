@@ -194,6 +194,24 @@ def init_db() -> None:
             )
             """
         )
+        # Self-reported holdings only -- quantity/avg_cost are
+        # whatever the user manually typed in, never synced from a
+        # real brokerage and never used to place a trade. This is a
+        # deliberate product/safety boundary, not a stopgap: the app
+        # has no brokerage integration and never executes trades, so a
+        # "portfolio" here can only ever be a manual P&L calculator.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS portfolio_holdings (
+                user_id TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                quantity REAL NOT NULL,
+                avg_cost REAL NOT NULL,
+                added_at REAL NOT NULL,
+                PRIMARY KEY (user_id, ticker)
+            )
+            """
+        )
 
 
 # ---------------------------------------------------------------- users/sessions
@@ -535,6 +553,45 @@ def get_watchlist(user_id: str) -> list:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT ticker, added_at FROM watchlist WHERE user_id=? ORDER BY added_at DESC",
+            (user_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------- portfolio (self-reported)
+
+def upsert_portfolio_holding(user_id: str, ticker: str, quantity: float, avg_cost: float) -> None:
+    """Re-adding a ticker already held REPLACES its quantity/avg_cost
+    rather than accumulating a second row or averaging the two lots --
+    this is a single current-position editor, not a transaction ledger.
+    added_at is only set on first insert (COALESCE against the
+    existing row), so editing a holding doesn't bump it to the top of
+    a most-recently-added sort."""
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO portfolio_holdings (user_id, ticker, quantity, avg_cost, added_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, ticker) DO UPDATE SET
+                quantity=excluded.quantity,
+                avg_cost=excluded.avg_cost
+            """,
+            (user_id, ticker, quantity, avg_cost, time.time()),
+        )
+
+
+def remove_portfolio_holding(user_id: str, ticker: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "DELETE FROM portfolio_holdings WHERE user_id=? AND ticker=?", (user_id, ticker)
+        )
+
+
+def get_portfolio_holdings(user_id: str) -> list:
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT ticker, quantity, avg_cost, added_at FROM portfolio_holdings WHERE user_id=? ORDER BY added_at DESC",
             (user_id,),
         ).fetchall()
     return [dict(r) for r in rows]
