@@ -1,32 +1,50 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useResearch } from "@/lib/useResearch";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import ReportView from "@/components/ReportView";
 import ResearchProgress, { STEPS } from "@/components/ResearchProgress";
 import InstallPrompt from "@/components/InstallPrompt";
 import AuthGate from "@/components/AuthGate";
-import Watchlist from "@/components/Watchlist";
-import RecentReports from "@/components/RecentReports";
+import BottomNav from "@/components/BottomNav";
 
 const QUICK_TICKERS = ["AAPL", "NVDA", "TSLA", "MSFT"];
 
 export default function Home() {
   return (
     <AuthGate>
-      {({ userId, email, logout }) => <ResearchPage userId={userId} email={email} onLogout={logout} />}
+      {({ email }) => (
+        // useSearchParams requires a Suspense boundary around whatever
+        // reads it, or the production build bails out of static
+        // optimization with a hard error -- this page is fully client
+        // rendered already (every child below uses hooks), so the
+        // fallback is never actually visible in practice.
+        <Suspense fallback={null}>
+          <ResearchPage email={email} />
+        </Suspense>
+      )}
     </AuthGate>
   );
 }
 
-// First two letters of the email's local-part, uppercased -- there's
-// no real "name" field on a user (see db.py's users table), so this is
-// the closest thing to initials this app can show without adding one.
-function initialsFromEmail(email: string | null): string {
-  if (!email) return "AI";
-  return email.split("@")[0].slice(0, 2).toUpperCase();
+// First name-shaped guess from the email's local-part -- there's no
+// real "name" field on a user (see db.py's users table). Splits on
+// common separators (. _ -) and title-cases the first segment, e.g.
+// "shivaum.sharma@..." -> "Shivaum". Falls back to the raw local-part
+// if it doesn't look like a compound name.
+function displayNameFromEmail(email: string | null): string {
+  if (!email) return "there";
+  const local = email.split("@")[0];
+  const first = local.split(/[._-]/)[0];
+  return first.charAt(0).toUpperCase() + first.slice(1);
+}
+
+function greetingForHour(hour: number): string {
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
 }
 
 // Purely additive to the header -- not gating anything, not shown at
@@ -102,17 +120,24 @@ function PipelinePreview() {
   );
 }
 
-function ResearchPage({
-  userId,
-  email,
-  onLogout,
-}: {
-  userId: string;
-  email: string | null;
-  onLogout: () => void;
-}) {
+function ResearchPage({ email }: { email: string | null }) {
   const [query, setQuery] = useState("");
   const { status, jobId, result, errorMessage, latencySeconds, fromCache, submit, loadJob, reset } = useResearch();
+  const searchParams = useSearchParams();
+
+  // Cross-page navigation target: the /reports page links here as
+  // /?job=<id> when you click a past report, since useResearch's state
+  // lives in this component instance, not anywhere global -- the URL
+  // is the one thing both pages can actually share. Runs once per
+  // distinct job id (not on every render), and deliberately does NOT
+  // clear the query param afterward -- a reload of this exact URL
+  // should keep showing the same report, not silently drop back to
+  // the search form.
+  const jobParam = searchParams.get("job");
+  useEffect(() => {
+    if (jobParam) loadJob(jobParam);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobParam]);
 
   const isBusy = status === "submitting" || status === "running";
 
@@ -120,43 +145,25 @@ function ResearchPage({
     if (q.trim() && !isBusy) submit(q.trim());
   }
 
+  const hour = new Date().getHours();
+
   return (
-    <div className="min-h-screen bg-bg">
+    <div className="min-h-screen bg-bg pb-20">
       <div className="mx-auto max-w-2xl px-5 py-8">
         <InstallPrompt />
 
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-border pb-3">
-          <div className="flex items-baseline gap-2.5">
-            <span className="font-mono text-base font-bold tracking-wide text-text">FINSIGHT</span>
-            <span className="hidden font-mono text-[10px] tracking-wide text-dim sm:inline">
-              AUTONOMOUS EQUITY RESEARCH
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="font-mono text-[10px] text-dim" title={userId}>
-              {userId.slice(0, 8)}
-            </span>
-            <NotificationToggle />
-            <button
-              type="button"
-              onClick={onLogout}
-              className="font-mono text-[10px] font-bold text-muted hover:text-danger"
-            >
-              LOGOUT
-            </button>
-            <Link
-              href="/profile"
-              title="Profile"
-              className="flex h-7 w-7 items-center justify-center rounded-full border border-border font-mono text-[11px] text-muted hover:border-accent hover:text-accent"
-            >
-              {initialsFromEmail(email)}
-            </Link>
-          </div>
+        <div className="flex items-center justify-between">
+          <span className="font-mono text-[10px] font-bold tracking-wide text-dim">FINSIGHT</span>
+          <NotificationToggle />
         </div>
 
+        <h1 className="mt-3 font-mono text-xl font-bold text-text">
+          {greetingForHour(hour)}, {displayNameFromEmail(email)}
+        </h1>
+
         {!isBusy && status !== "done" && (
-          <p className="mt-4 text-sm text-muted">
+          <p className="mt-2 text-sm text-muted">
             An LLM planning agent that builds institutional-style equity research on demand. Not a
             general-purpose financial chatbot — name a publicly listed company to begin.
           </p>
@@ -209,13 +216,7 @@ function ResearchPage({
 
         {isBusy && <ResearchProgress question={query} />}
 
-        {!isBusy && status !== "done" && status !== "error" && (
-          <>
-            <Watchlist />
-            <RecentReports onSelectReport={loadJob} />
-            <PipelinePreview />
-          </>
-        )}
+        {!isBusy && status !== "done" && status !== "error" && <PipelinePreview />}
 
         {status === "error" && errorMessage && (
           <div className="mt-6 rounded-lg border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-danger">
@@ -249,6 +250,8 @@ function ResearchPage({
           LLM Planner + RAG over live SEC filings, ChromaDB, FinBERT and DCF valuation tools
         </p>
       </div>
+
+      <BottomNav />
     </div>
   );
 }
