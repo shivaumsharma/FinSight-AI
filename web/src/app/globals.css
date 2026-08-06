@@ -31,7 +31,7 @@
   --color-accent: var(--accent);
   --color-danger: var(--danger);
   --color-warn: var(--warn);
-  --font-mono: ui-monospace, Menlo, "SF Mono", monospace;
+  --font-mono: var(--font-mono-loaded), ui-monospace, Menlo, "SF Mono", monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 }
 

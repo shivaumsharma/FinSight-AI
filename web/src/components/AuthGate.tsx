@@ -7,8 +7,17 @@ import { useAuth } from "@/lib/useAuth";
 // visitors see a login/signup form instead of the research UI. Scope
 // is deliberately just signup/login/logout; no password reset, no
 // account settings (see the project plan doc's own scope note).
-export default function AuthGate({ children }: { children: (auth: { userId: string; logout: () => void }) => React.ReactNode }) {
-  const { status, userId, error, signup, login, logout } = useAuth();
+interface AuthedProps {
+  userId: string;
+  email: string | null;
+  createdAt: number | null;
+  jobsUsedToday: number | null;
+  dailyLimit: number | null;
+  logout: () => void;
+}
+
+export default function AuthGate({ children }: { children: (auth: AuthedProps) => React.ReactNode }) {
+  const { status, userId, email: authedEmail, createdAt, jobsUsedToday, dailyLimit, error, signup, login, logout } = useAuth();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -23,7 +32,7 @@ export default function AuthGate({ children }: { children: (auth: { userId: stri
   }
 
   if (status === "authenticated" && userId) {
-    return <>{children({ userId, logout })}</>;
+    return <>{children({ userId, email: authedEmail, createdAt, jobsUsedToday, dailyLimit, logout })}</>;
   }
 
   async function handleSubmit(e: React.FormEvent) {

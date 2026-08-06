@@ -1,17 +1,32 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useResearch } from "@/lib/useResearch";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import ReportView from "@/components/ReportView";
-import ResearchProgress from "@/components/ResearchProgress";
+import ResearchProgress, { STEPS } from "@/components/ResearchProgress";
 import InstallPrompt from "@/components/InstallPrompt";
 import AuthGate from "@/components/AuthGate";
+import Watchlist from "@/components/Watchlist";
+import RecentReports from "@/components/RecentReports";
 
 const QUICK_TICKERS = ["AAPL", "NVDA", "TSLA", "MSFT"];
 
 export default function Home() {
-  return <AuthGate>{({ userId, logout }) => <ResearchPage userId={userId} onLogout={logout} />}</AuthGate>;
+  return (
+    <AuthGate>
+      {({ userId, email, logout }) => <ResearchPage userId={userId} email={email} onLogout={logout} />}
+    </AuthGate>
+  );
+}
+
+// First two letters of the email's local-part, uppercased -- there's
+// no real "name" field on a user (see db.py's users table), so this is
+// the closest thing to initials this app can show without adding one.
+function initialsFromEmail(email: string | null): string {
+  if (!email) return "AI";
+  return email.split("@")[0].slice(0, 2).toUpperCase();
 }
 
 // Purely additive to the header -- not gating anything, not shown at
@@ -58,9 +73,46 @@ function NotificationToggle() {
   );
 }
 
-function ResearchPage({ userId, onLogout }: { userId: string; onLogout: () => void }) {
+// Idle-state preview of the same 8 stages ResearchProgress lights up
+// once a job is actually running -- same STEPS list, same icon
+// language (just all "○", nothing active yet), so a first-time visitor
+// sees exactly what they're about to trigger before they trigger it,
+// and the transition into a real run feels continuous rather than
+// like a different UI taking over.
+function PipelinePreview() {
+  return (
+    <div className="mt-6 rounded-lg border border-border-subtle bg-card/60 p-5">
+      <p className="font-mono text-[10px] tracking-wide text-dim">WHAT RUNNING THIS DOES</p>
+      <div className="mt-3 flex flex-col">
+        {STEPS.map((label, i) => (
+          <div key={label} className="flex items-center gap-3 py-1.5">
+            <span className="font-mono text-sm text-dim">○</span>
+            <span className="font-mono text-xs text-muted">
+              {String(i + 1).padStart(2, "0")} · {label}
+            </span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-[11px] leading-relaxed text-dim">
+        Every step above hits real data -- live market quotes, actual SEC filings, a FinBERT sentiment
+        model, and a full WACC/FCFF/DCF valuation -- then an LLM synthesizes the result into a sourced
+        report, typically in 1–3 minutes.
+      </p>
+    </div>
+  );
+}
+
+function ResearchPage({
+  userId,
+  email,
+  onLogout,
+}: {
+  userId: string;
+  email: string | null;
+  onLogout: () => void;
+}) {
   const [query, setQuery] = useState("");
-  const { status, jobId, result, errorMessage, latencySeconds, fromCache, submit } = useResearch();
+  const { status, jobId, result, errorMessage, latencySeconds, fromCache, submit, loadJob } = useResearch();
 
   const isBusy = status === "submitting" || status === "running";
 
@@ -75,7 +127,12 @@ function ResearchPage({ userId, onLogout }: { userId: string; onLogout: () => vo
 
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border pb-3">
-          <span className="font-mono text-base font-bold tracking-wide text-text">FINSIGHT</span>
+          <div className="flex items-baseline gap-2.5">
+            <span className="font-mono text-base font-bold tracking-wide text-text">FINSIGHT</span>
+            <span className="hidden font-mono text-[10px] tracking-wide text-dim sm:inline">
+              AUTONOMOUS EQUITY RESEARCH
+            </span>
+          </div>
           <div className="flex items-center gap-3">
             <span className="font-mono text-[10px] text-dim" title={userId}>
               {userId.slice(0, 8)}
@@ -88,15 +145,19 @@ function ResearchPage({ userId, onLogout }: { userId: string; onLogout: () => vo
             >
               LOGOUT
             </button>
-            <span className="flex h-7 w-7 items-center justify-center rounded-full border border-border font-mono text-[11px] text-muted">
-              AI
-            </span>
+            <Link
+              href="/profile"
+              title="Profile"
+              className="flex h-7 w-7 items-center justify-center rounded-full border border-border font-mono text-[11px] text-muted hover:border-accent hover:text-accent"
+            >
+              {initialsFromEmail(email)}
+            </Link>
           </div>
         </div>
 
         {!isBusy && status !== "done" && (
           <p className="mt-4 text-sm text-muted">
-            Autonomous Financial Intelligence Platform for institutional-style equity research. Not a
+            An LLM planning agent that builds institutional-style equity research on demand. Not a
             general-purpose financial chatbot — name a publicly listed company to begin.
           </p>
         )}
@@ -147,6 +208,14 @@ function ResearchPage({ userId, onLogout }: { userId: string; onLogout: () => vo
         </form>
 
         {isBusy && <ResearchProgress question={query} />}
+
+        {!isBusy && status !== "done" && status !== "error" && (
+          <>
+            <Watchlist />
+            <RecentReports onSelectReport={loadJob} />
+            <PipelinePreview />
+          </>
+        )}
 
         {status === "error" && errorMessage && (
           <div className="mt-6 rounded-lg border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-danger">

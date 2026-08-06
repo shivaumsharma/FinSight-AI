@@ -135,3 +135,27 @@ export interface ApiErrorBody {
   code: string;
   message: string;
 }
+
+// GET /v1/research/recent's list-row shape -- deliberately NOT the
+// full ResearchResult/JobResponse (fetching every past report's full
+// nested result just to render a list row would be wasteful); mirrors
+// db.list_recent_jobs()'s SELECT columns exactly.
+export interface ReportSummary {
+  job_id: string;
+  ticker: string;
+  company_name: string | null;
+  rating: string;
+  started_at: number;
+}
+
+// GET /v1/watchlist's item shape. price/change_pct are null when that
+// ticker's live quote fetch failed (see main.py's per-ticker
+// try/except -- one bad symbol must not fail the whole list). rating
+// is null when the user has never researched this ticker.
+export interface WatchlistItem {
+  ticker: string;
+  price: number | null;
+  change_pct: number | null;
+  rating: string | null;
+  added_at: number;
+}

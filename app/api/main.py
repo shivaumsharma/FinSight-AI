@@ -49,6 +49,7 @@ from pydantic import BaseModel, field_validator
 
 from app.api import auth, db, errors, jobs
 from app.core.company_resolver import resolve_companies
+from app.data.market_data import TickerNotFoundError, get_quote
 
 TIMEOUT_SWEEP_INTERVAL_SECONDS = 60
 
@@ -215,6 +216,18 @@ class PushUnsubscribeRequest(BaseModel):
     endpoint: str
 
 
+class WatchlistRequest(BaseModel):
+    ticker: str
+
+    @field_validator("ticker")
+    @classmethod
+    def _normalize_ticker(cls, v: str) -> str:
+        # Uppercased/stripped here (not left to the endpoint) so
+        # "aapl" and "AAPL" always land as the same watchlist row --
+        # matches MarketDataLoader's own self.ticker = ticker.upper().
+        return v.strip().upper()
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -257,7 +270,20 @@ def logout(authorization: str = Header(default=None)):
 
 @app.get("/v1/auth/me")
 def me(current_user: str = Depends(auth.get_current_user)):
-    return {"user_id": current_user}
+    # useAuth.ts already calls this on every mount -- extending its
+    # response (rather than adding a second endpoint) is what powers
+    # the Profile view for free, no new round-trip. jobs_used_today/
+    # daily_limit reuse the exact same rate-limit machinery
+    # POST /v1/research already checks against, not a new counter.
+    user = db.get_user_by_id(current_user)
+    jobs_used_today = db.count_recent_jobs(current_user, time.time() - RATE_LIMIT_WINDOW_SECONDS)
+    return {
+        "user_id": current_user,
+        "email": user["email"] if user else None,
+        "created_at": user["created_at"] if user else None,
+        "jobs_used_today": jobs_used_today,
+        "daily_limit": DAILY_JOB_LIMIT,
+    }
 
 
 @app.get("/v1/push/vapid-public-key")
@@ -304,6 +330,15 @@ def submit_research(
 
     job_id = jobs.submit_job(question=body.question, orchestrator=orchestrator, user_id=current_user)
     return {"job_id": job_id}
+
+
+@app.get("/v1/research/recent")
+def get_recent_research(limit: int = Query(10, ge=1, le=50), current_user: str = Depends(auth.get_current_user)):
+    # Registered BEFORE /v1/research/{job_id} deliberately -- Starlette
+    # matches routes in registration order, so if {job_id} came first,
+    # a request to /v1/research/recent would match it with job_id="recent"
+    # and never reach this handler.
+    return {"reports": db.list_recent_jobs(current_user, limit)}
 
 
 @app.get("/v1/research/{job_id}")
@@ -378,3 +413,48 @@ def get_research_pdf(
 
     return FileResponse(job["pdf_path"], media_type="application/pdf",
                          filename=f"{job['job_id']}.pdf")
+
+
+@app.get("/v1/watchlist")
+def get_watchlist(current_user: str = Depends(auth.get_current_user)):
+    items = []
+    for row in db.get_watchlist(current_user):
+        ticker = row["ticker"]
+        try:
+            quote = get_quote(ticker)
+        except Exception:
+            # One bad/delisted ticker's quote failure must not 500 the
+            # whole list -- best-effort per ticker, null quote on failure.
+            quote = None
+        items.append({
+            "ticker": ticker,
+            "price": quote["price"] if quote else None,
+            "change_pct": quote["change_pct"] if quote else None,
+            "rating": db.get_latest_rating_for_ticker(current_user, ticker),
+            "added_at": row["added_at"],
+        })
+    return {"items": items}
+
+
+@app.post("/v1/watchlist")
+def add_to_watchlist(body: WatchlistRequest, current_user: str = Depends(auth.get_current_user)):
+    # get_quote() itself is the validity check here (not
+    # resolve_companies, which is NLP entity extraction over free text
+    # -- the wrong tool for a raw ticker string) -- any failure means
+    # this isn't a real, currently-listed ticker.
+    try:
+        get_quote(body.ticker)
+    except TickerNotFoundError:
+        raise errors.ticker_not_found(body.ticker)
+
+    db.add_watchlist_item(current_user, body.ticker)
+    return {"status": "ok"}
+
+
+@app.delete("/v1/watchlist/{ticker}")
+def remove_from_watchlist(ticker: str, current_user: str = Depends(auth.get_current_user)):
+    # Idempotent, same pattern as push_unsubscribe -- removing a ticker
+    # that isn't on the watchlist (or was already removed) is a no-op,
+    # not an error.
+    db.remove_watchlist_item(current_user, ticker.upper())
+    return {"status": "ok"}

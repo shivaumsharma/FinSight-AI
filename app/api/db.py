@@ -93,6 +93,19 @@ def init_db() -> None:
             )
             """
         )
+        # Denormalized onto jobs rather than a separate report_summaries
+        # table -- these three are updated in the same UPDATE statement
+        # mark_done() already issues (same result dict already in
+        # scope), so there's no second write and no risk of the two
+        # drifting out of sync. sqlite3 has no ADD COLUMN IF NOT EXISTS,
+        # so each gets its own try/except: one genuine failure (disk
+        # full, locked file) must not silently skip the other two the
+        # way a single wrapping try/except would.
+        for column in ("ticker", "company_name", "rating"):
+            try:
+                conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} TEXT")
+            except sqlite3.OperationalError:
+                pass  # column already exists
         # password_hash/salt are separate columns, not one combined
         # string -- keeps app/api/auth.py's PBKDF2 hash/verify
         # symmetric (hash_password returns exactly what verify_password
@@ -141,6 +154,20 @@ def init_db() -> None:
             )
             """
         )
+        # (user_id, ticker) as a composite primary key, not a surrogate
+        # id -- a user can only watch a given ticker once, and that's
+        # exactly what the primary key should enforce; add_watchlist_item
+        # relies on this for its INSERT OR IGNORE idempotency.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS watchlist (
+                user_id TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                added_at REAL NOT NULL,
+                PRIMARY KEY (user_id, ticker)
+            )
+            """
+        )
 
 
 # ---------------------------------------------------------------- users/sessions
@@ -167,6 +194,16 @@ def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
     with _connect() as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+    return dict(row) if row is not None else None
+
+
+def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
+    """For the Profile view -- a session only carries user_id, not
+    email, so displaying account details needs this lookup by id
+    (get_user_by_email above is keyed the other direction, for login)."""
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM users WHERE user_id=?", (user_id,)).fetchone()
     return dict(row) if row is not None else None
 
 
@@ -302,14 +339,29 @@ def mark_done(job_id: str, result: Dict[str, Any], pdf_path: str) -> None:
     clause makes that a silent no-op instead of a late result quietly
     overwriting an error status the client may have already seen and
     acted on.
+
+    ticker/company_name/rating are pulled out of `result` here (same
+    .get()-chain path jobs.py's _notify_job_complete already reads for
+    push-notification text) and denormalized onto the row so
+    list_recent_jobs/get_latest_rating_for_ticker don't need to
+    json.loads() every row's full result_json just to list them. Uses
+    .get() throughout, never direct indexing -- a malformed/partial
+    result dict must still let this job complete successfully with
+    NULL columns, not raise and lose an otherwise-good result.
     """
+    ticker = result.get("ticker")
+    report_data = result.get("report_data") or {}
+    company_name = (report_data.get("company_overview") or {}).get("name")
+    rating = (report_data.get("recommendation") or {}).get("rating")
     with _connect() as conn:
         conn.execute(
             """
-            UPDATE jobs SET status=?, result_json=?, pdf_path=?, updated_at=?
+            UPDATE jobs SET status=?, result_json=?, pdf_path=?, updated_at=?,
+                            ticker=?, company_name=?, rating=?
             WHERE job_id=? AND status=?
             """,
-            (STATUS_DONE, json.dumps(result), pdf_path, time.time(), job_id, STATUS_RUNNING),
+            (STATUS_DONE, json.dumps(result), pdf_path, time.time(),
+             ticker, company_name, rating, job_id, STATUS_RUNNING),
         )
 
 
@@ -334,6 +386,78 @@ def get_job(job_id: str) -> Optional[Dict[str, Any]]:
     result = dict(row)
     result["result"] = json.loads(result["result_json"]) if result["result_json"] else None
     return result
+
+
+def list_recent_jobs(user_id: str, limit: int = 10) -> list:
+    """For the home page's Recent Reports section. Filters to status
+    'done' (a queued/failed job isn't a "report") AND ticker IS NOT
+    NULL -- the latter excludes rows written before the ticker/
+    company_name/rating columns existed (see init_db's ALTER TABLE
+    migration above), so a pre-migration job shows up nowhere rather
+    than as a blank card with no ticker to display."""
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT job_id, ticker, company_name, rating, started_at
+            FROM jobs
+            WHERE user_id=? AND status=? AND ticker IS NOT NULL
+            ORDER BY started_at DESC
+            LIMIT ?
+            """,
+            (user_id, STATUS_DONE, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_latest_rating_for_ticker(user_id: str, ticker: str) -> Optional[str]:
+    """The rating a Watchlist row shows -- the user's own last completed
+    report for that ticker, not a live re-run of the DCF/LLM pipeline
+    (which would be slow and expensive just to refresh a tile). None if
+    the user has never researched this ticker."""
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT rating FROM jobs
+            WHERE user_id=? AND ticker=? AND status=? AND rating IS NOT NULL
+            ORDER BY started_at DESC
+            LIMIT 1
+            """,
+            (user_id, ticker, STATUS_DONE),
+        ).fetchone()
+    return row[0] if row is not None else None
+
+
+# ---------------------------------------------------------------- watchlist
+
+def add_watchlist_item(user_id: str, ticker: str) -> None:
+    """INSERT OR IGNORE, not a duplicate-key error -- adding a ticker
+    that's already on the watchlist is a no-op, same idempotency
+    pattern as add_push_subscription above."""
+    with _connect() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO watchlist (user_id, ticker, added_at) VALUES (?, ?, ?)",
+            (user_id, ticker, time.time()),
+        )
+
+
+def remove_watchlist_item(user_id: str, ticker: str) -> None:
+    """No-op if the ticker isn't on the watchlist, same as
+    delete_session/remove_push_subscription above."""
+    with _connect() as conn:
+        conn.execute(
+            "DELETE FROM watchlist WHERE user_id=? AND ticker=?", (user_id, ticker)
+        )
+
+
+def get_watchlist(user_id: str) -> list:
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT ticker, added_at FROM watchlist WHERE user_id=? ORDER BY added_at DESC",
+            (user_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def reconcile_interrupted_jobs() -> int:
