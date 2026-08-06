@@ -269,7 +269,7 @@ def logout(authorization: str = Header(default=None)):
 
 
 @app.get("/v1/auth/me")
-def me(current_user: str = Depends(auth.get_current_user)):
+def me(authorization: str = Header(default=None), current_user: str = Depends(auth.get_current_user)):
     # useAuth.ts already calls this on every mount -- extending its
     # response (rather than adding a second endpoint) is what powers
     # the Profile view for free, no new round-trip. jobs_used_today/
@@ -277,13 +277,37 @@ def me(current_user: str = Depends(auth.get_current_user)):
     # POST /v1/research already checks against, not a new counter.
     user = db.get_user_by_id(current_user)
     jobs_used_today = db.count_recent_jobs(current_user, time.time() - RATE_LIMIT_WINDOW_SECONDS)
+    # authorization is guaranteed well-formed here -- Depends(auth.get_current_user)
+    # above already validated it (raised 401 otherwise) before this
+    # body ever runs, so extract_bearer_token can't itself fail.
+    session_expires_at = db.get_session_expiry(auth.extract_bearer_token(authorization))
     return {
         "user_id": current_user,
         "email": user["email"] if user else None,
         "created_at": user["created_at"] if user else None,
         "jobs_used_today": jobs_used_today,
         "daily_limit": DAILY_JOB_LIMIT,
+        "total_reports": db.count_all_jobs(current_user),
+        "session_expires_at": session_expires_at,
     }
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str
+
+
+@app.delete("/v1/auth/me")
+def delete_account(body: DeleteAccountRequest, current_user: str = Depends(auth.get_current_user)):
+    # Requires the password again, not just an active session -- an
+    # irreversible action (every job, every watchlist item, the
+    # account itself, all gone) deserves a stronger confirmation than
+    # "you happened to have a valid cookie right now."
+    user = db.get_user_by_id(current_user)
+    if user is None or not auth.verify_password(body.password, user["password_hash"], user["salt"]):
+        raise errors.invalid_credentials()
+
+    db.delete_user_account(current_user)
+    return {"status": "ok"}
 
 
 @app.get("/v1/push/vapid-public-key")

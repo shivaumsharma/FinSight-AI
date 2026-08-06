@@ -321,10 +321,58 @@ def test_auth_me_returns_profile_and_usage_fields(client, auth_headers):
     assert isinstance(body["created_at"], float)
     assert body["jobs_used_today"] == 0
     assert body["daily_limit"] == main.DAILY_JOB_LIMIT
+    assert body["total_reports"] == 0
+    # Session TTL default is 30 days -- just assert it's meaningfully
+    # in the future, not an exact value (avoids a flaky test tied to
+    # wall-clock timing between session creation and this assertion).
+    assert body["session_expires_at"] > time.time() + 3600
 
     client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
     resp = client.get("/v1/auth/me", headers=auth_headers)
     assert resp.json()["jobs_used_today"] == 1
+    assert resp.json()["total_reports"] == 1
+
+
+def test_deleting_account_requires_the_correct_password(client, auth_headers):
+    resp = client.request("DELETE", "/v1/auth/me", json={"password": "wrongpassword"}, headers=auth_headers)
+    assert resp.status_code == 401
+    assert resp.json()["code"] == "INVALID_CREDENTIALS"
+
+    # The account must still exist and be usable after a rejected deletion.
+    resp = client.get("/v1/auth/me", headers=auth_headers)
+    assert resp.status_code == 200
+
+
+def test_deleting_account_removes_everything_scoped_to_the_user(client, auth_headers):
+    job_id = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers
+    ).json()["job_id"]
+    client.post("/v1/push/subscribe", json={
+        "endpoint": "https://push.example.com/deleteme",
+        "keys": {"p256dh": "p256dh-val", "auth": "auth-val"},
+    }, headers=auth_headers)
+
+    resp = client.request("DELETE", "/v1/auth/me", json={"password": "correcthorsebattery"}, headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+
+    # The now-deleted session's own token must no longer authenticate --
+    # deleting the account deletes ALL of that user's sessions, not just
+    # leaving the current one dangling on an orphaned user_id.
+    resp = client.get("/v1/auth/me", headers=auth_headers)
+    assert resp.status_code == 401
+
+    # And a fresh login must fail -- the user row itself is gone, not
+    # just this one session.
+    resp = client.post("/v1/auth/login", json={"email": "alice@example.com", "password": "correcthorsebattery"})
+    assert resp.status_code == 401
+
+    # Cascading cleanup, verified directly against the DB rather than
+    # through an API surface (there's no "list all my jobs" endpoint).
+    assert db.get_job(job_id) is None
+    with db._connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM push_subscriptions WHERE endpoint=?",
+                             ("https://push.example.com/deleteme",)).fetchone()[0] == 0
 
 
 def test_signup_rejects_a_duplicate_email(client):
