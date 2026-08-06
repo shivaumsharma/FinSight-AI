@@ -48,7 +48,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, field_validator
 
 from app.api import auth, db, errors, jobs
-from app.core.company_resolver import resolve_companies
+from app.core.company_resolver import resolve_companies, suggest_companies
 from app.data.market_data import TickerNotFoundError, get_corporate_actions, get_quote
 
 TIMEOUT_SWEEP_INTERVAL_SECONDS = 60
@@ -549,6 +549,14 @@ INDEX_LIST = [
     {"name": "BANK NIFTY", "ticker": "^NSEBANK"},
     {"name": "INDIA VIX", "ticker": "^INDIAVIX"},
 ]
+
+
+@app.get("/v1/companies/suggest")
+def suggest_companies_endpoint(q: str = Query(default=""), current_user: str = Depends(auth.get_current_user)):
+    # Powers the Watchlist add-ticker input's dropdown -- a user typing
+    # "tata" should see real candidates to pick from (Tata Motors, Tata
+    # Steel, ...) rather than having to already know the exact symbol.
+    return {"suggestions": suggest_companies(q, limit=8)}
 
 
 @app.get("/v1/market/indices")
