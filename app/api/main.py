@@ -324,6 +324,9 @@ def me(authorization: str = Header(default=None), current_user: str = Depends(au
         # pattern the jobs-table migration above already uses.
         "risk_tolerance": user["risk_tolerance"] if user and user.get("risk_tolerance") else "Moderate",
         "waitlist_features": db.list_waitlist_features(current_user),
+        # None when unset -- the frontend's own displayNameFromEmail
+        # heuristic is the fallback (see page.tsx), not duplicated here.
+        "display_name": user["display_name"] if user else None,
     }
 
 
@@ -348,6 +351,28 @@ def update_risk_tolerance(body: RiskToleranceRequest, current_user: str = Depend
     # (a separate, larger feature). Real and saved, not decorative.
     db.set_risk_tolerance(current_user, body.risk_tolerance)
     return {"status": "ok", "risk_tolerance": body.risk_tolerance}
+
+
+class DisplayNameRequest(BaseModel):
+    display_name: str | None = None
+
+    @field_validator("display_name")
+    @classmethod
+    def _normalize(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            return None  # empty/whitespace-only clears back to the email heuristic
+        if len(v) > 40:
+            raise ValueError("Display name must be 40 characters or fewer.")
+        return v
+
+
+@app.patch("/v1/auth/display-name")
+def update_display_name(body: DisplayNameRequest, current_user: str = Depends(auth.get_current_user)):
+    db.set_display_name(current_user, body.display_name)
+    return {"status": "ok", "display_name": body.display_name}
 
 
 class WaitlistRequest(BaseModel):

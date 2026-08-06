@@ -20,6 +20,8 @@ interface AuthedProps {
   resetAt: number | null;
   waitlistFeatures: string[];
   joinWaitlist: (feature: string) => Promise<void>;
+  displayName: string | null;
+  setDisplayName: (name: string | null) => Promise<void>;
   logout: () => void;
   deleteAccount: (password: string) => Promise<boolean>;
   deleteError: string | null;
@@ -28,8 +30,8 @@ interface AuthedProps {
 export default function AuthGate({ children }: { children: (auth: AuthedProps) => React.ReactNode }) {
   const {
     status, userId, email: authedEmail, createdAt, jobsUsedToday, dailyLimit,
-    totalReports, sessionExpiresAt, riskTolerance, resetAt, waitlistFeatures, error,
-    signup, login, logout, deleteAccount, setRiskTolerance, joinWaitlist,
+    totalReports, sessionExpiresAt, riskTolerance, resetAt, waitlistFeatures, displayName, error,
+    signup, login, logout, deleteAccount, setRiskTolerance, joinWaitlist, setDisplayName,
   } = useAuth();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
@@ -50,7 +52,7 @@ export default function AuthGate({ children }: { children: (auth: AuthedProps) =
         {children({
           userId, email: authedEmail, createdAt, jobsUsedToday, dailyLimit,
           totalReports, sessionExpiresAt, riskTolerance, setRiskTolerance,
-          resetAt, waitlistFeatures, joinWaitlist,
+          resetAt, waitlistFeatures, joinWaitlist, displayName, setDisplayName,
           logout, deleteAccount, deleteError: error,
         })}
       </>

@@ -32,6 +32,19 @@ export default function SearchOverlay({ onClose }: { onClose: () => void }) {
       .catch(() => setWatchlist([]));
   }, []);
 
+  // The visible button alone wasn't enough -- pressing the actual
+  // Escape key (what the button's own "ESC" label implied would work)
+  // did nothing, and there was no way to dismiss by tapping outside
+  // the box either, so a user who missed the small button felt stuck
+  // behind the overlay. Both are real close paths now, not just the button.
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   const q = query.trim().toUpperCase();
 
   const matchedReports = useMemo(() => {
@@ -57,8 +70,24 @@ export default function SearchOverlay({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-20 bg-bg/95 backdrop-blur-sm">
-      <div className="mx-auto max-w-2xl px-5 py-6">
+    <div
+      className="fixed inset-0 z-20 bg-bg/95 backdrop-blur-sm"
+      onClick={(e) => {
+        // Only the backdrop itself closes on click -- the content div
+        // below stops propagation so clicking a result or the input
+        // doesn't also dismiss the overlay.
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="mx-auto max-w-2xl px-5 py-6" onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mb-3 flex items-center gap-1.5 font-mono text-xs font-bold text-muted hover:text-accent"
+        >
+          &larr; BACK
+        </button>
+
         <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3.5 py-3">
           <span className="font-mono text-sm font-bold text-accent">&gt;</span>
           <input
@@ -69,9 +98,6 @@ export default function SearchOverlay({ onClose }: { onClose: () => void }) {
             autoFocus
             className="flex-1 bg-transparent font-mono text-sm text-text placeholder:text-muted focus:outline-none"
           />
-          <button type="button" onClick={onClose} className="font-mono text-xs text-dim hover:text-muted">
-            ESC
-          </button>
         </div>
 
         {q && (

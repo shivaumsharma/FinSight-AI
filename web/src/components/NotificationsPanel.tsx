@@ -9,6 +9,15 @@ import type { ReportSummary } from "@/lib/types";
 
 const LAST_SEEN_KEY = "finsight:notifications:lastSeenAt";
 
+function BellIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+      <path d="M6 10a6 6 0 1 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 14 6 10z" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M10 19a2 2 0 0 0 4 0" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 // Single place for both halves of "notifications" that the earlier
 // header split left ambiguous: a real history of what happened (past
 // completed reports, sourced from the same list /reports already
@@ -57,9 +66,9 @@ export default function NotificationsPanel() {
         type="button"
         onClick={toggleOpen}
         aria-label="Notifications"
-        className="relative font-mono text-xs text-muted hover:text-accent"
+        className="relative text-muted hover:text-accent"
       >
-        &#128276;
+        <BellIcon />
         {unreadCount > 0 && (
           <span className="absolute -right-1.5 -top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-accent font-mono text-[8px] font-bold text-bg">
             {unreadCount > 9 ? "9+" : unreadCount}
