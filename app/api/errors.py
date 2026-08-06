@@ -23,6 +23,7 @@ INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
 EMAIL_ALREADY_REGISTERED = "EMAIL_ALREADY_REGISTERED"
 FORBIDDEN = "FORBIDDEN"
 RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED"
+TICKER_NOT_FOUND = "TICKER_NOT_FOUND"
 
 
 class APIError(Exception):
@@ -93,4 +94,12 @@ def rate_limit_exceeded(daily_limit: int) -> APIError:
         RATE_LIMIT_EXCEEDED,
         f"Daily limit of {daily_limit} research jobs reached. Please try again tomorrow.",
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+    )
+
+
+def ticker_not_found(ticker: str) -> APIError:
+    return APIError(
+        TICKER_NOT_FOUND,
+        f"'{ticker}' doesn't look like a valid, currently-listed ticker.",
+        status_code=status.HTTP_400_BAD_REQUEST,
     )

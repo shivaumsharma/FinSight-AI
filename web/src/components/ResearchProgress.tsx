@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 // honest approximation of typical timing (observed ~90-190s total this
 // session), not a claim of live per-step status. It never reaches the
 // final step until the real result actually comes back.
-const STEPS = [
+export const STEPS = [
   "Resolving ticker & company",
   "Market data & financial statements",
   "SEC filings & RAG retrieval",

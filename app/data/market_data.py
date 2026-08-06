@@ -1,3 +1,4 @@
+import time
 from datetime import date
 
 import yfinance as yf
@@ -24,6 +25,53 @@ class TickerNotFoundError(Exception):
     streamlit_app.py to show a friendly message instead of a raw
     traceback from whichever statement fetch happens to hit an empty
     DataFrame first."""
+
+
+# Deliberately separate from get_company_info() below, not a thin
+# wrapper around it -- get_company_info() makes two yfinance round
+# trips (.info + .calendar) to fetch dozens of fields (business
+# summary, employees, website...) a watchlist tile has no use for, and
+# is intentionally never cached because a stale price in a *report*
+# would be a correctness bug. A watchlist tile is a different case --
+# normal quote-UI behavior every trading app caches briefly -- so this
+# uses yfinance's lightweight fast_info accessor and a short-lived
+# in-process cache, NOT app/core/cache.py (that's Redis-backed and
+# silently no-ops without Redis; reusing it here would contradict this
+# module's own "never cache price" policy for the wrong reason -- this
+# genuinely is a different, cacheable case, not an exception to it).
+_quote_cache: dict = {}
+_QUOTE_CACHE_TTL_SECONDS = 45
+
+
+def get_quote(ticker: str) -> dict:
+    """Cheap current-price lookup for the Watchlist -- {"price",
+    "change_pct"}. Raises TickerNotFoundError if fast_info has no
+    usable price (bad/delisted symbol), same exception the rest of this
+    module already uses for that condition."""
+    ticker = ticker.upper()
+
+    cached = _quote_cache.get(ticker)
+    if cached is not None and time.time() - cached[0] < _QUOTE_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    try:
+        fast_info = yf.Ticker(ticker).fast_info
+        price = fast_info.last_price
+        previous_close = fast_info.previous_close
+    except Exception as exc:
+        # fast_info raises its own internal errors (e.g. KeyError deep
+        # in yfinance's response parsing) for an invalid/delisted
+        # ticker rather than returning empty data -- normalize all of
+        # that to the one exception type this module already uses for
+        # "no usable data for this ticker".
+        raise TickerNotFoundError(f"No price data found for {ticker}") from exc
+    if not price:
+        raise TickerNotFoundError(f"No price data found for {ticker}")
+
+    change_pct = ((price - previous_close) / previous_close * 100) if previous_close else None
+    quote = {"price": price, "change_pct": change_pct}
+    _quote_cache[ticker] = (time.time(), quote)
+    return quote
 
 
 class MarketDataLoader:

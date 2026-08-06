@@ -140,6 +140,35 @@ export function useResearch() {
     }
   }, []);
 
+  // For redisplaying an already-completed report (a Recent Reports row
+  // click) -- one GET, no polling loop, no new POST /v1/research. Only
+  // handles the "done" case: a Recent Reports row is only ever shown
+  // for a job that already completed (see db.list_recent_jobs's own
+  // status='done' filter), so a queued/running/error response here
+  // would mean the row itself was stale, not something this needs to
+  // render a progress UI for.
+  const loadJob = useCallback(async (jobId: string) => {
+    cancelledRef.current = true;
+    let resp: Response;
+    try {
+      resp = await fetch(`/api/research/${jobId}`, { cache: "no-store" });
+    } catch {
+      setState((s) => ({ ...s, status: "error", errorMessage: "Couldn't reach the research service. Check your connection and try again." }));
+      return;
+    }
+    const data: JobResponse = await resp.json();
+    if (data.status === "done" && data.result) {
+      setState({
+        status: "done",
+        jobId,
+        result: data.result,
+        errorMessage: null,
+        latencySeconds: null,
+        fromCache: false,
+      });
+    }
+  }, []);
+
   const reset = useCallback(() => {
     cancelledRef.current = true;
     // Only clears the current view, not the localStorage entry itself
@@ -149,5 +178,5 @@ export function useResearch() {
     setState(IDLE_STATE);
   }, []);
 
-  return { ...state, submit, reset };
+  return { ...state, submit, loadJob, reset };
 }
