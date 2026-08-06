@@ -4,10 +4,9 @@ import { useEffect, useState } from "react";
 import RatingBadge from "./RatingBadge";
 import type { WatchlistItem } from "@/lib/types";
 
-// Always renders (unlike RecentReports, which hides itself when
-// empty) -- the add-ticker input is the primary way a user grows this
-// list, so it needs to be visible even with zero items, not just once
-// something's already on it.
+// Always renders, even with zero items -- the add-ticker input is the
+// primary way a user grows this list, so it needs to stay visible
+// rather than disappearing until something's already on it.
 export default function Watchlist() {
   const [items, setItems] = useState<WatchlistItem[] | null>(null);
   const [ticker, setTicker] = useState("");

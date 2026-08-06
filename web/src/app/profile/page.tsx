@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import AuthGate from "@/components/AuthGate";
+import BottomNav from "@/components/BottomNav";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import type { WatchlistItem } from "@/lib/types";
 
@@ -409,7 +410,7 @@ function ProfilePage({
   const countdown = formatCountdown(resetAt);
 
   return (
-    <div className="min-h-screen bg-bg">
+    <div className="min-h-screen bg-bg pb-20">
       <div className="mx-auto max-w-2xl px-5 py-8">
         <div className="flex items-center justify-between border-b border-border pb-3">
           <Link href="/" className="font-mono text-xs font-bold text-muted hover:text-accent">
@@ -501,6 +502,7 @@ function ProfilePage({
 
         <DeleteAccountSection onDeleteAccount={onDeleteAccount} deleteError={deleteError} />
       </div>
+      <BottomNav />
     </div>
   );
 }
