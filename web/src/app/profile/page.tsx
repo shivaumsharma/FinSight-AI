@@ -13,6 +13,7 @@ export default function Profile() {
       {({
         email, createdAt, jobsUsedToday, dailyLimit, totalReports, sessionExpiresAt,
         riskTolerance, setRiskTolerance, resetAt, waitlistFeatures, joinWaitlist,
+        displayName, setDisplayName,
         logout, deleteAccount, deleteError,
       }) => (
         <ProfilePage
@@ -27,6 +28,8 @@ export default function Profile() {
           resetAt={resetAt}
           waitlistFeatures={waitlistFeatures}
           onJoinWaitlist={joinWaitlist}
+          displayName={displayName}
+          onSetDisplayName={setDisplayName}
           onLogout={logout}
           onDeleteAccount={deleteAccount}
           deleteError={deleteError}
@@ -39,6 +42,16 @@ export default function Profile() {
 function initialsFromEmail(email: string | null): string {
   if (!email) return "AI";
   return email.split("@")[0].slice(0, 2).toUpperCase();
+}
+
+// Same heuristic page.tsx's greeting falls back to when no display_name
+// is set -- shown here as the input's placeholder so editing feels like
+// starting from what's already displayed, not a blank field.
+function fallbackNameFromEmail(email: string | null): string {
+  if (!email) return "there";
+  const local = email.split("@")[0];
+  const first = local.split(/[._-]/)[0];
+  return first.charAt(0).toUpperCase() + first.slice(1);
 }
 
 function formatDate(unixSeconds: number | null): string {
@@ -182,6 +195,72 @@ const RISK_COLORS: Record<string, string> = {
 // room for a dropdown. The title tooltip is explicit that this is
 // saved-but-not-yet-applied -- better than letting a user assume their
 // reports already changed because of it.
+// Fixes the greeting header showing a typo-looking guess (e.g.
+// "sshivaum@..." -> "Sshivaum") for anyone whose email doesn't cleanly
+// split into a real name -- a real, persisted, user-editable field
+// instead of a smarter guess, since no heuristic can reliably recover
+// an actual name from an arbitrary email local-part.
+function DisplayNameRow({
+  displayName,
+  emailFallback,
+  onChange,
+}: {
+  displayName: string | null;
+  emailFallback: string;
+  onChange: (name: string | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(displayName || "");
+
+  function startEditing() {
+    setValue(displayName || "");
+    setEditing(true);
+  }
+
+  function save() {
+    onChange(value.trim() || null);
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <div className="rounded-lg border border-border bg-card px-3.5 py-3">
+        <div className="font-mono text-xs text-text">Display name</div>
+        <div className="mt-2 flex gap-2">
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") save();
+              if (e.key === "Escape") setEditing(false);
+            }}
+            maxLength={40}
+            autoFocus
+            placeholder={emailFallback}
+            className="min-w-0 flex-1 rounded-lg border border-border bg-bg px-3 py-1.5 font-mono text-xs text-text placeholder:text-muted focus:outline-none focus:border-accent"
+          />
+          <button type="button" onClick={save} className="rounded-lg bg-accent px-3 py-1.5 font-mono text-[10px] font-bold text-bg">
+            SAVE
+          </button>
+          <button type="button" onClick={() => setEditing(false)} className="font-mono text-[10px] text-dim hover:text-muted">
+            CANCEL
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3.5 py-3">
+      <div className="font-mono text-xs text-text">Display name</div>
+      <button type="button" onClick={startEditing} className="font-mono text-[11px] text-muted hover:text-accent">
+        {displayName || emailFallback} &middot; edit
+      </button>
+    </div>
+  );
+}
+
 function RiskToleranceRow({
   riskTolerance,
   onChange,
@@ -372,6 +451,8 @@ function ProfilePage({
   resetAt,
   waitlistFeatures,
   onJoinWaitlist,
+  displayName,
+  onSetDisplayName,
   onLogout,
   onDeleteAccount,
   deleteError,
@@ -387,6 +468,8 @@ function ProfilePage({
   resetAt: number | null;
   waitlistFeatures: string[];
   onJoinWaitlist: (feature: string) => void;
+  displayName: string | null;
+  onSetDisplayName: (name: string | null) => Promise<void>;
   onLogout: () => void;
   onDeleteAccount: (password: string) => Promise<boolean>;
   deleteError: string | null;
@@ -468,6 +551,7 @@ function ProfilePage({
 
         <SectionHeader icon={<PreferencesIcon />} label="PREFERENCES" />
         <div className="mt-2 space-y-2">
+          <DisplayNameRow displayName={displayName} emailFallback={fallbackNameFromEmail(email)} onChange={onSetDisplayName} />
           <RiskToleranceRow riskTolerance={riskTolerance} onChange={onSetRiskTolerance} />
           <NotificationRow />
           <InfoRow

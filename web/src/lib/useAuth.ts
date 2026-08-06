@@ -16,6 +16,7 @@ interface AuthState {
   riskTolerance: string | null;
   resetAt: number | null;
   waitlistFeatures: string[];
+  displayName: string | null;
   error: string | null;
 }
 
@@ -31,6 +32,7 @@ const UNAUTHENTICATED_STATE: AuthState = {
   riskTolerance: null,
   resetAt: null,
   waitlistFeatures: [],
+  displayName: null,
   error: null,
 };
 
@@ -57,6 +59,7 @@ export function useAuth() {
           riskTolerance: data.risk_tolerance ?? null,
           resetAt: data.reset_at ?? null,
           waitlistFeatures: data.waitlist_features ?? [],
+          displayName: data.display_name ?? null,
           error: null,
         });
       } else {
@@ -159,5 +162,17 @@ export function useAuth() {
     }).catch(() => {});
   }, []);
 
-  return { ...state, signup, login, logout, deleteAccount, setRiskTolerance, joinWaitlist };
+  // Optimistic, same reasoning as setRiskTolerance -- the 40-char cap
+  // is already enforced client-side on the input, so a server-side
+  // rejection here would only happen from a bug, not a real user path.
+  const setDisplayName = useCallback(async (name: string | null) => {
+    setState((s) => ({ ...s, displayName: name }));
+    await fetch("/api/auth/display-name", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ display_name: name }),
+    }).catch(() => {});
+  }, []);
+
+  return { ...state, signup, login, logout, deleteAccount, setRiskTolerance, joinWaitlist, setDisplayName };
 }

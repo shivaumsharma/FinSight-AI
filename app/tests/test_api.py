@@ -381,6 +381,37 @@ def test_risk_tolerance_rejects_an_invalid_level(client, auth_headers):
     assert resp.status_code == 422
 
 
+def test_display_name_defaults_to_none_and_is_persisted(client, auth_headers):
+    resp = client.get("/v1/auth/me", headers=auth_headers)
+    assert resp.json()["display_name"] is None
+
+    resp = client.patch("/v1/auth/display-name", json={"display_name": "Shivaum"}, headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["display_name"] == "Shivaum"
+
+    resp = client.get("/v1/auth/me", headers=auth_headers)
+    assert resp.json()["display_name"] == "Shivaum"
+
+
+def test_display_name_is_trimmed(client, auth_headers):
+    resp = client.patch("/v1/auth/display-name", json={"display_name": "  Shivaum  "}, headers=auth_headers)
+    assert resp.json()["display_name"] == "Shivaum"
+
+
+def test_display_name_of_empty_or_whitespace_clears_it_back_to_none(client, auth_headers):
+    client.patch("/v1/auth/display-name", json={"display_name": "Shivaum"}, headers=auth_headers)
+    resp = client.patch("/v1/auth/display-name", json={"display_name": "   "}, headers=auth_headers)
+    assert resp.json()["display_name"] is None
+
+    resp = client.get("/v1/auth/me", headers=auth_headers)
+    assert resp.json()["display_name"] is None
+
+
+def test_display_name_rejects_more_than_40_characters(client, auth_headers):
+    resp = client.patch("/v1/auth/display-name", json={"display_name": "x" * 41}, headers=auth_headers)
+    assert resp.status_code == 422
+
+
 def test_deleting_account_requires_the_correct_password(client, auth_headers):
     resp = client.request("DELETE", "/v1/auth/me", json={"password": "wrongpassword"}, headers=auth_headers)
     assert resp.status_code == 401
