@@ -488,6 +488,42 @@ def get_research_pdf(
                          filename=f"{job['job_id']}.pdf")
 
 
+# Curated, not user-editable -- a fixed carousel of major indices
+# rather than an arbitrary-ticker lookup. GIFT NIFTY is deliberately
+# excluded: neither "NIFTY_FUT.NS" nor "GIFTNIFTY" resolve on Yahoo
+# Finance (confirmed empirically -- both 404 from yfinance), so there's
+# no reliable free data source for it.
+INDEX_LIST = [
+    {"name": "S&P 500", "ticker": "^GSPC"},
+    {"name": "NASDAQ", "ticker": "^IXIC"},
+    {"name": "DOW", "ticker": "^DJI"},
+    {"name": "NIFTY 50", "ticker": "^NSEI"},
+    {"name": "SENSEX", "ticker": "^BSESN"},
+    {"name": "BANK NIFTY", "ticker": "^NSEBANK"},
+    {"name": "INDIA VIX", "ticker": "^INDIAVIX"},
+]
+
+
+@app.get("/v1/market/indices")
+def get_market_indices(current_user: str = Depends(auth.get_current_user)):
+    indices = []
+    for entry in INDEX_LIST:
+        try:
+            quote = get_quote(entry["ticker"])
+        except Exception:
+            # Same per-item isolation as the watchlist below -- one
+            # index's fetch failure (Yahoo throttling, a transient
+            # outage) must not blank out the whole carousel.
+            quote = None
+        indices.append({
+            "name": entry["name"],
+            "ticker": entry["ticker"],
+            "price": quote["price"] if quote else None,
+            "change_pct": quote["change_pct"] if quote else None,
+        })
+    return {"indices": indices}
+
+
 @app.get("/v1/watchlist")
 def get_watchlist(current_user: str = Depends(auth.get_current_user)):
     items = []

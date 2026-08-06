@@ -159,3 +159,14 @@ export interface WatchlistItem {
   rating: string | null;
   added_at: number;
 }
+
+// GET /v1/market/indices' item shape -- a fixed, curated list (see
+// main.py's INDEX_LIST), not user-editable. price/change_pct are null
+// when that index's quote fetch failed (same per-item isolation as
+// WatchlistItem).
+export interface IndexQuote {
+  name: string;
+  ticker: string;
+  price: number | null;
+  change_pct: number | null;
+}
