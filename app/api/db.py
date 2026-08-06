@@ -132,6 +132,16 @@ def init_db() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN risk_tolerance TEXT")
         except sqlite3.OperationalError:
             pass  # column already exists
+        # User-editable name shown in the greeting header instead of a
+        # heuristic guessed from the email's local-part -- that guess
+        # (capitalize up to the first separator) reads as a typo for
+        # any email that doesn't cleanly split into a real name (e.g.
+        # "sshivaum@..." -> "Sshivaum"). NULL falls back to that same
+        # heuristic at read/render time rather than being backfilled.
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN display_name TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists
         # session_token is the primary key, not user_id -- a user can
         # hold multiple valid sessions at once (e.g. two browser tabs
         # each logging in independently), and logout must invalidate
@@ -254,6 +264,14 @@ def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
 def set_risk_tolerance(user_id: str, risk_tolerance: str) -> None:
     with _connect() as conn:
         conn.execute("UPDATE users SET risk_tolerance=? WHERE user_id=?", (risk_tolerance, user_id))
+
+
+def set_display_name(user_id: str, display_name: str | None) -> None:
+    """None clears back to the email-derived heuristic (see main.py's
+    GET /v1/auth/me) -- lets a user un-set a display name they no
+    longer want, not just overwrite it with another one."""
+    with _connect() as conn:
+        conn.execute("UPDATE users SET display_name=? WHERE user_id=?", (display_name, user_id))
 
 
 def create_session(user_id: str, ttl_seconds: int = DEFAULT_SESSION_TTL_SECONDS) -> str:

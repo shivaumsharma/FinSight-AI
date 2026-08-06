@@ -18,30 +18,40 @@ const QUICK_TICKERS = ["AAPL", "NVDA", "TSLA", "MSFT"];
 export default function Home() {
   return (
     <AuthGate>
-      {({ email }) => (
+      {({ email, displayName }) => (
         // useSearchParams requires a Suspense boundary around whatever
         // reads it, or the production build bails out of static
         // optimization with a hard error -- this page is fully client
         // rendered already (every child below uses hooks), so the
         // fallback is never actually visible in practice.
         <Suspense fallback={null}>
-          <ResearchPage email={email} />
+          <ResearchPage email={email} displayName={displayName} />
         </Suspense>
       )}
     </AuthGate>
   );
 }
 
-// First name-shaped guess from the email's local-part -- there's no
-// real "name" field on a user (see db.py's users table). Splits on
-// common separators (. _ -) and title-cases the first segment, e.g.
-// "shivaum.sharma@..." -> "Shivaum". Falls back to the raw local-part
-// if it doesn't look like a compound name.
-function displayNameFromEmail(email: string | null): string {
+// Prefers the user's own editable display_name (Profile page) over a
+// guess -- that guess (capitalize up to the first separator in the
+// email's local-part) reads as a typo for any email that doesn't
+// cleanly split into a real name, e.g. "sshivaum@..." -> "Sshivaum".
+// Falls back to the raw local-part if no separator is found.
+function greetingName(email: string | null, displayName: string | null): string {
+  if (displayName) return displayName;
   if (!email) return "there";
   const local = email.split("@")[0];
   const first = local.split(/[._-]/)[0];
   return first.charAt(0).toUpperCase() + first.slice(1);
+}
+
+function SearchIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+      <circle cx="10.5" cy="10.5" r="6.5" />
+      <path d="M20 20l-4.8-4.8" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 function greetingForHour(hour: number): string {
@@ -79,7 +89,7 @@ function PipelinePreview() {
   );
 }
 
-function ResearchPage({ email }: { email: string | null }) {
+function ResearchPage({ email, displayName }: { email: string | null; displayName: string | null }) {
   const [query, setQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const { status, jobId, result, errorMessage, latencySeconds, fromCache, submit, loadJob, reset } = useResearch();
@@ -134,9 +144,9 @@ function ResearchPage({ email }: { email: string | null }) {
               type="button"
               onClick={() => setShowSearch(true)}
               aria-label="Search reports and watchlist"
-              className="font-mono text-xs text-muted hover:text-accent"
+              className="text-muted hover:text-accent"
             >
-              &#128269;
+              <SearchIcon />
             </button>
             <NotificationsPanel />
           </div>
@@ -145,7 +155,7 @@ function ResearchPage({ email }: { email: string | null }) {
         {showSearch && <SearchOverlay onClose={() => setShowSearch(false)} />}
 
         <h1 className="mt-3 font-mono text-xl font-bold text-text">
-          {greetingForHour(hour)}, {displayNameFromEmail(email)}
+          {greetingForHour(hour)}, {greetingName(email, displayName)}
         </h1>
 
         <IndicesCarousel />
