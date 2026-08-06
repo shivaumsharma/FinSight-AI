@@ -49,7 +49,7 @@ from pydantic import BaseModel, field_validator
 
 from app.api import auth, db, errors, jobs
 from app.core.company_resolver import resolve_companies
-from app.data.market_data import TickerNotFoundError, get_quote
+from app.data.market_data import TickerNotFoundError, get_corporate_actions, get_quote
 
 TIMEOUT_SWEEP_INTERVAL_SECONDS = 60
 
@@ -557,12 +557,22 @@ def get_watchlist(current_user: str = Depends(auth.get_current_user)):
             # One bad/delisted ticker's quote failure must not 500 the
             # whole list -- best-effort per ticker, null quote on failure.
             quote = None
+        try:
+            corporate_actions = get_corporate_actions(ticker)
+        except Exception:
+            # Same isolation -- a corporate-actions lookup failure must
+            # not blank out the price/rating that already succeeded.
+            corporate_actions = None
         items.append({
             "ticker": ticker,
             "price": quote["price"] if quote else None,
             "change_pct": quote["change_pct"] if quote else None,
             "rating": db.get_latest_rating_for_ticker(current_user, ticker),
             "added_at": row["added_at"],
+            "next_earnings_date": corporate_actions["next_earnings_date"] if corporate_actions else None,
+            "next_ex_dividend_date": corporate_actions["next_ex_dividend_date"] if corporate_actions else None,
+            "last_dividend_amount": corporate_actions["last_dividend_amount"] if corporate_actions else None,
+            "last_split": corporate_actions["last_split"] if corporate_actions else None,
         })
     return {"items": items}
 

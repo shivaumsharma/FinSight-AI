@@ -74,6 +74,74 @@ def get_quote(ticker: str) -> dict:
     return quote
 
 
+# Same lightweight-and-cached spirit as get_quote() above, for a
+# different watchlist need: upcoming earnings + dividend dates, and the
+# most recent split -- NOT routed through MarketDataLoader.get_company_info()
+# (two round trips, dozens of unrelated fields, deliberately never
+# cached). A longer TTL than quotes: these change at most a few times
+# a year, not every 45 seconds.
+_corporate_actions_cache: dict = {}
+_CORPORATE_ACTIONS_CACHE_TTL_SECONDS = 3600
+
+
+def get_corporate_actions(ticker: str) -> dict:
+    """Cheap, never-raising lookup for the Watchlist -- {"next_earnings_date",
+    "next_ex_dividend_date", "last_dividend_amount", "last_split"}, all
+    None when yfinance has nothing to report. Mirrors
+    MarketDataLoader.get_next_earnings_date's own never-break-the-caller
+    contract for each individual field, so one missing data point
+    (e.g. a company that's never split) doesn't blank out the rest."""
+    ticker = ticker.upper()
+
+    cached = _corporate_actions_cache.get(ticker)
+    if cached is not None and time.time() - cached[0] < _CORPORATE_ACTIONS_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    stock = yf.Ticker(ticker)
+
+    next_earnings_date = None
+    next_ex_dividend_date = None
+    try:
+        calendar = stock.calendar or {}
+        earnings_dates = calendar.get("Earnings Date") or []
+        upcoming_earnings = [d for d in earnings_dates if d >= date.today()]
+        next_earnings_date = min(upcoming_earnings).isoformat() if upcoming_earnings else None
+
+        ex_div = calendar.get("Ex-Dividend Date")
+        if ex_div and ex_div >= date.today():
+            next_ex_dividend_date = ex_div.isoformat()
+    except Exception:
+        pass
+
+    last_dividend_amount = None
+    try:
+        dividends = stock.dividends
+        if not dividends.empty:
+            last_dividend_amount = float(dividends.iloc[-1])
+    except Exception:
+        pass
+
+    last_split = None
+    try:
+        splits = stock.splits
+        if not splits.empty:
+            last_split = {
+                "date": splits.index[-1].date().isoformat(),
+                "ratio": float(splits.iloc[-1]),
+            }
+    except Exception:
+        pass
+
+    result = {
+        "next_earnings_date": next_earnings_date,
+        "next_ex_dividend_date": next_ex_dividend_date,
+        "last_dividend_amount": last_dividend_amount,
+        "last_split": last_split,
+    }
+    _corporate_actions_cache[ticker] = (time.time(), result)
+    return result
+
+
 class MarketDataLoader:
   
   def __init__(self,ticker:str):
