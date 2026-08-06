@@ -8,3 +8,10 @@ export function relativeTime(unixSeconds: number): string {
   const days = Math.round(hours / 24);
   return `${days}d ago`;
 }
+
+// For a "YYYY-MM-DD" date string (e.g. corporate-actions dates, news
+// article dates) rather than a unix timestamp -- relativeTime above
+// doesn't apply since there's no time-of-day component.
+export function formatShortDate(isoDate: string): string {
+  return new Date(isoDate).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}

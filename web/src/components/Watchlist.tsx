@@ -2,11 +2,8 @@
 
 import { useEffect, useState } from "react";
 import RatingBadge from "./RatingBadge";
+import { formatShortDate } from "@/lib/format";
 import type { CompanySuggestion, WatchlistItem } from "@/lib/types";
-
-function formatShortDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
 
 // Always renders, even with zero items -- the add-ticker input is the
 // primary way a user grows this list, so it needs to stay visible

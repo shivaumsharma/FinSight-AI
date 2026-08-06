@@ -12,6 +12,7 @@ import SearchOverlay from "@/components/SearchOverlay";
 import NotificationsPanel from "@/components/NotificationsPanel";
 import IndicesCarousel from "@/components/IndicesCarousel";
 import Portfolio from "@/components/Portfolio";
+import MarketNews from "@/components/MarketNews";
 
 const QUICK_TICKERS = ["AAPL", "NVDA", "TSLA", "MSFT"];
 
@@ -161,6 +162,8 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
         <IndicesCarousel />
 
         <Portfolio />
+
+        <MarketNews />
 
         {!isBusy && status !== "done" && (
           <p className="mt-2 text-sm text-muted">

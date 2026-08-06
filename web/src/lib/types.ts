@@ -200,6 +200,17 @@ export interface PortfolioHolding {
   added_at: number;
 }
 
+// GET /v1/news/market's item shape -- general market headlines, not
+// tied to any one company (see app/reporting/news_client.py's
+// fetch_market_news, distinct from the per-ticker company-news path).
+export interface NewsArticle {
+  headline: string;
+  source: string;
+  date: string;
+  url: string;
+  summary: string;
+}
+
 export interface PortfolioSummary {
   total_market_value: number | null;
   total_cost_basis: number | null;

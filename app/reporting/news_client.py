@@ -86,6 +86,84 @@ def _cache_path(ticker: str) -> Path:
     return CACHE_DIR / f"news_{ticker.upper()}.json"
 
 
+# Separate cache/TTL from company news above -- general market
+# headlines are worth refreshing far more often than the 24h TTL that
+# makes sense for a single ticker's coverage (a report is generated
+# once; the home dashboard's news feed gets checked repeatedly through
+# the day), and there's exactly one of these regardless of how many
+# tickers a user follows, so a single shared cache file is enough.
+MARKET_NEWS_CACHE_FILE = CACHE_DIR / "market_news.json"
+MARKET_NEWS_CACHE_TTL_SECONDS = 30 * 60
+
+
+def fetch_market_news(limit: int = 20) -> List[Dict]:
+    """
+    General market news (not tied to any one company) via Finnhub's
+    /news?category=general endpoint -- a list of {"headline", "source",
+    "date" (YYYY-MM-DD), "url", "summary"} dicts, most recent first.
+    Same never-raise contract as fetch_company_news: a missing API key,
+    a failed request, or an unexpected response shape all degrade to
+    an empty list rather than propagating an error to the caller.
+    """
+    CACHE_DIR.mkdir(exist_ok=True)
+
+    if MARKET_NEWS_CACHE_FILE.exists():
+        age = time.time() - MARKET_NEWS_CACHE_FILE.stat().st_mtime
+        if age < MARKET_NEWS_CACHE_TTL_SECONDS:
+            with open(MARKET_NEWS_CACHE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)[:limit]
+
+    if not FINNHUB_API_KEY:
+        return []
+
+    try:
+        resp = requests.get(
+            "https://finnhub.io/api/v1/news",
+            params={"category": "general", "token": FINNHUB_API_KEY},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        raw_articles = resp.json()
+    except (requests.RequestException, ValueError):
+        return []
+
+    if not isinstance(raw_articles, list):
+        return []
+
+    # Sorted by the raw numeric timestamp (not the formatted date
+    # string) before formatting -- Finnhub's own response order isn't
+    # guaranteed to be strictly chronological.
+    raw_articles.sort(key=lambda item: item.get("datetime") or 0, reverse=True)
+
+    articles = []
+    seen_urls = set()
+    for item in raw_articles:
+        headline = item.get("headline")
+        url = item.get("url")
+        if not headline or not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        date_str = (
+            datetime.utcfromtimestamp(item["datetime"]).strftime("%Y-%m-%d")
+            if item.get("datetime")
+            else "date unknown"
+        )
+
+        articles.append({
+            "headline": headline,
+            "source": item.get("source", "Unknown"),
+            "date": date_str,
+            "url": url,
+            "summary": item.get("summary", ""),
+        })
+
+    with open(MARKET_NEWS_CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump(articles, f)
+
+    return articles[:limit]
+
+
 def fetch_company_news(ticker: str, days: int = DAYS_LOOKBACK) -> List[Dict]:
     """
     Returns a list of {"headline", "source", "date" (YYYY-MM-DD),
