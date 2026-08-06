@@ -3,12 +3,13 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useResearch } from "@/lib/useResearch";
-import { usePushNotifications } from "@/lib/usePushNotifications";
 import ReportView from "@/components/ReportView";
 import ResearchProgress, { STEPS } from "@/components/ResearchProgress";
 import InstallPrompt from "@/components/InstallPrompt";
 import AuthGate from "@/components/AuthGate";
 import BottomNav from "@/components/BottomNav";
+import SearchOverlay from "@/components/SearchOverlay";
+import NotificationsPanel from "@/components/NotificationsPanel";
 
 const QUICK_TICKERS = ["AAPL", "NVDA", "TSLA", "MSFT"];
 
@@ -47,50 +48,6 @@ function greetingForHour(hour: number): string {
   return "Good evening";
 }
 
-// Purely additive to the header -- not gating anything, not shown at
-// all when the browser doesn't support push (still "checking" is
-// treated the same as unsupported for a beat, avoiding a flash of the
-// button before the initial support/permission check resolves).
-function NotificationToggle() {
-  const { status, subscribe, unsubscribe } = usePushNotifications();
-
-  if (status === "unsupported" || status === "checking") return null;
-
-  if (status === "denied") {
-    return (
-      <span
-        className="font-mono text-[10px] text-dim"
-        title="Notifications are blocked in your browser settings for this site"
-      >
-        NOTIFICATIONS BLOCKED
-      </span>
-    );
-  }
-
-  if (status === "subscribed") {
-    return (
-      <button
-        type="button"
-        onClick={unsubscribe}
-        title="Notifications on -- click to turn off"
-        className="font-mono text-[10px] font-bold text-accent hover:text-muted"
-      >
-        NOTIFICATIONS ON
-      </button>
-    );
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={subscribe}
-      className="font-mono text-[10px] font-bold text-muted hover:text-accent"
-    >
-      ENABLE NOTIFICATIONS
-    </button>
-  );
-}
-
 // Idle-state preview of the same 8 stages ResearchProgress lights up
 // once a job is actually running -- same STEPS list, same icon
 // language (just all "○", nothing active yet), so a first-time visitor
@@ -122,6 +79,7 @@ function PipelinePreview() {
 
 function ResearchPage({ email }: { email: string | null }) {
   const [query, setQuery] = useState("");
+  const [showSearch, setShowSearch] = useState(false);
   const { status, jobId, result, errorMessage, latencySeconds, fromCache, submit, loadJob, reset } = useResearch();
   const searchParams = useSearchParams();
 
@@ -139,6 +97,20 @@ function ResearchPage({ email }: { email: string | null }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobParam]);
 
+  // Landing target for SearchOverlay's "Research this" fallback
+  // (/?q=<query> when nothing matched an existing report or watchlist
+  // ticker) -- prefills and immediately runs it, since typing into the
+  // overlay and hitting that button is already an explicit act of
+  // intent, not something that needs a second confirmation here.
+  const qParam = searchParams.get("q");
+  useEffect(() => {
+    if (qParam) {
+      setQuery(qParam);
+      submit(qParam);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qParam]);
+
   const isBusy = status === "submitting" || status === "running";
 
   function run(q: string) {
@@ -155,8 +127,20 @@ function ResearchPage({ email }: { email: string | null }) {
         {/* Header */}
         <div className="flex items-center justify-between">
           <span className="font-mono text-[10px] font-bold tracking-wide text-dim">FINSIGHT</span>
-          <NotificationToggle />
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowSearch(true)}
+              aria-label="Search reports and watchlist"
+              className="font-mono text-xs text-muted hover:text-accent"
+            >
+              &#128269;
+            </button>
+            <NotificationsPanel />
+          </div>
         </div>
+
+        {showSearch && <SearchOverlay onClose={() => setShowSearch(false)} />}
 
         <h1 className="mt-3 font-mono text-xl font-bold text-text">
           {greetingForHour(hour)}, {displayNameFromEmail(email)}

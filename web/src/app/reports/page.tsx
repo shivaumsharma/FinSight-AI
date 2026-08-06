@@ -5,18 +5,8 @@ import { useRouter } from "next/navigation";
 import AuthGate from "@/components/AuthGate";
 import BottomNav from "@/components/BottomNav";
 import RatingBadge from "@/components/RatingBadge";
+import { relativeTime } from "@/lib/format";
 import type { ReportSummary } from "@/lib/types";
-
-function relativeTime(unixSeconds: number): string {
-  const diffMs = Date.now() - unixSeconds * 1000;
-  const minutes = Math.round(diffMs / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  return `${days}d ago`;
-}
 
 // A fuller page than the home widget it's promoted from -- a real
 // empty state (rather than just hiding, which is right for a small
