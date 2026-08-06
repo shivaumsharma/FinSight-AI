@@ -276,23 +276,32 @@ def me(authorization: str = Header(default=None), current_user: str = Depends(au
     # daily_limit reuse the exact same rate-limit machinery
     # POST /v1/research already checks against, not a new counter.
     user = db.get_user_by_id(current_user)
-    jobs_used_today = db.count_recent_jobs(current_user, time.time() - RATE_LIMIT_WINDOW_SECONDS)
+    window_start = time.time() - RATE_LIMIT_WINDOW_SECONDS
+    jobs_used_today = db.count_recent_jobs(current_user, window_start)
     # authorization is guaranteed well-formed here -- Depends(auth.get_current_user)
     # above already validated it (raised 401 otherwise) before this
     # body ever runs, so extract_bearer_token can't itself fail.
     session_expires_at = db.get_session_expiry(auth.extract_bearer_token(authorization))
+    # The oldest job counted in the current rate-limit window is the
+    # next one to age out -- it does so exactly RATE_LIMIT_WINDOW_SECONDS
+    # after it started, which is the moment jobs_used_today next ticks
+    # down by one. None (no countdown) if nothing's counted right now.
+    oldest = db.oldest_job_time_in_window(current_user, window_start)
+    reset_at = (oldest + RATE_LIMIT_WINDOW_SECONDS) if oldest is not None else None
     return {
         "user_id": current_user,
         "email": user["email"] if user else None,
         "created_at": user["created_at"] if user else None,
         "jobs_used_today": jobs_used_today,
         "daily_limit": DAILY_JOB_LIMIT,
+        "reset_at": reset_at,
         "total_reports": db.count_all_jobs(current_user),
         "session_expires_at": session_expires_at,
         # NULL on a fresh/pre-migration row defaults to "Moderate" here
         # (read time), not backfilled in the DB -- same nullable
         # pattern the jobs-table migration above already uses.
         "risk_tolerance": user["risk_tolerance"] if user and user.get("risk_tolerance") else "Moderate",
+        "waitlist_features": db.list_waitlist_features(current_user),
     }
 
 
@@ -317,6 +326,19 @@ def update_risk_tolerance(body: RiskToleranceRequest, current_user: str = Depend
     # (a separate, larger feature). Real and saved, not decorative.
     db.set_risk_tolerance(current_user, body.risk_tolerance)
     return {"status": "ok", "risk_tolerance": body.risk_tolerance}
+
+
+class WaitlistRequest(BaseModel):
+    feature: str
+
+
+@app.post("/v1/waitlist")
+def join_waitlist(body: WaitlistRequest, current_user: str = Depends(auth.get_current_user)):
+    # No allowlist of valid `feature` slugs -- this is meant to stay
+    # generic across whatever not-yet-built feature needs a real
+    # "interested" signal next, not just today's Brokerage Sync.
+    db.join_waitlist(current_user, body.feature)
+    return {"status": "ok"}
 
 
 class DeleteAccountRequest(BaseModel):
