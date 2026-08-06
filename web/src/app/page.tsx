@@ -112,7 +112,7 @@ function ResearchPage({
   onLogout: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const { status, jobId, result, errorMessage, latencySeconds, fromCache, submit, loadJob } = useResearch();
+  const { status, jobId, result, errorMessage, latencySeconds, fromCache, submit, loadJob, reset } = useResearch();
 
   const isBusy = status === "submitting" || status === "running";
 
@@ -230,7 +230,19 @@ function ResearchPage({
         )}
 
         {status === "done" && result && jobId && (
-          <ReportView result={result} jobId={jobId} latencySeconds={latencySeconds} />
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setQuery("");
+                reset();
+              }}
+              className="mt-6 font-mono text-xs font-bold text-muted hover:text-accent"
+            >
+              &larr; BACK TO SEARCH
+            </button>
+            <ReportView result={result} jobId={jobId} latencySeconds={latencySeconds} />
+          </>
         )}
 
         <p className="mt-16 text-center font-mono text-[10px] text-dim">

@@ -13,6 +13,7 @@ interface AuthState {
   dailyLimit: number | null;
   totalReports: number | null;
   sessionExpiresAt: number | null;
+  riskTolerance: string | null;
   error: string | null;
 }
 
@@ -25,6 +26,7 @@ const UNAUTHENTICATED_STATE: AuthState = {
   dailyLimit: null,
   totalReports: null,
   sessionExpiresAt: null,
+  riskTolerance: null,
   error: null,
 };
 
@@ -48,6 +50,7 @@ export function useAuth() {
           dailyLimit: data.daily_limit ?? null,
           totalReports: data.total_reports ?? null,
           sessionExpiresAt: data.session_expires_at ?? null,
+          riskTolerance: data.risk_tolerance ?? null,
           error: null,
         });
       } else {
@@ -123,5 +126,19 @@ export function useAuth() {
     return false;
   }, []);
 
-  return { ...state, signup, login, logout, deleteAccount };
+  // Optimistic update -- the profile UI is a cycle-through-3-values
+  // button, and waiting on a round-trip before the badge visibly
+  // changes would make every click feel laggy for a preference this
+  // low-stakes (worst case on a failed request: it silently reverts
+  // next time /api/auth/me is refetched, not a real correctness issue).
+  const setRiskTolerance = useCallback(async (level: string) => {
+    setState((s) => ({ ...s, riskTolerance: level }));
+    await fetch("/api/auth/risk-tolerance", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ risk_tolerance: level }),
+    }).catch(() => {});
+  }, []);
+
+  return { ...state, signup, login, logout, deleteAccount, setRiskTolerance };
 }
