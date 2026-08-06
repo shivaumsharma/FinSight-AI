@@ -7,30 +7,52 @@ type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 interface AuthState {
   status: AuthStatus;
   userId: string | null;
+  email: string | null;
+  createdAt: number | null;
+  jobsUsedToday: number | null;
+  dailyLimit: number | null;
   error: string | null;
 }
+
+const UNAUTHENTICATED_STATE: AuthState = {
+  status: "unauthenticated",
+  userId: null,
+  email: null,
+  createdAt: null,
+  jobsUsedToday: null,
+  dailyLimit: null,
+  error: null,
+};
 
 // Mirrors useResearch.ts's shape (status/error state + an imperative
 // action that updates it) -- same pattern already established for the
 // one other stateful client/server round-trip in this app.
 export function useAuth() {
-  const [state, setState] = useState<AuthState>({ status: "loading", userId: null, error: null });
+  const [state, setState] = useState<AuthState>({ ...UNAUTHENTICATED_STATE, status: "loading" });
 
   const checkSession = useCallback(async () => {
     try {
       const resp = await fetch("/api/auth/me", { cache: "no-store" });
       if (resp.ok) {
         const data = await resp.json();
-        setState({ status: "authenticated", userId: data.user_id, error: null });
+        setState({
+          status: "authenticated",
+          userId: data.user_id,
+          email: data.email ?? null,
+          createdAt: data.created_at ?? null,
+          jobsUsedToday: data.jobs_used_today ?? null,
+          dailyLimit: data.daily_limit ?? null,
+          error: null,
+        });
       } else {
-        setState({ status: "unauthenticated", userId: null, error: null });
+        setState(UNAUTHENTICATED_STATE);
       }
     } catch {
       // A network hiccup checking auth shouldn't strand the user on an
       // infinite loading spinner -- fail to logged-out, same as a real
       // 401 would, since the research form itself will surface a clear
       // "couldn't reach the service" error if they try to use it.
-      setState({ status: "unauthenticated", userId: null, error: null });
+      setState(UNAUTHENTICATED_STATE);
     }
   }, []);
 
@@ -72,7 +94,7 @@ export function useAuth() {
 
   const logout = useCallback(async () => {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
-    setState({ status: "unauthenticated", userId: null, error: null });
+    setState(UNAUTHENTICATED_STATE);
   }, []);
 
   return { ...state, signup, login, logout };

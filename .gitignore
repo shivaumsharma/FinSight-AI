@@ -35,7 +35,11 @@ scripts/finetuned_bge_embeddings/
 
 # Rendered PDFs from app/api/jobs.py -- regenerated per job, referenced
 # from jobs.db (also gitignored via *.db above) by path, not committed.
-reports/
+# Anchored to the repo root (leading /) -- a bare "reports/" would also
+# match web/src/app/api/reports/ (the Recent Reports proxy route,
+# real source code), since unanchored gitignore patterns match at any
+# depth.
+/reports/
 
 # Every real LLM prompt/response pair this deployment sees (app/core/
 # llm_provider.py, LOG_LLM_CALLS) -- training-data collection for a

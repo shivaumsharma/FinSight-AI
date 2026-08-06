@@ -18,7 +18,7 @@ vector_db/
 filings_cache/
 models/
 narrative_comparison/
-reports/
+/reports/
 llm_logs/
 *.db
 

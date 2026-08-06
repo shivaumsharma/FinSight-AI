@@ -37,6 +37,39 @@ function ShareButton({ jobId }: { jobId: string }) {
   );
 }
 
+function WatchlistButton({ ticker }: { ticker: string }) {
+  const [state, setState] = useState<"idle" | "adding" | "added" | "error">("idle");
+
+  async function handleAdd() {
+    setState("adding");
+    try {
+      const resp = await fetch("/api/watchlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker }),
+      });
+      if (!resp.ok) throw new Error("watchlist add failed");
+      setState("added");
+    } catch {
+      setState("error");
+      setTimeout(() => setState("idle"), 2000);
+    }
+  }
+
+  const label = { idle: "+ WATCHLIST", adding: "...", added: "ON WATCHLIST", error: "COULDN'T ADD" }[state];
+
+  return (
+    <button
+      type="button"
+      onClick={handleAdd}
+      disabled={state === "adding" || state === "added"}
+      className="mt-6 ml-2 inline-block rounded-lg border border-border bg-card px-5 py-2.5 font-mono text-xs font-bold text-text hover:border-accent disabled:opacity-60"
+    >
+      {label}
+    </button>
+  );
+}
+
 function StatTile({ label, value, valueClass }: { label: string; value: React.ReactNode; valueClass?: string }) {
   return (
     <div className="flex-1 rounded-lg border border-border bg-card px-3 py-2.5">
@@ -404,6 +437,7 @@ export default function ReportView({
         EXPORT PDF
       </a>
       <ShareButton jobId={jobId} />
+      <WatchlistButton ticker={result.ticker} />
     </div>
   );
 }

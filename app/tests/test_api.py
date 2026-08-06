@@ -269,6 +269,41 @@ def test_unknown_job_id_returns_structured_404(client, auth_headers):
     assert resp.json()["code"] == "JOB_NOT_FOUND"
 
 
+# ---------------------------------------------------------------- recent reports
+
+def test_recent_reports_returns_completed_job_with_ticker_and_rating(client, auth_headers):
+    job_id = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers
+    ).json()["job_id"]
+    _poll_until_terminal(client, job_id, auth_headers)
+
+    resp = client.get("/v1/research/recent", headers=auth_headers)
+    assert resp.status_code == 200
+    reports = resp.json()["reports"]
+    assert len(reports) == 1
+    assert reports[0]["job_id"] == job_id
+    assert reports[0]["ticker"] == "AAPL"
+    assert reports[0]["rating"] == "Buy"
+
+
+def test_recent_reports_excludes_a_different_users_jobs(client, auth_headers):
+    client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
+
+    other_user_headers = _signup(client, email="recentreportsother@example.com", password="otherpassword")
+    resp = client.get("/v1/research/recent", headers=other_user_headers)
+    assert resp.status_code == 200
+    assert resp.json()["reports"] == []
+
+
+def test_recent_reports_is_registered_before_the_job_id_route(client, auth_headers):
+    # /v1/research/recent must not be shadowed by /v1/research/{job_id}
+    # matching "recent" as a literal job_id -- a real bug class for
+    # Starlette route registration order, exercised directly here.
+    resp = client.get("/v1/research/recent", headers=auth_headers)
+    assert resp.status_code == 200
+    assert "reports" in resp.json()
+
+
 # ---------------------------------------------------------------- per-user auth
 
 def test_signup_then_login_both_work(client):
@@ -276,6 +311,20 @@ def test_signup_then_login_both_work(client):
     resp = client.post("/v1/auth/login", json={"email": "carol@example.com", "password": "carolspassword"})
     assert resp.status_code == 200
     assert "session_token" in resp.json()
+
+
+def test_auth_me_returns_profile_and_usage_fields(client, auth_headers):
+    resp = client.get("/v1/auth/me", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["email"] == "alice@example.com"
+    assert isinstance(body["created_at"], float)
+    assert body["jobs_used_today"] == 0
+    assert body["daily_limit"] == main.DAILY_JOB_LIMIT
+
+    client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
+    resp = client.get("/v1/auth/me", headers=auth_headers)
+    assert resp.json()["jobs_used_today"] == 1
 
 
 def test_signup_rejects_a_duplicate_email(client):
