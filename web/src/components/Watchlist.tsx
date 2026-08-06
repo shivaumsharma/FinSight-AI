@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import RatingBadge from "./RatingBadge";
-import type { WatchlistItem } from "@/lib/types";
+import type { CompanySuggestion, WatchlistItem } from "@/lib/types";
 
 function formatShortDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -16,6 +16,8 @@ export default function Watchlist() {
   const [ticker, setTicker] = useState("");
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<CompanySuggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   function refresh() {
     fetch("/api/watchlist")
@@ -26,16 +28,33 @@ export default function Watchlist() {
 
   useEffect(refresh, []);
 
-  async function handleAdd(e: React.FormEvent) {
-    e.preventDefault();
-    if (!ticker.trim() || adding) return;
+  // Debounced -- fetching on every keystroke would fire a request per
+  // character typed. 2-char minimum keeps a single keypress from
+  // querying the full ~10k-company index for nothing useful.
+  useEffect(() => {
+    const q = ticker.trim();
+    if (q.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    const timeout = setTimeout(() => {
+      fetch(`/api/companies/suggest?q=${encodeURIComponent(q)}`)
+        .then((r) => (r.ok ? r.json() : { suggestions: [] }))
+        .then((data) => setSuggestions(data.suggestions))
+        .catch(() => setSuggestions([]));
+    }, 250);
+    return () => clearTimeout(timeout);
+  }, [ticker]);
+
+  async function submitTicker(rawTicker: string) {
+    if (!rawTicker.trim() || adding) return;
     setAdding(true);
     setError(null);
     try {
       const resp = await fetch("/api/watchlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticker: ticker.trim() }),
+        body: JSON.stringify({ ticker: rawTicker.trim() }),
       });
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({ message: "Couldn't add that ticker." }));
@@ -43,10 +62,25 @@ export default function Watchlist() {
         return;
       }
       setTicker("");
+      setSuggestions([]);
+      setShowSuggestions(false);
       refresh();
     } finally {
       setAdding(false);
     }
+  }
+
+  function handleAdd(e: React.FormEvent) {
+    e.preventDefault();
+    submitTicker(ticker);
+  }
+
+  // onMouseDown, not onClick -- fires before the input's onBlur, so
+  // selecting a suggestion doesn't race the dropdown closing before
+  // the click registers.
+  function selectSuggestion(s: CompanySuggestion) {
+    setShowSuggestions(false);
+    submitTicker(s.ticker);
   }
 
   async function handleRemove(t: string) {
@@ -111,13 +145,22 @@ export default function Watchlist() {
         </div>
       )}
 
-      <form onSubmit={handleAdd} className="mt-2 flex gap-2">
+      <form onSubmit={handleAdd} className="relative mt-2 flex gap-2">
         <input
           type="text"
           value={ticker}
-          onChange={(e) => setTicker(e.target.value)}
-          placeholder="add ticker..."
+          onChange={(e) => {
+            setTicker(e.target.value);
+            setShowSuggestions(true);
+          }}
+          onFocus={() => setShowSuggestions(true)}
+          onBlur={() => setShowSuggestions(false)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setShowSuggestions(false);
+          }}
+          placeholder="add ticker or company name..."
           disabled={adding}
+          autoComplete="off"
           className="min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-2 font-mono text-xs text-text placeholder:text-muted focus:outline-none focus:border-accent disabled:opacity-60"
         />
         <button
@@ -127,6 +170,25 @@ export default function Watchlist() {
         >
           {adding ? "..." : "ADD"}
         </button>
+
+        {showSuggestions && suggestions.length > 0 && (
+          <div className="absolute left-0 right-[68px] top-full z-10 mt-1 overflow-hidden rounded-lg border border-border bg-card shadow-lg">
+            {suggestions.map((s) => (
+              <button
+                key={s.ticker}
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  selectSuggestion(s);
+                }}
+                className="flex w-full items-center justify-between border-b border-border-subtle px-3 py-2 text-left last:border-b-0 hover:bg-bg/60"
+              >
+                <span className="truncate font-mono text-xs text-text">{s.name}</span>
+                <span className="ml-2 flex-shrink-0 font-mono text-[10px] text-dim">{s.ticker}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </form>
       {error && <p className="mt-1.5 font-mono text-[10px] text-danger">{error}</p>}
     </div>

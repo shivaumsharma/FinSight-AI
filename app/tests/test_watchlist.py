@@ -251,6 +251,31 @@ def test_watchlist_rating_reflects_the_users_last_completed_report(client, monke
     assert items["AAPL"]["rating"] == "Buy"
 
 
+# ---------------------------------------------------------------- company suggest
+
+def test_suggest_companies_endpoint_returns_matches(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(
+        main, "suggest_companies",
+        lambda q, limit=8: [{"ticker": "TATASTEEL.NS", "name": "Tata Steel Limited"}],
+    )
+
+    resp = client.get("/v1/companies/suggest?q=tata", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["suggestions"] == [{"ticker": "TATASTEEL.NS", "name": "Tata Steel Limited"}]
+
+
+def test_suggest_companies_endpoint_requires_a_session(client):
+    resp = client.get("/v1/companies/suggest?q=tata")
+    assert resp.status_code == 401
+
+
+def test_suggest_companies_endpoint_defaults_to_empty_query(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "suggest_companies", lambda q, limit=8: [] if not q else [{"ticker": "X", "name": "X"}])
+    resp = client.get("/v1/companies/suggest", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["suggestions"] == []
+
+
 # ---------------------------------------------------------------- market indices
 
 def test_market_indices_returns_the_curated_list(client, monkeypatch, auth_headers):

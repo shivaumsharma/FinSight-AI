@@ -168,6 +168,13 @@ export interface WatchlistItem {
 // main.py's INDEX_LIST), not user-editable. price/change_pct are null
 // when that index's quote fetch failed (same per-item isolation as
 // WatchlistItem).
+// GET /v1/companies/suggest's item shape -- powers the Watchlist
+// add-ticker input's autocomplete dropdown.
+export interface CompanySuggestion {
+  ticker: string;
+  name: string;
+}
+
 export interface IndexQuote {
   name: string;
   ticker: string;

@@ -510,6 +510,59 @@ def resolve_companies(question: str) -> List[str]:
     return found
 
 
+def suggest_companies(prefix: str, limit: int = 8) -> List[dict]:
+    """
+    Autocomplete suggestions for a partial ticker or company name --
+    a list of {"ticker", "name"} dicts. NOT the same code path as
+    resolve_companies() above (that's free-text NLP extraction from a
+    full sentence); this is a much simpler direct prefix/substring
+    search over the same two index sources, built for the Watchlist's
+    add-ticker input so a user can pick from real matches instead of
+    guessing an exact symbol.
+
+    Three passes in priority order, each de-duplicated by ticker:
+    ticker-symbol prefix (the user typed something that looks like a
+    real symbol), then company-name prefix, then company-name
+    substring (broadest net, catches e.g. "motors" mid-name).
+    """
+    prefix = prefix.strip()
+    if not prefix:
+        return []
+
+    index = _load_index()
+    nse_index = _load_nse_index()
+    title_to_ticker = {**index["title_to_ticker"], **nse_index["title_to_ticker"]}
+    ticker_to_title = {t: title for title, t in title_to_ticker.items()}
+
+    lowered = prefix.lower()
+    upper = prefix.upper()
+    all_tickers = index["tickers"] | nse_index["tickers"]
+
+    results: List[dict] = []
+    seen = set()
+
+    def add(ticker: str, name: str) -> bool:
+        if ticker in seen:
+            return False
+        seen.add(ticker)
+        results.append({"ticker": ticker, "name": name})
+        return len(results) >= limit
+
+    for ticker in sorted(t for t in all_tickers if t.startswith(upper)):
+        if add(ticker, ticker_to_title.get(ticker, ticker)):
+            return results
+
+    for title in sorted(t for t in title_to_ticker if t.lower().startswith(lowered)):
+        if add(title_to_ticker[title], title):
+            return results
+
+    for title in sorted(t for t in title_to_ticker if lowered in t.lower()):
+        if add(title_to_ticker[title], title):
+            return results
+
+    return results
+
+
 def is_comparison_question(question: str) -> bool:
     """Heuristic for 'compare X and Y' style questions."""
     keywords = ["compare", " vs ", " vs.", "versus", "better buy", "which is a better"]

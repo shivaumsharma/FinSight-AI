@@ -67,3 +67,40 @@ def test_similar_nse_company_names_disambiguate_correctly():
     # real names, not just "any Bajaj company".
     assert _resolve("should i buy bajaj auto") == ["BAJAJ-AUTO.NS"]
     assert _resolve("is bajaj finserv a good buy") == ["BAJAJFINSV.NS"]
+
+
+# ---------------------------------------------------------------- suggest_companies
+
+def _suggest(prefix: str, limit: int = 8):
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    from app.core.company_resolver import suggest_companies
+
+    return suggest_companies(prefix, limit=limit)
+
+
+def test_suggest_companies_matches_a_ticker_prefix():
+    results = _suggest("AAP")
+    assert any(r["ticker"] == "AAPL" for r in results)
+    assert all("ticker" in r and "name" in r for r in results)
+
+
+def test_suggest_companies_matches_a_real_company_by_name_prefix():
+    results = _suggest("Tata Steel")
+    assert any(r["ticker"] == "TATASTEEL.NS" for r in results)
+
+
+def test_suggest_companies_respects_the_limit():
+    results = _suggest("A", limit=3)
+    assert len(results) <= 3
+
+
+def test_suggest_companies_empty_prefix_returns_nothing():
+    assert _suggest("") == []
+
+
+def test_suggest_companies_never_returns_duplicate_tickers():
+    results = _suggest("Tata")
+    tickers = [r["ticker"] for r in results]
+    assert len(tickers) == len(set(tickers))
