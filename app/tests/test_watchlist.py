@@ -203,6 +203,39 @@ def test_watchlist_rating_reflects_the_users_last_completed_report(client, monke
     assert items["AAPL"]["rating"] == "Buy"
 
 
+# ---------------------------------------------------------------- market indices
+
+def test_market_indices_returns_the_curated_list(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
+
+    resp = client.get("/v1/market/indices", headers=auth_headers)
+    assert resp.status_code == 200
+    indices = resp.json()["indices"]
+    assert [i["ticker"] for i in indices] == [e["ticker"] for e in main.INDEX_LIST]
+    assert all(i["price"] == 200.0 and i["change_pct"] == 1.5 for i in indices)
+
+
+def test_market_indices_requires_a_session(client):
+    resp = client.get("/v1/market/indices")
+    assert resp.status_code == 401
+
+
+def test_one_bad_index_does_not_500_the_whole_carousel(client, monkeypatch, auth_headers):
+    def flaky_quote(ticker):
+        if ticker == "^BSESN":
+            raise TickerNotFoundError(ticker)
+        return _fake_quote()
+
+    monkeypatch.setattr(main, "get_quote", flaky_quote)
+
+    resp = client.get("/v1/market/indices", headers=auth_headers)
+    assert resp.status_code == 200
+    indices = {i["ticker"]: i for i in resp.json()["indices"]}
+    assert indices["^BSESN"]["price"] is None
+    assert indices["^BSESN"]["change_pct"] is None
+    assert indices["^GSPC"]["price"] == 200.0
+
+
 # ---------------------------------------------------------------- migration idempotency
 
 def test_init_db_migration_is_idempotent_against_a_pre_migration_schema(tmp_path, monkeypatch):

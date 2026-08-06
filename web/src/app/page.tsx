@@ -10,6 +10,7 @@ import AuthGate from "@/components/AuthGate";
 import BottomNav from "@/components/BottomNav";
 import SearchOverlay from "@/components/SearchOverlay";
 import NotificationsPanel from "@/components/NotificationsPanel";
+import IndicesCarousel from "@/components/IndicesCarousel";
 
 const QUICK_TICKERS = ["AAPL", "NVDA", "TSLA", "MSFT"];
 
@@ -145,6 +146,8 @@ function ResearchPage({ email }: { email: string | null }) {
         <h1 className="mt-3 font-mono text-xl font-bold text-text">
           {greetingForHour(hour)}, {displayNameFromEmail(email)}
         </h1>
+
+        <IndicesCarousel />
 
         {!isBusy && status !== "done" && (
           <p className="mt-2 text-sm text-muted">
