@@ -50,8 +50,8 @@ def auth_headers(client):
     return {"Authorization": f"Bearer {token}"}
 
 
-def _fake_quote(price=200.0, change_pct=1.5, previous_close=None):
-    return {"price": price, "change_pct": change_pct, "previous_close": previous_close}
+def _fake_quote(price=200.0, change_pct=1.5, previous_close=None, currency="USD"):
+    return {"price": price, "change_pct": change_pct, "previous_close": previous_close, "currency": currency}
 
 
 # ---------------------------------------------------------------- add/list/remove
@@ -291,3 +291,66 @@ def test_today_pnl_ignores_holdings_with_a_failed_quote(client, monkeypatch, aut
     assert holdings["MSFT"]["today_pnl"] is None
     # Only AAPL's gain counted -- MSFT's missing quote must not corrupt the total.
     assert resp.json()["summary"]["total_today_pnl"] == pytest.approx(100.0)
+
+
+# ---------------------------------------------------------------- currency
+
+def test_holding_shows_its_own_native_currency_not_converted(client, monkeypatch, auth_headers):
+    # A rupee-priced holding must never be silently relabeled as
+    # dollars -- currency comes straight from the quote, and the
+    # per-holding market_value/cost_basis stay in that native currency
+    # (only the aggregate summary below gets converted).
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote(price=1000.0, currency="INR"))
+    monkeypatch.setattr(main, "get_usd_conversion_rate", lambda currency: 1.0 / 95.0 if currency == "INR" else 1.0)
+    client.post("/v1/portfolio", json={"ticker": "BAJFINANCE.NS", "quantity": 2, "avg_cost": 900.0}, headers=auth_headers)
+
+    resp = client.get("/v1/portfolio", headers=auth_headers)
+    holding = resp.json()["holdings"][0]
+    assert holding["currency"] == "INR"
+    assert holding["market_value"] == pytest.approx(2000.0)
+    assert holding["cost_basis"] == pytest.approx(1800.0)
+
+
+def test_summary_converts_mixed_currency_holdings_to_usd_equivalent(client, monkeypatch, auth_headers):
+    def fake_quote(ticker):
+        if ticker == "AAPL":
+            return _fake_quote(price=100.0, currency="USD")
+        return _fake_quote(price=1000.0, currency="INR")
+
+    monkeypatch.setattr(main, "get_quote", fake_quote)
+    monkeypatch.setattr(main, "get_usd_conversion_rate", lambda currency: 1.0 if currency == "USD" else 0.01)
+    client.post("/v1/portfolio", json={"ticker": "AAPL", "quantity": 10, "avg_cost": 90.0}, headers=auth_headers)
+    client.post("/v1/portfolio", json={"ticker": "BAJFINANCE.NS", "quantity": 5, "avg_cost": 900.0}, headers=auth_headers)
+
+    resp = client.get("/v1/portfolio", headers=auth_headers)
+    summary = resp.json()["summary"]
+    # AAPL: 10*100=1000 USD market value, 10*90=900 USD cost basis (rate 1.0).
+    # BAJFINANCE.NS: 5*1000=5000 INR market value * 0.01 = 50 USD;
+    # 5*900=4500 INR cost basis * 0.01 = 45 USD.
+    assert summary["total_market_value"] == pytest.approx(1050.0)
+    assert summary["total_cost_basis"] == pytest.approx(945.0)
+    assert summary["currency"] == "USD"
+    assert summary["mixed_currency"] is True
+
+
+def test_summary_mixed_currency_is_false_for_an_all_usd_portfolio(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
+    client.post("/v1/portfolio", json={"ticker": "AAPL", "quantity": 10, "avg_cost": 90.0}, headers=auth_headers)
+
+    resp = client.get("/v1/portfolio", headers=auth_headers)
+    assert resp.json()["summary"]["mixed_currency"] is False
+
+
+def test_summary_excludes_a_holding_with_no_known_fx_rate(client, monkeypatch, auth_headers):
+    # A currency this app has no FX ticker for (anything besides USD/
+    # INR) must not silently get treated as 1:1 with USD -- the holding
+    # still displays correctly on its own row, but its value is left
+    # out of the USD aggregate rather than corrupting the total.
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote(price=100.0, currency="EUR"))
+    monkeypatch.setattr(main, "get_usd_conversion_rate", lambda currency: None)
+    client.post("/v1/portfolio", json={"ticker": "SAP.DE", "quantity": 10, "avg_cost": 90.0}, headers=auth_headers)
+
+    resp = client.get("/v1/portfolio", headers=auth_headers)
+    body = resp.json()
+    assert body["holdings"][0]["market_value"] == pytest.approx(1000.0)
+    assert body["summary"]["excluded_from_summary"] is True

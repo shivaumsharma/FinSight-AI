@@ -7,7 +7,8 @@ directly to a fake object so this stays fast and deterministic.
 
 from datetime import date, timedelta
 
-from app.data.market_data import MarketDataLoader
+from app.data import market_data
+from app.data.market_data import MarketDataLoader, get_usd_conversion_rate
 
 
 class _FakeStock:
@@ -62,6 +63,43 @@ def test_get_next_earnings_date_never_raises_on_unexpected_shape():
     # crash the report over a calendar-format change on yfinance's side.
     loader = _loader_with_calendar("unexpected shape, not a dict")
     assert loader.get_next_earnings_date() is None
+
+
+# ---------------------------------------------------------------- currency conversion
+
+def test_usd_conversion_rate_is_1_for_usd():
+    assert get_usd_conversion_rate("USD") == 1.0
+
+
+def test_usd_conversion_rate_is_1_for_missing_currency():
+    # A holding whose quote never resolved a currency defaults to USD
+    # everywhere this app reads it -- same "no conversion needed" case.
+    assert get_usd_conversion_rate(None) == 1.0
+    assert get_usd_conversion_rate("") == 1.0
+
+
+def test_usd_conversion_rate_for_inr_is_the_reciprocal_of_the_fx_quote(monkeypatch):
+    # INR=X is quoted as INR-per-1-USD (~95), so converting an INR
+    # amount TO USD is dividing by that -- i.e. multiplying by its
+    # reciprocal.
+    monkeypatch.setattr(market_data, "get_quote", lambda ticker: {"price": 95.0, "change_pct": 0.1, "previous_close": 94.9, "currency": "INR"})
+    rate = get_usd_conversion_rate("INR")
+    assert rate == 1.0 / 95.0
+
+
+def test_usd_conversion_rate_is_none_for_an_unknown_currency():
+    # This app only has a known FX ticker for INR (see
+    # _FX_TICKERS_BY_CURRENCY) -- anything else must signal "can't
+    # convert" rather than silently treating it as 1:1 with USD.
+    assert get_usd_conversion_rate("EUR") is None
+
+
+def test_usd_conversion_rate_is_none_when_the_fx_quote_fails(monkeypatch):
+    def raise_not_found(ticker):
+        raise market_data.TickerNotFoundError(ticker)
+
+    monkeypatch.setattr(market_data, "get_quote", raise_not_found)
+    assert get_usd_conversion_rate("INR") is None
 
 
 # ---------------------------------------------------------------- get_corporate_actions

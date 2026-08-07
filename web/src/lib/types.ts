@@ -176,6 +176,7 @@ export interface WatchlistItem {
   ticker: string;
   price: number | null;
   change_pct: number | null;
+  currency: string;
   rating: string | null;
   added_at: number;
   next_earnings_date: string | null;
@@ -199,7 +200,16 @@ export interface IndexQuote {
   name: string;
   ticker: string;
   region: "india" | "global";
+  currency: string;
   price: number | null;
+  change_pct: number | null;
+}
+
+// GET /v1/market/fx's response shape -- the USD/INR currency tracker.
+// rate/change_pct are null when the live FX quote fetch failed.
+export interface FxRate {
+  pair: string;
+  rate: number | null;
   change_pct: number | null;
 }
 
@@ -231,6 +241,11 @@ export interface PortfolioHolding {
   buy_date: string | null;
   price: number | null;
   change_pct: number | null;
+  // Native currency this holding actually trades in (from its live
+  // quote) -- price/cost_basis/market_value/today_pnl below are ALL in
+  // this currency, never converted. Only PortfolioSummary's totals are
+  // USD-converted (see its own "currency"/"mixed_currency" fields).
+  currency: string;
   cost_basis: number;
   market_value: number | null;
   unrealized_pnl: number | null;
@@ -264,6 +279,7 @@ export interface MoverItem {
   name: string;
   price: number;
   change_pct: number;
+  currency: string;
 }
 
 export interface MarketMoversData {
@@ -291,4 +307,14 @@ export interface PortfolioSummary {
   total_unrealized_pnl_pct: number | null;
   total_today_pnl: number | null;
   total_today_pnl_pct: number | null;
+  // Summary totals are always in this currency (USD), converted via a
+  // live FX rate when a holding's own native currency differs --
+  // mixed_currency flags that at least one holding needed conversion,
+  // so the UI can label the total "(USD equiv.)" rather than implying
+  // every holding actually trades in dollars. excluded_from_summary
+  // flags a holding whose currency had no known FX rate (left out of
+  // the totals entirely, still shown correctly on its own row).
+  currency: string;
+  mixed_currency: boolean;
+  excluded_from_summary: boolean;
 }

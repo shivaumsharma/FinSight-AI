@@ -58,8 +58,8 @@ def auth_headers(client):
     return {"Authorization": f"Bearer {token}"}
 
 
-def _fake_quote(price=200.0, change_pct=1.5):
-    return {"price": price, "change_pct": change_pct}
+def _fake_quote(price=200.0, change_pct=1.5, currency="USD"):
+    return {"price": price, "change_pct": change_pct, "currency": currency}
 
 
 def _fake_corporate_actions(**overrides):
@@ -97,6 +97,14 @@ def test_add_list_remove_round_trip(client, monkeypatch, auth_headers):
 
     resp = client.get("/v1/watchlist", headers=auth_headers)
     assert resp.json()["items"] == []
+
+
+def test_watchlist_item_shows_its_own_currency(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote(currency="INR"))
+    client.post("/v1/watchlist", json={"ticker": "BAJFINANCE.NS"}, headers=auth_headers)
+
+    resp = client.get("/v1/watchlist", headers=auth_headers)
+    assert resp.json()["items"][0]["currency"] == "INR"
 
 
 def test_adding_the_same_ticker_twice_is_idempotent(client, monkeypatch, auth_headers):
@@ -326,6 +334,17 @@ def test_market_indices_returns_the_curated_list(client, monkeypatch, auth_heade
     assert by_ticker["^GSPC"]["region"] == "global"
 
 
+def test_market_indices_includes_each_indexs_own_currency(client, monkeypatch, auth_headers):
+    def fake_quote(ticker):
+        return _fake_quote(currency="INR" if ticker in ("^NSEI", "^BSESN", "^NSEBANK", "^INDIAVIX") else "USD")
+
+    monkeypatch.setattr(main, "get_quote", fake_quote)
+    resp = client.get("/v1/market/indices", headers=auth_headers)
+    by_ticker = {i["ticker"]: i for i in resp.json()["indices"]}
+    assert by_ticker["^NSEI"]["currency"] == "INR"
+    assert by_ticker["^GSPC"]["currency"] == "USD"
+
+
 def test_market_indices_requires_a_session(client):
     resp = client.get("/v1/market/indices")
     assert resp.status_code == 401
@@ -345,6 +364,39 @@ def test_one_bad_index_does_not_500_the_whole_carousel(client, monkeypatch, auth
     assert indices["^BSESN"]["price"] is None
     assert indices["^BSESN"]["change_pct"] is None
     assert indices["^GSPC"]["price"] == 200.0
+
+
+# ---------------------------------------------------------------- currency (USD/INR FX tracker)
+
+def test_fx_rate_returns_the_live_usd_inr_quote(client, monkeypatch, auth_headers):
+    def fake_quote(ticker):
+        assert ticker == "INR=X"
+        return _fake_quote(price=95.2, change_pct=0.08)
+
+    monkeypatch.setattr(main, "get_quote", fake_quote)
+    resp = client.get("/v1/market/fx", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pair"] == "USD/INR"
+    assert body["rate"] == 95.2
+    assert body["change_pct"] == 0.08
+
+
+def test_fx_rate_degrades_to_null_on_a_failed_quote(client, monkeypatch, auth_headers):
+    def raise_not_found(ticker):
+        raise TickerNotFoundError(ticker)
+
+    monkeypatch.setattr(main, "get_quote", raise_not_found)
+    resp = client.get("/v1/market/fx", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["rate"] is None
+    assert body["change_pct"] is None
+
+
+def test_fx_rate_requires_a_session(client):
+    resp = client.get("/v1/market/fx")
+    assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------- market movers / sentiment

@@ -15,23 +15,53 @@ Cloud Run container.
 Deliberately labeled "Tracked Universe" everywhere this is surfaced
 (API response + frontend copy) so it's never mistaken for full-market
 coverage.
+
+Quotes come from ONE batched request to Yahoo's v7/finance/quote
+endpoint (accepts many comma-separated symbols), NOT a per-ticker loop
+over get_quote()/fast_info -- a real production issue, not a
+hypothetical: an ~80-ticker ThreadPoolExecutor scan against fast_info
+returned as few as 1-3 successes when run from the deployed Cloud Run
+service (even after lowering concurrency and adding a retry), while
+the exact same ticker list succeeded 78/79 (only WBA, delisted in
+2025, genuinely missing) from a non-cloud IP at the same concurrency --
+Yahoo's per-request throttling of that endpoint is evidently far
+harsher from Cloud Run's egress IP than the fetch pattern itself. A
+single request carrying the whole batch reproduced 78/79 successes
+reliably even from the same non-cloud test environment; deployed
+behavior is confirmed after each deploy, not just assumed to transfer.
+
+Uses yfinance's internal YfData helper for this request -- not fully
+public API, but the same session/crumb/cookie machinery yfinance's own
+Ticker/fast_info already depends on internally. Confirmed necessary: a
+raw, unauthenticated request to this same endpoint gets a 401
+(Yahoo requires the crumb token YfData already knows how to obtain),
+so this reuses working auth handling rather than reimplementing it.
 """
 
 import json
 import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import List
+from typing import Dict, List
+
+from yfinance.data import YfData
 
 from app.api import db
 from app.core.company_resolver import get_company_name
-from app.data.market_data import get_quote
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 _CURATED_UNIVERSE_FILE = BASE_DIR / "scripts" / "backtest_results_curated_asof12mo_exit0mo.json"
 
 _movers_cache: dict = {}
 _MOVERS_CACHE_TTL_SECONDS = 60
+
+# Yahoo's batch quote endpoint comfortably handles far more than this in
+# one request -- this app's tracked universe is currently ~80-100
+# tickers, well under any practical limit. Chunking defensively guards
+# against a URL-length/response-size edge case if the watchlist union
+# grows much larger over time, not a limit this app hits today.
+_QUOTE_BATCH_SIZE = 50
+
+_yf_data = YfData()
 
 
 def _load_curated_universe_tickers() -> List[str]:
@@ -59,61 +89,56 @@ def get_tracked_universe() -> List[str]:
     return sorted(set(_curated_universe_cache) | {t.upper() for t in watchlist_tickers})
 
 
-def _fetch_one(ticker: str) -> dict | None:
-    # One retry after a short pause -- Yahoo Finance's undocumented
-    # endpoint throttles/blocks bursty concurrent requests from cloud
-    # datacenter IPs (Cloud Run's outbound egress among them) far more
-    # aggressively than it does a single dev machine: confirmed by
-    # reproducing 78/79 successes for this exact ticker list, even at
-    # this same concurrency, from a non-cloud IP, versus most of the
-    # batch failing when run from the deployed service. A single retry
-    # after backing off is a real, testable mitigation for a transient
-    # per-request throttle -- a permanently delisted/renamed ticker
-    # (e.g. WBA, which went private in 2025) will still fail both
-    # attempts and correctly drop out.
-    for attempt in range(2):
+def _fetch_batch_quotes(tickers: List[str]) -> Dict[str, dict]:
+    """{"TICKER": {"price", "change_pct", "currency", "name"}, ...} for
+    every ticker Yahoo actually returned usable data for. A missing/
+    invalid/delisted ticker (e.g. WBA) is simply absent from Yahoo's
+    own response -- same per-item isolation the rest of this app
+    already relies on, just expressed as "absent from the dict" here
+    instead of a raised exception."""
+    quotes: Dict[str, dict] = {}
+    for i in range(0, len(tickers), _QUOTE_BATCH_SIZE):
+        chunk = tickers[i : i + _QUOTE_BATCH_SIZE]
         try:
-            quote = get_quote(ticker)
-            break
+            resp = _yf_data.get(
+                url="https://query1.finance.yahoo.com/v7/finance/quote",
+                params={"symbols": ",".join(chunk)},
+            )
+            results = resp.json().get("quoteResponse", {}).get("result", [])
         except Exception:
-            if attempt == 0:
-                time.sleep(0.5)
+            # One chunk's request failing must not discard quotes a
+            # previous, successful chunk already produced.
+            continue
+        for r in results:
+            symbol = r.get("symbol")
+            price = r.get("regularMarketPrice")
+            previous_close = r.get("regularMarketPreviousClose")
+            if not symbol or price is None or not previous_close:
                 continue
-            # Same per-item isolation as every other quote-scan in this
-            # app (watchlist, indices, portfolio) -- one bad/delisted/
-            # still-throttled ticker must not blank out the whole ranking.
-            return None
-    if quote["change_pct"] is None:
-        return None
-    return {
-        "ticker": ticker,
-        "name": get_company_name(ticker) or ticker,
-        "price": quote["price"],
-        "change_pct": quote["change_pct"],
-    }
+            quotes[symbol] = {
+                "price": price,
+                "change_pct": (price - previous_close) / previous_close * 100,
+                "currency": r.get("currency") or "USD",
+                "name": r.get("longName") or r.get("shortName") or get_company_name(symbol) or symbol,
+            }
+    return quotes
 
 
 def get_top_movers(limit: int = 5) -> dict:
     """{"gainers": [...], "losers": [...]}, each up to `limit` entries,
-    sorted by change_pct. Concurrent fetch (ThreadPoolExecutor) since
-    the tracked universe can be ~80+ tickers and get_quote() is a
-    network call per symbol -- sequential would make this endpoint
-    noticeably slow. Whole-result cached for MOVERS_CACHE_TTL_SECONDS,
-    same short-TTL-in-process pattern as market_data.py's own quote
-    cache (which this still benefits from underneath on a cache miss
-    here, since get_quote() has its own 45s cache too)."""
+    sorted by change_pct. Whole-result cached for
+    MOVERS_CACHE_TTL_SECONDS, same short-TTL-in-process pattern as
+    market_data.py's own quote cache."""
     cached = _movers_cache.get(limit)
     if cached is not None and time.time() - cached[0] < _MOVERS_CACHE_TTL_SECONDS:
         return cached[1]
 
     universe = get_tracked_universe()
-    # Deliberately gentler than a "max the throughput" concurrency level
-    # -- see _fetch_one's comment: Yahoo Finance throttles a bursty
-    # ~80-request-wide fan-out from a Cloud Run IP far more aggressively
-    # than the same fan-out from a non-cloud IP, so a lower worker count
-    # trades some latency for a meaningfully lower per-ticker failure rate.
-    with ThreadPoolExecutor(max_workers=min(6, max(1, len(universe)))) as pool:
-        results = [r for r in pool.map(_fetch_one, universe) if r is not None]
+    quotes = _fetch_batch_quotes(universe)
+    results = [
+        {"ticker": ticker, "name": q["name"], "price": q["price"], "change_pct": q["change_pct"], "currency": q["currency"]}
+        for ticker, q in quotes.items()
+    ]
 
     ranked = sorted(results, key=lambda r: r["change_pct"], reverse=True)
     # Guard against gainers/losers overlapping the SAME ticker when the
