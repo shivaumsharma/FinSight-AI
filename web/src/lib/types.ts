@@ -139,6 +139,25 @@ export interface ModelConsensus {
   total: number;
 }
 
+// GET /v1/research/backtest-accuracy's response shape -- this app's
+// own measured Buy/Hold/Sell accuracy against real historical
+// outcomes (scripts/phase2_backtest.py's saved results), the same
+// number for every report (not per-ticker -- see backtest_stats.py's
+// own docstring for why). secondary is an older, out-of-sample cohort
+// shown for honesty, not hidden just because it scored lower.
+export interface BacktestAccuracySummary {
+  accuracy_pct: number;
+  correct: number;
+  scored: number;
+  window_label: string;
+  secondary: {
+    accuracy_pct: number;
+    correct: number;
+    scored: number;
+    window_label: string;
+  } | null;
+}
+
 export type JobStatus = "queued" | "running" | "done" | "error";
 
 export interface JobResponse {
@@ -267,6 +286,9 @@ export interface NewsArticle {
   date: string;
   url: string;
   summary: string;
+  // Only present on GET /v1/news/my-stocks' articles -- which tracked
+  // ticker this headline came from, so the "On My Stocks" tab can show it.
+  ticker?: string;
 }
 
 // GET /v1/market/movers' item shape -- a row in the Top Movers

@@ -317,6 +317,125 @@ def test_market_news_caps_the_limit_at_30(client, auth_headers):
     assert resp.status_code == 422
 
 
+# ---------------------------------------------------------------- on my stocks news
+
+def _article(url, date_str, headline="Headline", ticker=None):
+    a = {"headline": headline, "source": "Test Wire", "date": date_str, "url": url, "summary": ""}
+    return a
+
+
+def test_my_stocks_news_aggregates_watchlist_and_portfolio_tickers(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
+    client.post("/v1/watchlist", json={"ticker": "AAPL"}, headers=auth_headers)
+    client.post("/v1/portfolio", json={"ticker": "MSFT", "quantity": 1, "avg_cost": 100}, headers=auth_headers)
+
+    import datetime
+    today = datetime.date.today().isoformat()
+
+    def fake_company_news(ticker, days=60):
+        if ticker == "AAPL":
+            return [_article("https://x.com/aapl1", today, "Apple headline")]
+        if ticker == "MSFT":
+            return [_article("https://x.com/msft1", today, "Microsoft headline")]
+        return []
+
+    monkeypatch.setattr(main, "fetch_company_news", fake_company_news)
+
+    resp = client.get("/v1/news/my-stocks", headers=auth_headers)
+    assert resp.status_code == 200
+    tickers = {a["ticker"] for a in resp.json()["articles"]}
+    assert tickers == {"AAPL", "MSFT"}
+
+
+def test_my_stocks_news_dedupes_a_ticker_on_both_lists(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
+    client.post("/v1/watchlist", json={"ticker": "AAPL"}, headers=auth_headers)
+    client.post("/v1/portfolio", json={"ticker": "AAPL", "quantity": 1, "avg_cost": 100}, headers=auth_headers)
+
+    import datetime
+    today = datetime.date.today().isoformat()
+    call_count = {"n": 0}
+
+    def fake_company_news(ticker, days=60):
+        call_count["n"] += 1
+        return [_article("https://x.com/aapl1", today)]
+
+    monkeypatch.setattr(main, "fetch_company_news", fake_company_news)
+
+    resp = client.get("/v1/news/my-stocks", headers=auth_headers)
+    assert call_count["n"] == 1  # AAPL only fetched once despite being on both lists
+    assert len(resp.json()["articles"]) == 1
+
+
+def test_my_stocks_news_dedupes_the_same_url_across_tickers(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
+    client.post("/v1/watchlist", json={"ticker": "AAPL"}, headers=auth_headers)
+    client.post("/v1/watchlist", json={"ticker": "MSFT"}, headers=auth_headers)
+
+    import datetime
+    today = datetime.date.today().isoformat()
+    # Same URL shows up under both tickers' company-news results (a
+    # real Finnhub possibility for an article mentioning both).
+    monkeypatch.setattr(main, "fetch_company_news", lambda ticker, days=60: [_article("https://x.com/shared", today)])
+
+    resp = client.get("/v1/news/my-stocks", headers=auth_headers)
+    assert len(resp.json()["articles"]) == 1
+
+
+def test_my_stocks_news_filters_out_articles_older_than_a_week(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
+    client.post("/v1/watchlist", json={"ticker": "AAPL"}, headers=auth_headers)
+
+    import datetime
+    today = datetime.date.today()
+    recent = today.isoformat()
+    stale = (today - datetime.timedelta(days=30)).isoformat()
+
+    monkeypatch.setattr(
+        main, "fetch_company_news",
+        lambda ticker, days=60: [_article("https://x.com/recent", recent), _article("https://x.com/stale", stale)],
+    )
+
+    resp = client.get("/v1/news/my-stocks", headers=auth_headers)
+    urls = {a["url"] for a in resp.json()["articles"]}
+    assert urls == {"https://x.com/recent"}
+
+
+def test_my_stocks_news_sorts_most_recent_first(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
+    client.post("/v1/watchlist", json={"ticker": "AAPL"}, headers=auth_headers)
+
+    import datetime
+    today = datetime.date.today()
+    d1 = today.isoformat()
+    d2 = (today - datetime.timedelta(days=1)).isoformat()
+
+    monkeypatch.setattr(
+        main, "fetch_company_news",
+        lambda ticker, days=60: [_article("https://x.com/older", d2), _article("https://x.com/newer", d1)],
+    )
+
+    resp = client.get("/v1/news/my-stocks", headers=auth_headers)
+    urls = [a["url"] for a in resp.json()["articles"]]
+    assert urls == ["https://x.com/newer", "https://x.com/older"]
+
+
+def test_my_stocks_news_empty_when_no_tracked_tickers(client, auth_headers):
+    resp = client.get("/v1/news/my-stocks", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["articles"] == []
+
+
+def test_my_stocks_news_requires_a_session(client):
+    resp = client.get("/v1/news/my-stocks")
+    assert resp.status_code == 401
+
+
+def test_my_stocks_news_caps_the_limit_at_30(client, auth_headers):
+    resp = client.get("/v1/news/my-stocks?limit=100", headers=auth_headers)
+    assert resp.status_code == 422
+
+
 # ---------------------------------------------------------------- market indices
 
 def test_market_indices_returns_the_curated_list(client, monkeypatch, auth_headers):

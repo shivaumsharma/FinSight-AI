@@ -304,6 +304,38 @@ def test_recent_reports_is_registered_before_the_job_id_route(client, auth_heade
     assert "reports" in resp.json()
 
 
+# ---------------------------------------------------------------- backtest accuracy badge
+
+def test_backtest_accuracy_returns_the_real_computed_summary(client, monkeypatch, auth_headers):
+    fake_summary = {"accuracy_pct": 52.6, "correct": 41, "scored": 78, "window_label": "x", "secondary": None}
+    monkeypatch.setattr(main, "get_backtest_accuracy_summary", lambda: fake_summary)
+
+    resp = client.get("/v1/research/backtest-accuracy", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json() == fake_summary
+
+
+def test_backtest_accuracy_404s_when_unavailable(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_backtest_accuracy_summary", lambda: None)
+
+    resp = client.get("/v1/research/backtest-accuracy", headers=auth_headers)
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "BACKTEST_ACCURACY_UNAVAILABLE"
+
+
+def test_backtest_accuracy_requires_a_session(client):
+    resp = client.get("/v1/research/backtest-accuracy")
+    assert resp.status_code == 401
+
+
+def test_backtest_accuracy_is_registered_before_the_job_id_route(client, auth_headers):
+    # Same Starlette route-ordering hazard as /v1/research/recent above
+    # -- "backtest-accuracy" must not get matched as a literal job_id.
+    resp = client.get("/v1/research/backtest-accuracy", headers=auth_headers)
+    assert resp.status_code in (200, 404)
+    assert resp.json().get("code") != "JOB_NOT_FOUND"
+
+
 # ---------------------------------------------------------------- per-user auth
 
 def test_signup_then_login_both_work(client):
