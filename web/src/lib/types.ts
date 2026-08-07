@@ -198,8 +198,25 @@ export interface CompanySuggestion {
 export interface IndexQuote {
   name: string;
   ticker: string;
+  region: "india" | "global";
   price: number | null;
   change_pct: number | null;
+}
+
+// GET /v1/corporate-actions/feed's item shape -- one upcoming event
+// (earnings or ex-dividend) for a ticker on the watchlist and/or
+// portfolio. See app/api/main.py's get_corporate_actions_feed: "all"
+// scope unions both ticker sources, "portfolio" is holdings only.
+export interface CorporateActionEvent {
+  ticker: string;
+  name: string;
+  type: "earnings" | "ex_dividend";
+  date: string;
+}
+
+export interface CorporateActionsFeedData {
+  events: CorporateActionEvent[];
+  scope: "all" | "portfolio";
 }
 
 // GET /v1/portfolio's item shape. Self-reported quantity/avg_cost --
