@@ -102,6 +102,17 @@ _GENERIC_TOPIC_DENYLIST = {
 }
 
 _TICKER_TOKEN = re.compile(r"\b[A-Z]{2,5}\b")
+# Explicit NSE-suffixed ticker written straight into free text (e.g.
+# "Should I invest in BAJFINANCE.NS?") -- NOT covered by _TICKER_TOKEN
+# above (that pattern caps at 5 letters and real NSE symbols routinely
+# run longer, e.g. "BAJFINANCE", "HDFCBANK") or by the fuzzy company-
+# name path below (a bare ticker isn't a "candidate phrase" the way a
+# capitalized company name is). Case-insensitive since a user typing a
+# ticker directly doesn't reliably match yfinance's own all-caps
+# convention; matched tokens are upper()'d before the exact-set lookup
+# in resolve_companies() below, which IS uppercase (see
+# _fetch_nse_index's `f"{symbol}.NS"`).
+_NSE_TICKER_TOKEN = re.compile(r"\b[A-Za-z][A-Za-z0-9&-]{0,19}\.NS\b", re.IGNORECASE)
 _WORD_TOKEN = re.compile(r"[A-Za-z][A-Za-z&'’]*")
 
 _index = None
@@ -436,6 +447,11 @@ def resolve_companies(question: str) -> List[str]:
     for token in _TICKER_TOKEN.findall(question):
         if token in index["tickers"] and token not in found:
             found.append(token)
+
+    for token in _NSE_TICKER_TOKEN.findall(question):
+        upper_token = token.upper()
+        if upper_token in nse_index["tickers"] and upper_token not in found:
+            found.append(upper_token)
 
     lowered = question.lower()
     for alias, ticker in ALIASES.items():

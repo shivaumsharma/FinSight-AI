@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import RatingBadge from "./RatingBadge";
 import { currencySymbol } from "@/lib/currency";
-import type { CompanySuggestion, PortfolioHolding, PortfolioSummary } from "@/lib/types";
+import type { CompanySuggestion, PortfolioAnalysis, PortfolioHolding, PortfolioSummary } from "@/lib/types";
 
 function fmt(n: number): string {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -22,6 +23,7 @@ function todayIso(): string {
 export default function Portfolio() {
   const [holdings, setHoldings] = useState<PortfolioHolding[] | null>(null);
   const [summary, setSummary] = useState<PortfolioSummary | null>(null);
+  const [analysis, setAnalysis] = useState<PortfolioAnalysis | null>(null);
   const [ticker, setTicker] = useState("");
   const [quantity, setQuantity] = useState("");
   const [avgCost, setAvgCost] = useState("");
@@ -43,6 +45,13 @@ export default function Portfolio() {
         setHoldings([]);
         setSummary(null);
       });
+    // Combined portfolio analysis (rating rollup across already-
+    // researched holdings) -- a separate, independent fetch from the
+    // holdings list above, never blocking it if this one fails.
+    fetch("/api/portfolio/analysis")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setAnalysis)
+      .catch(() => setAnalysis(null));
   }
 
   useEffect(refresh, []);
@@ -179,6 +188,24 @@ export default function Portfolio() {
         </div>
       )}
 
+      {holdings.length > 0 && analysis && analysis.holdings_researched > 0 && (
+        <div className="mt-2 rounded-lg border border-border-subtle bg-card/60 px-3.5 py-2">
+          <div className="flex items-center justify-between font-mono text-[10px]">
+            <span className="text-dim">
+              {analysis.holdings_researched}/{analysis.holdings_total} HOLDINGS RESEARCHED
+            </span>
+            {analysis.value_weighted_pct && (
+              <span className="font-bold">
+                <span className="text-accent">{analysis.value_weighted_pct.Buy.toFixed(0)}% Buy</span>
+                {" · "}
+                <span className="text-danger">{analysis.value_weighted_pct.Sell.toFixed(0)}% Sell</span>
+                <span className="text-dim"> (by value)</span>
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {holdings.length > 0 && (
         <div className="mt-2 flex flex-col gap-2">
           {holdings.map((h) => (
@@ -194,7 +221,12 @@ export default function Portfolio() {
                   {h.rating ? (
                     <RatingBadge rating={h.rating} size="sm" />
                   ) : (
-                    <span className="font-mono text-[10px] text-dim">not yet researched</span>
+                    <Link
+                      href={`/?q=${encodeURIComponent(`Should I invest in ${h.ticker}?`)}`}
+                      className="font-mono text-[10px] font-bold text-muted hover:text-accent"
+                    >
+                      RESEARCH &rarr;
+                    </Link>
                   )}
                 </div>
                 <div className="font-mono text-[10px] text-dim">

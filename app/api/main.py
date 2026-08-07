@@ -966,3 +966,53 @@ def add_or_update_portfolio_holding(body: PortfolioRequest, current_user: str = 
 def remove_portfolio_holding(ticker: str, current_user: str = Depends(auth.get_current_user)):
     db.remove_portfolio_holding(current_user, ticker.upper())
     return {"status": "ok"}
+
+
+@app.get("/v1/portfolio/analysis")
+def get_portfolio_analysis(current_user: str = Depends(auth.get_current_user)):
+    # Combined portfolio analysis -- aggregates each holding's already-
+    # researched rating (the SAME get_latest_rating_for_ticker lookup
+    # GET /v1/portfolio's own per-row rating already uses -- this is
+    # NOT a new research run, just a rollup of existing reports) into
+    # one portfolio-level Buy/Hold/Sell breakdown, both by simple count
+    # and by USD-equivalent market-value weight (a $10k Buy-rated
+    # holding should count more than a $50 one). Holdings with no
+    # completed report yet are tracked separately as "unresearched",
+    # never silently dropped or defaulted to a rating.
+    holdings = db.get_portfolio_holdings(current_user)
+    rating_counts = {"Buy": 0, "Hold": 0, "Sell": 0}
+    value_by_rating = {"Buy": 0.0, "Hold": 0.0, "Sell": 0.0}
+    total_value_usd = 0.0
+    unresearched_tickers = []
+
+    for row in holdings:
+        ticker = row["ticker"]
+        rating = db.get_latest_rating_for_ticker(current_user, ticker)
+        if rating is None or rating not in rating_counts:
+            unresearched_tickers.append(ticker)
+            continue
+
+        rating_counts[rating] += 1
+        try:
+            quote = get_quote(ticker)
+        except Exception:
+            continue
+        usd_rate = get_usd_conversion_rate(quote.get("currency", "USD"))
+        if usd_rate is None:
+            continue
+        market_value_usd = quote["price"] * row["quantity"] * usd_rate
+        value_by_rating[rating] += market_value_usd
+        total_value_usd += market_value_usd
+
+    value_weighted_pct = (
+        {r: round(v / total_value_usd * 100, 1) for r, v in value_by_rating.items()}
+        if total_value_usd else None
+    )
+
+    return {
+        "holdings_total": len(holdings),
+        "holdings_researched": sum(rating_counts.values()),
+        "rating_counts": rating_counts,
+        "value_weighted_pct": value_weighted_pct,
+        "unresearched_tickers": unresearched_tickers,
+    }

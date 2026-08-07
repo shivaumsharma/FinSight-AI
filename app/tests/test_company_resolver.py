@@ -60,6 +60,24 @@ def test_generic_finance_question_resolves_to_nothing():
     assert _resolve("what is the best way to start investing") == []
 
 
+def test_explicit_nse_suffixed_ticker_resolves_directly():
+    # A bare "SYMBOL.NS" written straight into free text (e.g. a
+    # research-trigger link built from a Portfolio holding's own
+    # ticker) used to resolve to nothing: _TICKER_TOKEN caps at 5
+    # letters (many real NSE symbols run longer) and even a match would
+    # only have been checked against the US ticker set, never NSE's.
+    assert _resolve("Should I invest in BAJFINANCE.NS?") == ["BAJFINANCE.NS"]
+
+
+def test_explicit_nse_suffixed_ticker_is_case_insensitive():
+    assert _resolve("what about bajfinance.ns") == ["BAJFINANCE.NS"]
+
+
+def test_explicit_nse_suffixed_ticker_combines_with_a_us_ticker():
+    result = _resolve("Compare AAPL and BAJFINANCE.NS")
+    assert set(result) == {"AAPL", "BAJFINANCE.NS"}
+
+
 def test_similar_nse_company_names_disambiguate_correctly():
     # Multiple real "Bajaj ..." companies exist on NSE -- exercises
     # that the fuzzy matcher (and its start-with-phrase/shortest-title
