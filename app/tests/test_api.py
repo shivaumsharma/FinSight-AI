@@ -593,6 +593,65 @@ def test_share_link_expired_is_rejected(client, monkeypatch, auth_headers):
     assert resp.status_code == 401
 
 
+# ---------------------------------------------------------------- model compare
+
+def _fake_opinions(*_a, **_k):
+    return [
+        {"label": "Llama 3.3 70B", "model": "llama-3.3-70b-versatile", "rating": "Buy", "confidence": 78, "reasoning": "Upside supports it."},
+        {"label": "GPT-OSS 120B", "model": "openai/gpt-oss-120b", "rating": "Buy", "confidence": 82, "reasoning": "Sentiment agrees."},
+        {"label": "Qwen3.6 27B", "model": "qwen/qwen3.6-27b", "rating": "Hold", "confidence": 55, "reasoning": "Wants more data."},
+    ]
+
+
+def test_model_compare_returns_models_and_consensus(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_model_opinions", _fake_opinions)
+    job_id = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers
+    ).json()["job_id"]
+    _poll_until_terminal(client, job_id, auth_headers)
+
+    resp = client.post(f"/v1/research/{job_id}/model-compare", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["models"]) == 3
+    assert body["consensus"] == {"rating": "Buy", "agree_count": 2, "total": 3}
+
+
+def test_model_compare_requires_a_session(client):
+    resp = client.post("/v1/research/some-job-id/model-compare")
+    assert resp.status_code == 401
+
+
+def test_model_compare_404s_for_an_unknown_job(client, auth_headers):
+    resp = client.post("/v1/research/does-not-exist/model-compare", headers=auth_headers)
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "JOB_NOT_FOUND"
+
+
+def test_model_compare_only_the_owner_can_run_it(client, auth_headers):
+    job_id = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers
+    ).json()["job_id"]
+
+    other_user_headers = _signup(client, email="mallory-compare@example.com", password="malloryspassword")
+    resp = client.post(f"/v1/research/{job_id}/model-compare", headers=other_user_headers)
+    assert resp.status_code == 403
+    assert resp.json()["code"] == "FORBIDDEN"
+
+
+def test_model_compare_409s_while_job_is_not_done(client, auth_headers):
+    job_id = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers
+    ).json()["job_id"]
+    resp = client.post(f"/v1/research/{job_id}/model-compare", headers=auth_headers)
+    # Could race with the (fast) stub finishing first -- only assert the
+    # 409 case when it's actually still pending/running.
+    status = client.get(f"/v1/research/{job_id}", headers=auth_headers).json()["status"]
+    if status in (db.STATUS_PENDING, db.STATUS_RUNNING):
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "JOB_NOT_DONE"
+
+
 def test_exceeding_the_daily_job_limit_is_rejected(client, monkeypatch, auth_headers):
     monkeypatch.setattr(main, "DAILY_JOB_LIMIT", 2)
 
