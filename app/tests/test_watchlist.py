@@ -342,6 +342,69 @@ def test_one_bad_index_does_not_500_the_whole_carousel(client, monkeypatch, auth
     assert indices["^GSPC"]["price"] == 200.0
 
 
+# ---------------------------------------------------------------- market movers / sentiment
+
+def test_market_movers_returns_gainers_and_losers(client, monkeypatch, auth_headers):
+    fake_result = {"gainers": [{"ticker": "AAA", "name": "AAA Inc", "price": 105.0, "change_pct": 5.0}], "losers": []}
+    monkeypatch.setattr(main, "get_top_movers", lambda limit=5: fake_result)
+
+    resp = client.get("/v1/market/movers", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json() == fake_result
+
+
+def test_market_movers_requires_a_session(client):
+    resp = client.get("/v1/market/movers")
+    assert resp.status_code == 401
+
+
+def test_market_movers_passes_through_the_limit(client, monkeypatch, auth_headers):
+    captured = {}
+
+    def fake_movers(limit=5):
+        captured["limit"] = limit
+        return {"gainers": [], "losers": []}
+
+    monkeypatch.setattr(main, "get_top_movers", fake_movers)
+    client.get("/v1/market/movers?limit=3", headers=auth_headers)
+    assert captured["limit"] == 3
+
+
+def test_market_movers_caps_the_limit_at_10(client, auth_headers):
+    resp = client.get("/v1/market/movers?limit=50", headers=auth_headers)
+    assert resp.status_code == 422
+
+
+def test_market_sentiment_computes_buy_sell_percentages_excluding_hold(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(db, "get_global_rating_distribution", lambda: {"Buy": 3, "Hold": 2, "Sell": 1, "Insufficient Data": 0})
+
+    resp = client.get("/v1/market/sentiment", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["buy_pct"] == 75.0
+    assert body["sell_pct"] == 25.0
+    assert body["buy_count"] == 3
+    assert body["hold_count"] == 2
+    assert body["sell_count"] == 1
+    assert body["total_rated"] == 6
+
+
+def test_market_sentiment_null_percentages_when_nothing_rated(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(db, "get_global_rating_distribution", lambda: {"Buy": 0, "Hold": 0, "Sell": 0, "Insufficient Data": 0})
+
+    resp = client.get("/v1/market/sentiment", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["buy_pct"] is None
+    assert body["sell_pct"] is None
+    assert body["total_rated"] == 0
+
+
+def test_market_sentiment_requires_a_session(client):
+    resp = client.get("/v1/market/sentiment")
+    assert resp.status_code == 401
+
+
 # ---------------------------------------------------------------- migration idempotency
 
 def test_init_db_migration_is_idempotent_against_a_pre_migration_schema(tmp_path, monkeypatch):
