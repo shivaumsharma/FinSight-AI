@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
   const resp = await fetch(`${FINSIGHT_API_URL}/v1/portfolio`, {
     method: "POST",
     headers: backendHeaders(sessionToken),
-    body: JSON.stringify({ ticker: body.ticker, quantity: body.quantity, avg_cost: body.avg_cost }),
+    body: JSON.stringify({ ticker: body.ticker, quantity: body.quantity, avg_cost: body.avg_cost, buy_date: body.buy_date }),
   });
 
   const data = await resp.json();
