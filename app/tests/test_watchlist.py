@@ -319,6 +319,11 @@ def test_market_indices_returns_the_curated_list(client, monkeypatch, auth_heade
     indices = resp.json()["indices"]
     assert [i["ticker"] for i in indices] == [e["ticker"] for e in main.INDEX_LIST]
     assert all(i["price"] == 200.0 and i["change_pct"] == 1.5 for i in indices)
+    # region powers the /indices page's Indian/Global tab split.
+    assert all(i["region"] in ("india", "global") for i in indices)
+    by_ticker = {i["ticker"]: i for i in indices}
+    assert by_ticker["^NSEI"]["region"] == "india"
+    assert by_ticker["^GSPC"]["region"] == "global"
 
 
 def test_market_indices_requires_a_session(client):
@@ -402,6 +407,112 @@ def test_market_sentiment_null_percentages_when_nothing_rated(client, monkeypatc
 
 def test_market_sentiment_requires_a_session(client):
     resp = client.get("/v1/market/sentiment")
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------- corporate actions feed
+
+def test_corporate_actions_feed_all_scope_unions_watchlist_and_portfolio(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
+    monkeypatch.setattr(main, "get_company_name", lambda ticker: f"{ticker} Inc")
+    client.post("/v1/watchlist", json={"ticker": "AAPL"}, headers=auth_headers)
+    client.post("/v1/portfolio", json={"ticker": "MSFT", "quantity": 1, "avg_cost": 100}, headers=auth_headers)
+
+    def fake_actions(ticker):
+        dates = {
+            "AAPL": {"next_earnings_date": "2026-09-15", "next_ex_dividend_date": None, "last_dividend_amount": None, "last_split": None},
+            "MSFT": {"next_earnings_date": "2026-08-20", "next_ex_dividend_date": "2026-08-25", "last_dividend_amount": None, "last_split": None},
+        }
+        return dates[ticker]
+
+    monkeypatch.setattr(main, "get_corporate_actions", fake_actions)
+
+    resp = client.get("/v1/corporate-actions/feed", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["scope"] == "all"
+    # Sorted chronologically -- MSFT earnings (08-20) before its own
+    # ex-div (08-25) before AAPL earnings (09-15).
+    assert [(e["ticker"], e["type"], e["date"]) for e in body["events"]] == [
+        ("MSFT", "earnings", "2026-08-20"),
+        ("MSFT", "ex_dividend", "2026-08-25"),
+        ("AAPL", "earnings", "2026-09-15"),
+    ]
+    assert body["events"][0]["name"] == "MSFT Inc"
+
+
+def test_corporate_actions_feed_portfolio_scope_excludes_watchlist_only_tickers(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
+    monkeypatch.setattr(main, "get_company_name", lambda ticker: None)
+    client.post("/v1/watchlist", json={"ticker": "AAPL"}, headers=auth_headers)
+    client.post("/v1/portfolio", json={"ticker": "MSFT", "quantity": 1, "avg_cost": 100}, headers=auth_headers)
+    monkeypatch.setattr(
+        main, "get_corporate_actions",
+        lambda ticker: {"next_earnings_date": "2026-09-15", "next_ex_dividend_date": None, "last_dividend_amount": None, "last_split": None},
+    )
+
+    resp = client.get("/v1/corporate-actions/feed?scope=portfolio", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["scope"] == "portfolio"
+    assert [e["ticker"] for e in body["events"]] == ["MSFT"]
+    # No company name known -- falls back to the bare ticker.
+    assert body["events"][0]["name"] == "MSFT"
+
+
+def test_corporate_actions_feed_dedupes_a_ticker_on_both_lists(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
+    monkeypatch.setattr(main, "get_company_name", lambda ticker: None)
+    client.post("/v1/watchlist", json={"ticker": "AAPL"}, headers=auth_headers)
+    client.post("/v1/portfolio", json={"ticker": "AAPL", "quantity": 1, "avg_cost": 100}, headers=auth_headers)
+    monkeypatch.setattr(
+        main, "get_corporate_actions",
+        lambda ticker: {"next_earnings_date": "2026-09-15", "next_ex_dividend_date": None, "last_dividend_amount": None, "last_split": None},
+    )
+
+    resp = client.get("/v1/corporate-actions/feed", headers=auth_headers)
+    events = resp.json()["events"]
+    assert len(events) == 1
+
+
+def test_corporate_actions_feed_skips_tickers_with_no_upcoming_events(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
+    monkeypatch.setattr(main, "get_company_name", lambda ticker: None)
+    client.post("/v1/watchlist", json={"ticker": "AAPL"}, headers=auth_headers)
+    monkeypatch.setattr(
+        main, "get_corporate_actions",
+        lambda ticker: {"next_earnings_date": None, "next_ex_dividend_date": None, "last_dividend_amount": None, "last_split": None},
+    )
+
+    resp = client.get("/v1/corporate-actions/feed", headers=auth_headers)
+    assert resp.json()["events"] == []
+
+
+def test_corporate_actions_feed_isolates_one_bad_ticker(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
+    monkeypatch.setattr(main, "get_company_name", lambda ticker: None)
+    client.post("/v1/watchlist", json={"ticker": "AAPL"}, headers=auth_headers)
+    client.post("/v1/watchlist", json={"ticker": "BAD"}, headers=auth_headers)
+
+    def flaky_actions(ticker):
+        if ticker == "BAD":
+            raise Exception("yfinance hiccup")
+        return {"next_earnings_date": "2026-09-15", "next_ex_dividend_date": None, "last_dividend_amount": None, "last_split": None}
+
+    monkeypatch.setattr(main, "get_corporate_actions", flaky_actions)
+
+    resp = client.get("/v1/corporate-actions/feed", headers=auth_headers)
+    assert resp.status_code == 200
+    assert [e["ticker"] for e in resp.json()["events"]] == ["AAPL"]
+
+
+def test_corporate_actions_feed_rejects_an_invalid_scope(client, auth_headers):
+    resp = client.get("/v1/corporate-actions/feed?scope=bogus", headers=auth_headers)
+    assert resp.status_code == 422
+
+
+def test_corporate_actions_feed_requires_a_session(client):
+    resp = client.get("/v1/corporate-actions/feed")
     assert resp.status_code == 401
 
 
