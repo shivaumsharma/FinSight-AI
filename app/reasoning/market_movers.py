@@ -8,9 +8,13 @@ honestly-scoped pool: every ticker from the curated backtest universe
 tickers app/reporting/report_data_builder.py's own comments reference)
 unioned with every ticker currently on ANY user's watchlist (a global,
 not per-user, union -- see db.get_all_distinct_watchlist_tickers()'s
-docstring for why). Confirmed via .dockerignore/Dockerfile inspection
-that scripts/ (including this json file) ships inside the deployed
-Cloud Run container.
+docstring for why). This json file is committed despite the broader
+`scripts/backtest_results_*.json` gitignore rule (see .gitignore's own
+comment) -- it was excluded for a while without anyone noticing
+because the watchlist-union half of the pool kept this endpoint
+working anyway, just silently short of its documented curated-universe
+half; caught via a live 404 on backtest_stats.py's own file read,
+which has no such fallback to mask the same gap.
 
 Deliberately labeled "Tracked Universe" everywhere this is surfaced
 (API response + frontend copy) so it's never mistaken for full-market
