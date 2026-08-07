@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import SectionSkeleton from "./SectionSkeleton";
 import { formatShortDate } from "@/lib/format";
 import type { NewsArticle } from "@/lib/types";
 
@@ -30,7 +31,7 @@ export default function MarketNews() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  if (trending === null) return null;
+  if (trending === null) return <SectionSkeleton label="MARKET NEWS" rows={3} />;
   // Nothing to show at all -- no trending feed configured and the
   // user hasn't opened "On My Stocks" yet (or it's also empty).
   if (trending.length === 0 && tab === "trending") return null;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import SectionSkeleton from "./SectionSkeleton";
 import { currencySymbol } from "@/lib/currency";
 import type { MarketMoversData, MoverItem } from "@/lib/types";
 
@@ -83,7 +84,7 @@ export default function MarketMovers() {
       .catch(() => setData({ gainers: [], losers: [] }));
   }, []);
 
-  if (data === null) return null;
+  if (data === null) return <SectionSkeleton label="TOP MOVERS (TRACKED UNIVERSE)" rows={3} />;
 
   const rows = tab === "gainers" ? data.gainers : data.losers;
 

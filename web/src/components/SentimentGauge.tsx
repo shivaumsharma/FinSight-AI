@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import SectionSkeleton from "./SectionSkeleton";
 import type { MarketSentiment } from "@/lib/types";
 
 // "FinSight Research Sentiment" -- the Buy/Sell share of every
@@ -19,7 +20,7 @@ export default function SentimentGauge() {
       .catch(() => setData(null));
   }, []);
 
-  if (data === null) return null;
+  if (data === null) return <SectionSkeleton label="FINSIGHT RESEARCH SENTIMENT" rows={1} />;
 
   const hasVotes = data.buy_pct !== null && data.sell_pct !== null;
 
