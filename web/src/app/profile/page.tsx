@@ -5,6 +5,7 @@ import Link from "next/link";
 import AuthGate from "@/components/AuthGate";
 import BottomNav from "@/components/BottomNav";
 import { usePushNotifications } from "@/lib/usePushNotifications";
+import { useTheme } from "@/lib/useTheme";
 import type { WatchlistItem } from "@/lib/types";
 
 export default function Profile() {
@@ -147,6 +148,37 @@ function SectionHeader({ icon, label }: { icon: React.ReactNode; label: string }
 // than implying categories (earnings alerts, price alerts) that don't
 // exist as backend event types yet -- a toggle that claims to control
 // more than it does is worse than one that's honest about doing less.
+// Client-local only (localStorage, see useTheme.ts) -- not a server-
+// persisted account preference like risk tolerance/display name below,
+// since which colors render is a per-device display setting, not
+// account data, and doesn't need a network round-trip to know on load.
+function ThemeRow() {
+  const { theme, setTheme } = useTheme();
+  const isLight = theme === "light";
+
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3.5 py-3">
+      <div>
+        <div className="font-mono text-xs text-text">Appearance</div>
+        <div className="mt-0.5 font-mono text-[10px] text-dim">
+          {isLight ? "Light -- serif, cream & gold" : "Dark -- monospace terminal"}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => setTheme(isLight ? "dark" : "light")}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${isLight ? "bg-accent" : "bg-border"}`}
+      >
+        <span
+          className={`absolute top-0.5 h-5 w-5 rounded-full bg-bg transition-transform ${
+            isLight ? "translate-x-5" : "translate-x-0.5"
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
 function NotificationRow() {
   const { status, subscribe, unsubscribe } = usePushNotifications();
 
@@ -551,6 +583,7 @@ function ProfilePage({
 
         <SectionHeader icon={<PreferencesIcon />} label="PREFERENCES" />
         <div className="mt-2 space-y-2">
+          <ThemeRow />
           <DisplayNameRow displayName={displayName} emailFallback={fallbackNameFromEmail(email)} onChange={onSetDisplayName} />
           <RiskToleranceRow riskTolerance={riskTolerance} onChange={onSetRiskTolerance} />
           <NotificationRow />

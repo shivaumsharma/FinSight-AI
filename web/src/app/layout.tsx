@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
-import { JetBrains_Mono } from "next/font/google";
+import { JetBrains_Mono, Source_Serif_4 } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 
 // The whole UI is built on a monospace terminal aesthetic (see
@@ -13,6 +14,25 @@ const jetbrainsMono = JetBrains_Mono({
   variable: "--font-mono-loaded",
   display: "swap",
 });
+
+// Light mode's "Classical" look (see globals.css's [data-theme="light"]
+// block) swaps --font-mono-loaded to this serif at the CSS-variable
+// level instead of touching every component's `font-mono` className --
+// every element that already renders in the dark theme's monospace
+// automatically renders in this serif under light mode, no per-
+// component changes needed.
+const sourceSerif = Source_Serif_4({
+  subsets: ["latin"],
+  variable: "--font-serif-loaded",
+  display: "swap",
+});
+
+// Runs before hydration (see the inline <script> in <head> below) --
+// reads the persisted theme choice and stamps it onto <html> before
+// first paint, so a light-mode user never sees a flash of the dark
+// theme on load. Kept as a plain string, not an imported module: it
+// has to execute synchronously and inline, before any bundled JS runs.
+const THEME_INIT_SCRIPT = `(function(){try{if(localStorage.getItem('finsight:theme')==='light'){document.documentElement.setAttribute('data-theme','light');}}catch(e){}})();`;
 
 export const metadata: Metadata = {
   title: "Finsight AI",
@@ -41,8 +61,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`h-full antialiased ${jetbrainsMono.variable}`}>
+    <html lang="en" className={`h-full antialiased ${jetbrainsMono.variable} ${sourceSerif.variable}`}>
       <body className="min-h-full flex flex-col">{children}</body>
+      <Script id="theme-init" strategy="beforeInteractive">
+        {THEME_INIT_SCRIPT}
+      </Script>
     </html>
   );
 }
