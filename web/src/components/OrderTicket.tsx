@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import SectionSkeleton from "./SectionSkeleton";
 import { currencySymbol } from "@/lib/currency";
-import { notifyPortfolioUpdated } from "@/lib/portfolioEvents";
+import { PORTFOLIO_UPDATED_EVENT, notifyPortfolioUpdated } from "@/lib/portfolioEvents";
 import type { CompanySuggestion, Order } from "@/lib/types";
 
 type Side = "BUY" | "SELL";
@@ -32,6 +33,16 @@ export default function OrderTicket() {
   }
 
   useEffect(refresh, []);
+
+  // A holding can also change via a path that never goes through this
+  // component's own submitOrder (e.g. Portfolio's "try sample data"
+  // seeding) -- listen for the same cross-component event Portfolio.tsx
+  // already relies on so this order history never goes stale either.
+  useEffect(() => {
+    window.addEventListener(PORTFOLIO_UPDATED_EVENT, refresh);
+    return () => window.removeEventListener(PORTFOLIO_UPDATED_EVENT, refresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Same debounced autocomplete as Portfolio/Watchlist's own ticker
   // inputs -- reuses the same /api/companies/suggest endpoint.
@@ -87,7 +98,7 @@ export default function OrderTicket() {
     setTicker(s.ticker);
   }
 
-  if (orders === null) return null;
+  if (orders === null) return <SectionSkeleton label="TRADE (SIMULATED)" rows={1} />;
 
   return (
     <div className="mt-6">

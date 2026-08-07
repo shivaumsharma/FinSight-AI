@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import SectionSkeleton from "./SectionSkeleton";
 import type { IndexQuote } from "@/lib/types";
 
 // Horizontally scrolling strip of a fixed, curated index list (see
@@ -22,7 +23,8 @@ export default function IndicesCarousel() {
       .catch(() => setIndices([]));
   }, []);
 
-  if (indices === null || indices.length === 0) return null;
+  if (indices === null) return <SectionSkeleton label="INDICES" rows={4} variant="row" />;
+  if (indices.length === 0) return null;
 
   return (
     <div className="mt-6">

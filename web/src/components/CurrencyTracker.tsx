@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import SectionSkeleton from "./SectionSkeleton";
 import type { FxRate } from "@/lib/types";
 
 // Live USD/INR exchange rate -- the one FX pair this app actually
@@ -18,7 +19,8 @@ export default function CurrencyTracker() {
       .catch(() => setFx(null));
   }, []);
 
-  if (fx === null || fx.rate === null) return null;
+  if (fx === null) return <SectionSkeleton label="CURRENCY" rows={1} />;
+  if (fx.rate === null) return null;
 
   return (
     <div className="mt-6">

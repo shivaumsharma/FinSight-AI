@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import RatingBadge from "./RatingBadge";
+import SectionSkeleton from "./SectionSkeleton";
 import { currencySymbol } from "@/lib/currency";
-import { PORTFOLIO_UPDATED_EVENT } from "@/lib/portfolioEvents";
+import { PORTFOLIO_UPDATED_EVENT, notifyPortfolioUpdated } from "@/lib/portfolioEvents";
 import type { CompanySuggestion, PortfolioAnalysis, PortfolioHolding, PortfolioSummary } from "@/lib/types";
 
 function fmt(n: number): string {
@@ -34,6 +35,7 @@ export default function Portfolio() {
   const [showForm, setShowForm] = useState(false);
   const [suggestions, setSuggestions] = useState<CompanySuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [seeding, setSeeding] = useState(false);
 
   function refresh() {
     fetch("/api/portfolio")
@@ -130,7 +132,52 @@ export default function Portfolio() {
     refresh();
   }
 
-  if (holdings === null) return null;
+  // Empty-state helper for a brand new account -- seeds a few
+  // realistic watchlist tickers and simulated BUY orders using the
+  // exact same endpoints the manual add-ticker/OrderTicket forms call,
+  // so a first-time user immediately sees a populated dashboard rather
+  // than a wall of "no holdings yet" placeholders. Reversible: every
+  // seeded row uses the same remove/× controls as anything added by
+  // hand.
+  async function seedSampleData() {
+    if (seeding) return;
+    setSeeding(true);
+    try {
+      await Promise.allSettled([
+        fetch("/api/watchlist", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticker: "TSLA" }),
+        }),
+        fetch("/api/watchlist", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticker: "RELIANCE.NS" }),
+        }),
+        fetch("/api/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticker: "AAPL", side: "BUY", quantity: 5 }),
+        }),
+        fetch("/api/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticker: "MSFT", side: "BUY", quantity: 3 }),
+        }),
+        fetch("/api/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticker: "NVDA", side: "BUY", quantity: 2 }),
+        }),
+      ]);
+      refresh();
+      notifyPortfolioUpdated();
+    } finally {
+      setSeeding(false);
+    }
+  }
+
+  if (holdings === null) return <SectionSkeleton label="PORTFOLIO" rows={2} />;
 
   return (
     <div className="mt-6">
@@ -278,9 +325,19 @@ export default function Portfolio() {
       )}
 
       {holdings.length === 0 && !showForm && (
-        <p className="mt-2 font-mono text-[11px] text-dim">
-          No holdings yet -- add one to track its live value against what you paid.
-        </p>
+        <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-border-subtle bg-card/60 px-3.5 py-2.5">
+          <p className="font-mono text-[11px] text-dim">
+            No holdings yet -- add one, or try it with sample data.
+          </p>
+          <button
+            type="button"
+            onClick={seedSampleData}
+            disabled={seeding}
+            className="shrink-0 font-mono text-[10px] font-bold text-muted hover:text-accent disabled:opacity-50"
+          >
+            {seeding ? "LOADING..." : "TRY SAMPLE DATA"}
+          </button>
+        </div>
       )}
 
       {showForm && (

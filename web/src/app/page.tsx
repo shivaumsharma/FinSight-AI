@@ -6,6 +6,7 @@ import { useResearch } from "@/lib/useResearch";
 import ReportView from "@/components/ReportView";
 import ResearchProgress, { STEPS } from "@/components/ResearchProgress";
 import InstallPrompt from "@/components/InstallPrompt";
+import OnboardingTour from "@/components/OnboardingTour";
 import AuthGate from "@/components/AuthGate";
 import BottomNav from "@/components/BottomNav";
 import SearchOverlay from "@/components/SearchOverlay";
@@ -140,6 +141,7 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
     <div className="min-h-screen bg-bg pb-20">
       <div className="mx-auto max-w-2xl px-5 py-8">
         <InstallPrompt />
+        <OnboardingTour />
 
         {/* Header */}
         <div className="flex items-center justify-between">
