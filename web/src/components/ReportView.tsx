@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import ModelCompare from "./ModelCompare";
 import RatingBadge, { ratingColorClass } from "./RatingBadge";
 import Tabs from "./Tabs";
 import type { ResearchResult } from "@/lib/types";
@@ -438,6 +439,7 @@ export default function ReportView({
       </a>
       <ShareButton jobId={jobId} />
       <WatchlistButton ticker={result.ticker} />
+      <ModelCompare jobId={jobId} />
     </div>
   );
 }

@@ -50,6 +50,7 @@ from pydantic import BaseModel, field_validator
 from app.api import auth, db, errors, jobs
 from app.core.company_resolver import resolve_companies, suggest_companies
 from app.data.market_data import TickerNotFoundError, get_corporate_actions, get_quote
+from app.reasoning.model_consensus import compute_consensus, get_model_opinions
 from app.reporting.news_client import fetch_market_news
 
 TIMEOUT_SWEEP_INTERVAL_SECONDS = 60
@@ -504,6 +505,28 @@ def share_research_pdf(job_id: str, current_user: str = Depends(auth.get_current
         "url": f"/v1/research/{job_id}/pdf?exp={expires_at}&sig={signature}",
         "expires_at": expires_at,
     }
+
+
+@app.post("/v1/research/{job_id}/model-compare")
+def model_compare(job_id: str, current_user: str = Depends(auth.get_current_user)):
+    """On-demand second-opinion panel for an already-completed report --
+    3 independent models re-interpreting the SAME already-computed
+    evidence (not a re-run of SEC/RAG/DCF), so this stays cheap and
+    fast. Deliberately not persisted: unlike the report itself, a
+    comparison is cheap enough to regenerate on each view, and not
+    caching it avoids a new DB table for v1."""
+    job = db.get_job(job_id)
+    if job is None:
+        raise errors.job_not_found(job_id)
+    if job["user_id"] != current_user:
+        raise errors.forbidden(job_id)
+    if job["status"] != db.STATUS_DONE or not job["result"]:
+        raise errors.job_not_done(job_id, job["status"])
+
+    report_data = job["result"].get("report_data", {})
+    ticker = job["result"].get("ticker", "")
+    opinions = get_model_opinions(report_data, ticker)
+    return {"models": opinions, "consensus": compute_consensus(opinions)}
 
 
 @app.get("/v1/research/{job_id}/pdf")

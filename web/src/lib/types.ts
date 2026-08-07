@@ -119,6 +119,26 @@ export interface ResearchResult {
   llm_usage?: Record<string, number> | null;
 }
 
+// POST /v1/research/{job_id}/model-compare's response shape -- an
+// on-demand second opinion from 3 independent models re-interpreting
+// the SAME already-computed evidence (not a re-run of the pipeline).
+// rating is "Insufficient Data" (RatingBadge already supports this)
+// when a model's response couldn't be parsed or the model was
+// unreachable, same degrade-gracefully convention as everywhere else.
+export interface ModelOpinion {
+  label: string;
+  model: string;
+  rating: "Buy" | "Hold" | "Sell" | "Insufficient Data";
+  confidence: number | null;
+  reasoning: string;
+}
+
+export interface ModelConsensus {
+  rating: "Buy" | "Hold" | "Sell" | "Insufficient Data";
+  agree_count: number;
+  total: number;
+}
+
 export type JobStatus = "queued" | "running" | "done" | "error";
 
 export interface JobResponse {
