@@ -563,6 +563,21 @@ def suggest_companies(prefix: str, limit: int = 8) -> List[dict]:
     return results
 
 
+def get_company_name(ticker: str) -> Optional[str]:
+    """Reverse lookup for Market Movers' per-ticker company name -- reuses
+    the SAME already-cached SEC/NSE title_to_ticker indices suggest_companies()
+    builds above, just inverted. Deliberately NOT MarketDataLoader.get_company_info()
+    (that's the heavy, never-cached, two-yfinance-round-trip path meant for a
+    single report, not a ~80-ticker scan). None if the ticker isn't in either
+    index (e.g. a watchlist ticker outside the SEC/NSE universe) -- callers
+    fall back to showing the bare ticker."""
+    index = _load_index()
+    nse_index = _load_nse_index()
+    title_to_ticker = {**index["title_to_ticker"], **nse_index["title_to_ticker"]}
+    ticker_to_title = {t: title for title, t in title_to_ticker.items()}
+    return ticker_to_title.get(ticker.upper())
+
+
 def is_comparison_question(question: str) -> bool:
     """Heuristic for 'compare X and Y' style questions."""
     keywords = ["compare", " vs ", " vs.", "versus", "better buy", "which is a better"]

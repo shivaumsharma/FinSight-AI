@@ -51,6 +51,7 @@ from pydantic import BaseModel, field_validator
 from app.api import auth, db, errors, jobs
 from app.core.company_resolver import resolve_companies, suggest_companies
 from app.data.market_data import TickerNotFoundError, get_corporate_actions, get_quote
+from app.reasoning.market_movers import get_top_movers
 from app.reasoning.model_consensus import compute_consensus, get_model_opinions
 from app.reporting.news_client import fetch_market_news
 
@@ -622,6 +623,38 @@ def get_market_indices(current_user: str = Depends(auth.get_current_user)):
             "change_pct": quote["change_pct"] if quote else None,
         })
     return {"indices": indices}
+
+
+@app.get("/v1/market/movers")
+def get_market_movers(limit: int = Query(default=5, le=10), current_user: str = Depends(auth.get_current_user)):
+    # "Tracked Universe" (curated backtest tickers + every user's
+    # watchlist tickers, unioned globally) -- NOT a full-market scan,
+    # see market_movers.py's module docstring. Frontend must label this
+    # clearly so it's never read as full-market coverage.
+    return get_top_movers(limit=limit)
+
+
+@app.get("/v1/market/sentiment")
+def get_market_sentiment(current_user: str = Depends(auth.get_current_user)):
+    # Global across all users' completed research, one vote per
+    # distinct ticker at its most recent rating -- same "pick one scope
+    # and be consistent" reasoning as Top Movers above, per the spec.
+    # Hold is deliberately excluded from the ratio (a Buy-vs-Sell
+    # "battery" gauge reads oddly with a third silent category baked
+    # into the denominator) but still returned as its own count.
+    counts = db.get_global_rating_distribution()
+    buy, hold, sell = counts["Buy"], counts["Hold"], counts["Sell"]
+    voting_total = buy + sell
+    buy_pct = round(buy / voting_total * 100, 1) if voting_total else None
+    sell_pct = round(sell / voting_total * 100, 1) if voting_total else None
+    return {
+        "buy_pct": buy_pct,
+        "sell_pct": sell_pct,
+        "buy_count": buy,
+        "hold_count": hold,
+        "sell_count": sell,
+        "total_rated": buy + hold + sell,
+    }
 
 
 @app.get("/v1/watchlist")

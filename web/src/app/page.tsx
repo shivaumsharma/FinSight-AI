@@ -13,6 +13,8 @@ import NotificationsPanel from "@/components/NotificationsPanel";
 import IndicesCarousel from "@/components/IndicesCarousel";
 import Portfolio from "@/components/Portfolio";
 import MarketNews from "@/components/MarketNews";
+import MarketMovers from "@/components/MarketMovers";
+import SentimentGauge from "@/components/SentimentGauge";
 
 const QUICK_TICKERS = ["AAPL", "NVDA", "TSLA", "MSFT"];
 
@@ -162,6 +164,10 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
         <IndicesCarousel />
 
         <Portfolio />
+
+        <MarketMovers />
+
+        <SentimentGauge />
 
         <MarketNews />
 
