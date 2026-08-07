@@ -24,6 +24,7 @@ EMAIL_ALREADY_REGISTERED = "EMAIL_ALREADY_REGISTERED"
 FORBIDDEN = "FORBIDDEN"
 RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED"
 TICKER_NOT_FOUND = "TICKER_NOT_FOUND"
+BACKTEST_ACCURACY_UNAVAILABLE = "BACKTEST_ACCURACY_UNAVAILABLE"
 
 
 class APIError(Exception):
@@ -102,4 +103,12 @@ def ticker_not_found(ticker: str) -> APIError:
         TICKER_NOT_FOUND,
         f"'{ticker}' doesn't look like a valid, currently-listed ticker.",
         status_code=status.HTTP_400_BAD_REQUEST,
+    )
+
+
+def backtest_accuracy_unavailable() -> APIError:
+    return APIError(
+        BACKTEST_ACCURACY_UNAVAILABLE,
+        "Backtest accuracy data is unavailable.",
+        status_code=status.HTTP_404_NOT_FOUND,
     )
