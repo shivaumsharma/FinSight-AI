@@ -45,9 +45,13 @@ _QUOTE_CACHE_TTL_SECONDS = 45
 
 def get_quote(ticker: str) -> dict:
     """Cheap current-price lookup for the Watchlist -- {"price",
-    "change_pct"}. Raises TickerNotFoundError if fast_info has no
-    usable price (bad/delisted symbol), same exception the rest of this
-    module already uses for that condition."""
+    "change_pct", "previous_close"}. previous_close is exposed
+    (already fetched internally to compute change_pct) so callers that
+    need today's-dollar-move math (e.g. the Portfolio's Today's P&L)
+    don't have to back-derive it from change_pct and risk float drift.
+    Raises TickerNotFoundError if fast_info has no usable price
+    (bad/delisted symbol), same exception the rest of this module
+    already uses for that condition."""
     ticker = ticker.upper()
 
     cached = _quote_cache.get(ticker)
@@ -69,7 +73,7 @@ def get_quote(ticker: str) -> dict:
         raise TickerNotFoundError(f"No price data found for {ticker}")
 
     change_pct = ((price - previous_close) / previous_close * 100) if previous_close else None
-    quote = {"price": price, "change_pct": change_pct}
+    quote = {"price": price, "change_pct": change_pct, "previous_close": previous_close}
     _quote_cache[ticker] = (time.time(), quote)
     return quote
 

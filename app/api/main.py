@@ -40,6 +40,7 @@ import re
 import threading
 import time
 from contextlib import asynccontextmanager
+from datetime import date
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, Query, Request
@@ -234,6 +235,7 @@ class PortfolioRequest(BaseModel):
     ticker: str
     quantity: float
     avg_cost: float
+    buy_date: Optional[str] = None
 
     @field_validator("ticker")
     @classmethod
@@ -250,6 +252,17 @@ class PortfolioRequest(BaseModel):
         if v <= 0:
             raise ValueError("Must be greater than zero.")
         return v
+
+    @field_validator("buy_date")
+    @classmethod
+    def _valid_iso_date(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return None
+        try:
+            date.fromisoformat(v.strip())
+        except ValueError:
+            raise ValueError("buy_date must be an ISO date (YYYY-MM-DD).")
+        return v.strip()
 
 
 @app.get("/health")
@@ -691,6 +704,13 @@ def get_portfolio(current_user: str = Depends(auth.get_current_user)):
     holdings = []
     total_market_value = 0.0
     total_cost_basis = 0.0
+    total_today_pnl = 0.0
+    # Denominator for total_today_pnl_pct -- only the market value of
+    # holdings that actually contributed a today_pnl (i.e. had a real
+    # previous_close), so a holding with a missing quote doesn't skew
+    # the percentage by inflating the denominator without a matching
+    # numerator contribution.
+    market_value_with_today_pnl = 0.0
     for row in db.get_portfolio_holdings(current_user):
         ticker = row["ticker"]
         quantity = row["quantity"]
@@ -703,25 +723,37 @@ def get_portfolio(current_user: str = Depends(auth.get_current_user)):
             quote = None
 
         price = quote["price"] if quote else None
+        previous_close = quote.get("previous_close") if quote else None
         cost_basis = quantity * avg_cost
         market_value = price * quantity if price is not None else None
         unrealized_pnl = (market_value - cost_basis) if market_value is not None else None
         unrealized_pnl_pct = (unrealized_pnl / cost_basis * 100) if unrealized_pnl is not None and cost_basis else None
+        today_pnl = quantity * (price - previous_close) if price is not None and previous_close else None
 
         if market_value is not None:
             total_market_value += market_value
         total_cost_basis += cost_basis
+        if today_pnl is not None:
+            total_today_pnl += today_pnl
+            market_value_with_today_pnl += market_value
 
         holdings.append({
             "ticker": ticker,
             "quantity": quantity,
             "avg_cost": avg_cost,
+            "buy_date": row.get("buy_date"),
             "price": price,
             "change_pct": quote["change_pct"] if quote else None,
             "cost_basis": cost_basis,
             "market_value": market_value,
             "unrealized_pnl": unrealized_pnl,
             "unrealized_pnl_pct": unrealized_pnl_pct,
+            "today_pnl": today_pnl,
+            # Live verdict from this ticker's latest completed report --
+            # the SAME lookup the Watchlist already uses, so a holding
+            # whose research call has since flipped (e.g. to Sell) shows
+            # it here too, not just on the Watchlist card.
+            "rating": db.get_latest_rating_for_ticker(current_user, ticker),
             "added_at": row["added_at"],
         })
 
@@ -735,6 +767,14 @@ def get_portfolio(current_user: str = Depends(auth.get_current_user)):
             "total_cost_basis": total_cost_basis if holdings else None,
             "total_unrealized_pnl": total_unrealized_pnl,
             "total_unrealized_pnl_pct": total_unrealized_pnl_pct,
+            "total_today_pnl": total_today_pnl if market_value_with_today_pnl else None,
+            # Percentage against YESTERDAY's value of just the holdings
+            # that contributed a today_pnl (today's market value minus
+            # today's gain) -- not total_market_value, which may include
+            # holdings with no previous_close and would otherwise skew
+            # the denominator without a matching numerator contribution.
+            "total_today_pnl_pct": (total_today_pnl / (market_value_with_today_pnl - total_today_pnl) * 100)
+                if market_value_with_today_pnl and (market_value_with_today_pnl - total_today_pnl) else None,
         },
     }
 
@@ -756,7 +796,7 @@ def add_or_update_portfolio_holding(body: PortfolioRequest, current_user: str = 
         except TickerNotFoundError:
             raise errors.ticker_not_found(body.ticker)
 
-    db.upsert_portfolio_holding(current_user, ticker, body.quantity, body.avg_cost)
+    db.upsert_portfolio_holding(current_user, ticker, body.quantity, body.avg_cost, body.buy_date)
     return {"status": "ok"}
 
 

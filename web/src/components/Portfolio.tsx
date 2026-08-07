@@ -1,10 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { PortfolioHolding, PortfolioSummary } from "@/lib/types";
+import RatingBadge from "./RatingBadge";
+import type { CompanySuggestion, PortfolioHolding, PortfolioSummary } from "@/lib/types";
 
 function fmt(n: number): string {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 // A home-dashboard card, not a dedicated nav-linked page like
@@ -19,9 +24,12 @@ export default function Portfolio() {
   const [ticker, setTicker] = useState("");
   const [quantity, setQuantity] = useState("");
   const [avgCost, setAvgCost] = useState("");
+  const [buyDate, setBuyDate] = useState(todayIso());
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [suggestions, setSuggestions] = useState<CompanySuggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   function refresh() {
     fetch("/api/portfolio")
@@ -38,18 +46,35 @@ export default function Portfolio() {
 
   useEffect(refresh, []);
 
-  async function handleAdd(e: React.FormEvent) {
-    e.preventDefault();
+  // Same debounced autocomplete as Watchlist's add-ticker input --
+  // reuses the same /api/companies/suggest endpoint, not a second
+  // ticker-resolution path.
+  useEffect(() => {
+    const q = ticker.trim();
+    if (q.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    const timeout = setTimeout(() => {
+      fetch(`/api/companies/suggest?q=${encodeURIComponent(q)}`)
+        .then((r) => (r.ok ? r.json() : { suggestions: [] }))
+        .then((data) => setSuggestions(data.suggestions))
+        .catch(() => setSuggestions([]));
+    }, 250);
+    return () => clearTimeout(timeout);
+  }, [ticker]);
+
+  async function submitHolding(rawTicker: string) {
     const q = parseFloat(quantity);
     const c = parseFloat(avgCost);
-    if (!ticker.trim() || !(q > 0) || !(c > 0) || adding) return;
+    if (!rawTicker.trim() || !(q > 0) || !(c > 0) || adding) return;
     setAdding(true);
     setError(null);
     try {
       const resp = await fetch("/api/portfolio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticker: ticker.trim(), quantity: q, avg_cost: c }),
+        body: JSON.stringify({ ticker: rawTicker.trim(), quantity: q, avg_cost: c, buy_date: buyDate || null }),
       });
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({ message: "Couldn't add that holding." }));
@@ -59,11 +84,23 @@ export default function Portfolio() {
       setTicker("");
       setQuantity("");
       setAvgCost("");
+      setBuyDate(todayIso());
       setShowForm(false);
+      setSuggestions([]);
       refresh();
     } finally {
       setAdding(false);
     }
+  }
+
+  function handleAdd(e: React.FormEvent) {
+    e.preventDefault();
+    submitHolding(ticker);
+  }
+
+  function selectSuggestion(s: CompanySuggestion) {
+    setShowSuggestions(false);
+    setTicker(s.ticker);
   }
 
   async function handleRemove(t: string) {
@@ -90,16 +127,40 @@ export default function Portfolio() {
       {holdings.length > 0 && summary && summary.total_market_value !== null && (
         <div className="mt-2 rounded-lg border border-border bg-card px-3.5 py-2.5">
           <div className="flex items-baseline justify-between">
-            <span className="font-mono text-lg font-bold text-text">${fmt(summary.total_market_value)}</span>
+            <div>
+              <div className="font-mono text-[10px] text-dim">PORTFOLIO VALUE</div>
+              <span className="font-mono text-lg font-bold text-text">${fmt(summary.total_market_value)}</span>
+            </div>
             {summary.total_unrealized_pnl !== null && (
-              <span className={`font-mono text-xs font-bold ${summary.total_unrealized_pnl >= 0 ? "text-accent" : "text-danger"}`}>
-                {summary.total_unrealized_pnl >= 0 ? "+" : ""}
-                ${fmt(summary.total_unrealized_pnl)}
-                {summary.total_unrealized_pnl_pct !== null && ` (${summary.total_unrealized_pnl_pct.toFixed(2)}%)`}
-              </span>
+              <div className="text-right">
+                <div className="font-mono text-[10px] text-dim">OVERALL P&amp;L</div>
+                <span className={`font-mono text-xs font-bold ${summary.total_unrealized_pnl >= 0 ? "text-accent" : "text-danger"}`}>
+                  {summary.total_unrealized_pnl >= 0 ? "+" : ""}
+                  ${fmt(summary.total_unrealized_pnl)}
+                  {summary.total_unrealized_pnl_pct !== null && ` (${summary.total_unrealized_pnl_pct.toFixed(2)}%)`}
+                </span>
+              </div>
             )}
           </div>
-          <p className="mt-0.5 font-mono text-[10px] text-dim">
+          <div className="mt-2 flex items-baseline justify-between border-t border-border-subtle pt-2">
+            {summary.total_cost_basis !== null && (
+              <div>
+                <div className="font-mono text-[10px] text-dim">INVESTED</div>
+                <span className="font-mono text-xs text-muted">${fmt(summary.total_cost_basis)}</span>
+              </div>
+            )}
+            {summary.total_today_pnl !== null && (
+              <div className="text-right">
+                <div className="font-mono text-[10px] text-dim">TODAY&apos;S P&amp;L</div>
+                <span className={`font-mono text-xs font-bold ${summary.total_today_pnl >= 0 ? "text-accent" : "text-danger"}`}>
+                  {summary.total_today_pnl >= 0 ? "+" : ""}
+                  ${fmt(summary.total_today_pnl)}
+                  {summary.total_today_pnl_pct !== null && ` (${summary.total_today_pnl_pct.toFixed(2)}%)`}
+                </span>
+              </div>
+            )}
+          </div>
+          <p className="mt-2 font-mono text-[10px] text-dim">
             Self-reported holdings, not connected to a brokerage -- unrealized P&amp;L only, no orders placed here.
           </p>
         </div>
@@ -108,11 +169,24 @@ export default function Portfolio() {
       {holdings.length > 0 && (
         <div className="mt-2 flex flex-col gap-2">
           {holdings.map((h) => (
-            <div key={h.ticker} className="flex items-center justify-between rounded-lg border border-border bg-card px-3.5 py-2.5">
+            <div
+              key={h.ticker}
+              className={`flex items-center justify-between rounded-lg border bg-card px-3.5 py-2.5 ${
+                h.rating === "Sell" ? "border-danger" : "border-border"
+              }`}
+            >
               <div>
-                <div className="font-mono text-sm font-bold text-text">{h.ticker}</div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-sm font-bold text-text">{h.ticker}</span>
+                  {h.rating ? (
+                    <RatingBadge rating={h.rating} size="sm" />
+                  ) : (
+                    <span className="font-mono text-[10px] text-dim">not yet researched</span>
+                  )}
+                </div>
                 <div className="font-mono text-[10px] text-dim">
                   {h.quantity} sh @ ${fmt(h.avg_cost)}
+                  {h.buy_date && ` · bought ${h.buy_date}`}
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -149,15 +223,44 @@ export default function Portfolio() {
       )}
 
       {showForm && (
-        <form onSubmit={handleAdd} className="mt-2 flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+        <form onSubmit={handleAdd} className="relative mt-2 flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
           <input
             type="text"
             value={ticker}
-            onChange={(e) => setTicker(e.target.value)}
-            placeholder="ticker (e.g. AAPL)"
+            onChange={(e) => {
+              setTicker(e.target.value);
+              setShowSuggestions(true);
+            }}
+            onFocus={() => setShowSuggestions(true)}
+            onBlur={() => setShowSuggestions(false)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setShowSuggestions(false);
+            }}
+            placeholder="ticker or company name..."
             disabled={adding}
+            autoComplete="off"
             className="rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs text-text placeholder:text-muted focus:outline-none focus:border-accent disabled:opacity-60"
           />
+
+          {showSuggestions && suggestions.length > 0 && (
+            <div className="absolute left-3 right-3 top-[42px] z-10 overflow-hidden rounded-lg border border-border bg-card shadow-lg">
+              {suggestions.map((s) => (
+                <button
+                  key={s.ticker}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    selectSuggestion(s);
+                  }}
+                  className="flex w-full items-center justify-between border-b border-border-subtle px-3 py-2 text-left last:border-b-0 hover:bg-bg/60"
+                >
+                  <span className="truncate font-mono text-xs text-text">{s.name}</span>
+                  <span className="ml-2 flex-shrink-0 font-mono text-[10px] text-dim">{s.ticker}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="flex gap-2">
             <input
               type="number"
@@ -180,6 +283,16 @@ export default function Portfolio() {
               className="min-w-0 flex-1 rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs text-text placeholder:text-muted focus:outline-none focus:border-accent disabled:opacity-60"
             />
           </div>
+          <label className="flex items-center gap-2 font-mono text-[10px] text-dim">
+            Buy date
+            <input
+              type="date"
+              value={buyDate}
+              onChange={(e) => setBuyDate(e.target.value)}
+              disabled={adding}
+              className="flex-1 rounded-lg border border-border bg-bg px-3 py-1.5 font-mono text-xs text-text focus:outline-none focus:border-accent disabled:opacity-60"
+            />
+          </label>
           <button
             type="submit"
             disabled={adding || !ticker.trim() || !quantity || !avgCost}

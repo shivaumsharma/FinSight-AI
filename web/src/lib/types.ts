@@ -211,12 +211,18 @@ export interface PortfolioHolding {
   ticker: string;
   quantity: number;
   avg_cost: number;
+  buy_date: string | null;
   price: number | null;
   change_pct: number | null;
   cost_basis: number;
   market_value: number | null;
   unrealized_pnl: number | null;
   unrealized_pnl_pct: number | null;
+  today_pnl: number | null;
+  // Live verdict from this ticker's latest completed report -- the
+  // SAME lookup WatchlistItem's rating uses, so a holding whose call
+  // has since flipped (e.g. to Sell) shows it here too.
+  rating: string | null;
   added_at: number;
 }
 
@@ -236,4 +242,6 @@ export interface PortfolioSummary {
   total_cost_basis: number | null;
   total_unrealized_pnl: number | null;
   total_unrealized_pnl_pct: number | null;
+  total_today_pnl: number | null;
+  total_today_pnl_pct: number | null;
 }
