@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import BacktestBadge from "./BacktestBadge";
 import ModelCompare from "./ModelCompare";
 import RatingBadge, { ratingColorClass } from "./RatingBadge";
 import Tabs from "./Tabs";
@@ -223,7 +224,10 @@ export default function ReportView({
         }}
       >
         <div>
-          <RatingBadge rating={rec.rating} />
+          <div className="flex items-center gap-2">
+            <RatingBadge rating={rec.rating} />
+            <BacktestBadge />
+          </div>
           <div className="mt-1 text-[10.5px] text-muted">
             composite {fmtScore(rec.composite_score)} · overall score {confidence["Overall Score"] ?? "N/A"}
           </div>

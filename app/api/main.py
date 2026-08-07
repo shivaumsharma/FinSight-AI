@@ -40,7 +40,7 @@ import re
 import threading
 import time
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, timedelta
 from typing import Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, Query, Request
@@ -51,9 +51,10 @@ from pydantic import BaseModel, field_validator
 from app.api import auth, db, errors, jobs
 from app.core.company_resolver import get_company_name, resolve_companies, suggest_companies
 from app.data.market_data import TickerNotFoundError, get_corporate_actions, get_quote, get_usd_conversion_rate
+from app.reasoning.backtest_stats import get_backtest_accuracy_summary
 from app.reasoning.market_movers import get_top_movers
 from app.reasoning.model_consensus import compute_consensus, get_model_opinions
-from app.reporting.news_client import fetch_market_news
+from app.reporting.news_client import fetch_company_news, fetch_market_news
 
 TIMEOUT_SWEEP_INTERVAL_SECONDS = 60
 
@@ -477,6 +478,19 @@ def get_recent_research(limit: int = Query(10, ge=1, le=50), current_user: str =
     return {"reports": db.list_recent_jobs(current_user, limit)}
 
 
+@app.get("/v1/research/backtest-accuracy")
+def get_backtest_accuracy(current_user: str = Depends(auth.get_current_user)):
+    # Registered before /v1/research/{job_id} for the same routing
+    # reason as /v1/research/recent above -- same static number for
+    # every report, not scoped to a specific job_id. Returns 404 if the
+    # backtest result files are missing (should never happen in a real
+    # deploy, but degrading honestly beats fabricating a number).
+    summary = get_backtest_accuracy_summary()
+    if summary is None:
+        raise errors.backtest_accuracy_unavailable()
+    return summary
+
+
 @app.get("/v1/research/{job_id}")
 def get_research(job_id: str, current_user: str = Depends(auth.get_current_user)):
     job = db.get_job(job_id)
@@ -607,6 +621,36 @@ def get_market_news(limit: int = Query(default=15, le=30), current_user: str = D
     # Risk Analysis/Sentiment sections already depend on -- a separate,
     # general (not-per-company) endpoint and cache, not a new provider.
     return {"articles": fetch_market_news(limit=limit)}
+
+
+@app.get("/v1/news/my-stocks")
+def get_my_stocks_news(limit: int = Query(default=15, le=30), current_user: str = Depends(auth.get_current_user)):
+    # "On My Stocks" tab -- reuses fetch_company_news (the SAME
+    # per-ticker Finnhub client + 24h cache the research pipeline's own
+    # News Selection stage already depends on), just aggregated across
+    # every ticker on the watchlist and/or portfolio (same union as the
+    # Corporate Actions feed) into one flat, deduped, recency-filtered
+    # list rather than shown per-ticker. fetch_company_news's own cache
+    # key is per-ticker only (not per `days`), so filtering to the last
+    # week happens here rather than passing a narrower `days` argument
+    # that could silently collide with an already-cached wider-window
+    # fetch from elsewhere in the app.
+    watchlist_tickers = {w["ticker"] for w in db.get_watchlist(current_user)}
+    portfolio_tickers = {h["ticker"] for h in db.get_portfolio_holdings(current_user)}
+    tickers = watchlist_tickers | portfolio_tickers
+
+    cutoff = (date.today() - timedelta(days=7)).isoformat()
+    seen_urls = set()
+    articles = []
+    for ticker in tickers:
+        for article in fetch_company_news(ticker):
+            if article["date"] < cutoff or article["url"] in seen_urls:
+                continue
+            seen_urls.add(article["url"])
+            articles.append({**article, "ticker": ticker})
+
+    articles.sort(key=lambda a: a["date"], reverse=True)
+    return {"articles": articles[:limit]}
 
 
 @app.get("/v1/market/indices")
