@@ -50,7 +50,7 @@ from pydantic import BaseModel, field_validator
 
 from app.api import auth, db, errors, jobs
 from app.core.company_resolver import get_company_name, resolve_companies, suggest_companies
-from app.data.market_data import TickerNotFoundError, get_corporate_actions, get_quote
+from app.data.market_data import TickerNotFoundError, get_corporate_actions, get_quote, get_usd_conversion_rate
 from app.reasoning.market_movers import get_top_movers
 from app.reasoning.model_consensus import compute_consensus, get_model_opinions
 from app.reporting.news_client import fetch_market_news
@@ -624,10 +624,24 @@ def get_market_indices(current_user: str = Depends(auth.get_current_user)):
             "name": entry["name"],
             "ticker": entry["ticker"],
             "region": entry["region"],
+            "currency": quote.get("currency", "USD") if quote else "USD",
             "price": quote["price"] if quote else None,
             "change_pct": quote["change_pct"] if quote else None,
         })
     return {"indices": indices}
+
+
+@app.get("/v1/market/fx")
+def get_fx_rate(current_user: str = Depends(auth.get_current_user)):
+    # USD/INR only -- the one non-USD currency this app's India
+    # coverage actually needs (see get_usd_conversion_rate's own
+    # comment). "rate" is INR per 1 USD, the same convention Yahoo/
+    # Google/XE all quote this pair in.
+    try:
+        quote = get_quote("INR=X")
+    except Exception:
+        return {"pair": "USD/INR", "rate": None, "change_pct": None}
+    return {"pair": "USD/INR", "rate": quote["price"], "change_pct": quote["change_pct"]}
 
 
 @app.get("/v1/corporate-actions/feed")
@@ -722,6 +736,7 @@ def get_watchlist(current_user: str = Depends(auth.get_current_user)):
             "ticker": ticker,
             "price": quote["price"] if quote else None,
             "change_pct": quote["change_pct"] if quote else None,
+            "currency": quote.get("currency", "USD") if quote else "USD",
             "rating": db.get_latest_rating_for_ticker(current_user, ticker),
             "added_at": row["added_at"],
             "next_earnings_date": corporate_actions["next_earnings_date"] if corporate_actions else None,
@@ -778,6 +793,15 @@ def remove_from_watchlist(ticker: str, current_user: str = Depends(auth.get_curr
 
 @app.get("/v1/portfolio")
 def get_portfolio(current_user: str = Depends(auth.get_current_user)):
+    # Each holding displays in its OWN native currency (price/cost_basis/
+    # market_value/today_pnl are never converted at the per-holding
+    # level) -- but the aggregate summary below needs one common unit
+    # to sum across a mixed USD/INR portfolio meaningfully, so summary
+    # totals are converted to USD equivalent via a live FX rate
+    # (get_usd_conversion_rate). A holding whose currency has no known
+    # FX rate is shown correctly on its own row but excluded from the
+    # summary totals (mixed_currency_excluded flags this for the UI)
+    # rather than silently mixing incompatible units again.
     holdings = []
     total_market_value = 0.0
     total_cost_basis = 0.0
@@ -788,6 +812,8 @@ def get_portfolio(current_user: str = Depends(auth.get_current_user)):
     # the percentage by inflating the denominator without a matching
     # numerator contribution.
     market_value_with_today_pnl = 0.0
+    any_non_usd = False
+    any_excluded_from_summary = False
     for row in db.get_portfolio_holdings(current_user):
         ticker = row["ticker"]
         quantity = row["quantity"]
@@ -801,18 +827,25 @@ def get_portfolio(current_user: str = Depends(auth.get_current_user)):
 
         price = quote["price"] if quote else None
         previous_close = quote.get("previous_close") if quote else None
+        currency = quote.get("currency", "USD") if quote else "USD"
+        if currency != "USD":
+            any_non_usd = True
         cost_basis = quantity * avg_cost
         market_value = price * quantity if price is not None else None
         unrealized_pnl = (market_value - cost_basis) if market_value is not None else None
         unrealized_pnl_pct = (unrealized_pnl / cost_basis * 100) if unrealized_pnl is not None and cost_basis else None
         today_pnl = quantity * (price - previous_close) if price is not None and previous_close else None
 
-        if market_value is not None:
-            total_market_value += market_value
-        total_cost_basis += cost_basis
-        if today_pnl is not None:
-            total_today_pnl += today_pnl
-            market_value_with_today_pnl += market_value
+        usd_rate = get_usd_conversion_rate(currency)
+        if usd_rate is None:
+            any_excluded_from_summary = True
+        else:
+            if market_value is not None:
+                total_market_value += market_value * usd_rate
+            total_cost_basis += cost_basis * usd_rate
+            if today_pnl is not None:
+                total_today_pnl += today_pnl * usd_rate
+                market_value_with_today_pnl += market_value * usd_rate
 
         holdings.append({
             "ticker": ticker,
@@ -821,6 +854,7 @@ def get_portfolio(current_user: str = Depends(auth.get_current_user)):
             "buy_date": row.get("buy_date"),
             "price": price,
             "change_pct": quote["change_pct"] if quote else None,
+            "currency": currency,
             "cost_basis": cost_basis,
             "market_value": market_value,
             "unrealized_pnl": unrealized_pnl,
@@ -852,6 +886,13 @@ def get_portfolio(current_user: str = Depends(auth.get_current_user)):
             # the denominator without a matching numerator contribution.
             "total_today_pnl_pct": (total_today_pnl / (market_value_with_today_pnl - total_today_pnl) * 100)
                 if market_value_with_today_pnl and (market_value_with_today_pnl - total_today_pnl) else None,
+            # Summary totals are always USD-equivalent, regardless of
+            # each holding's own native currency -- mixed_currency tells
+            # the frontend to label the total "(USD equiv.)" instead of
+            # implying every holding actually trades in dollars.
+            "currency": "USD",
+            "mixed_currency": any_non_usd,
+            "excluded_from_summary": any_excluded_from_summary,
         },
     }
 
