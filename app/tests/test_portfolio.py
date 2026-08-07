@@ -354,3 +354,73 @@ def test_summary_excludes_a_holding_with_no_known_fx_rate(client, monkeypatch, a
     body = resp.json()
     assert body["holdings"][0]["market_value"] == pytest.approx(1000.0)
     assert body["summary"]["excluded_from_summary"] is True
+
+
+# ---------------------------------------------------------------- combined portfolio analysis
+
+def _complete_job_with_rating(user_id, ticker, rating):
+    job_id = db.create_job("q", "hand_rolled", user_id=user_id)
+    db.mark_running(job_id)
+    result = {"ticker": ticker, "report_data": {"recommendation": {"rating": rating}}}
+    db.mark_done(job_id, result, pdf_path="/tmp/fake.pdf")
+
+
+def test_portfolio_analysis_counts_ratings_across_holdings(client, monkeypatch, auth_headers):
+    user_id = client.get("/v1/auth/me", headers=auth_headers).json()["user_id"]
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote(price=100.0))
+    client.post("/v1/portfolio", json={"ticker": "AAPL", "quantity": 10, "avg_cost": 90.0}, headers=auth_headers)
+    client.post("/v1/portfolio", json={"ticker": "MSFT", "quantity": 5, "avg_cost": 90.0}, headers=auth_headers)
+    client.post("/v1/portfolio", json={"ticker": "TSLA", "quantity": 1, "avg_cost": 90.0}, headers=auth_headers)
+
+    _complete_job_with_rating(user_id, "AAPL", "Buy")
+    _complete_job_with_rating(user_id, "MSFT", "Buy")
+    _complete_job_with_rating(user_id, "TSLA", "Sell")
+
+    resp = client.get("/v1/portfolio/analysis", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["holdings_total"] == 3
+    assert body["holdings_researched"] == 3
+    assert body["rating_counts"] == {"Buy": 2, "Hold": 0, "Sell": 1}
+    assert body["unresearched_tickers"] == []
+
+
+def test_portfolio_analysis_tracks_unresearched_holdings_separately(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote(price=100.0))
+    client.post("/v1/portfolio", json={"ticker": "AAPL", "quantity": 10, "avg_cost": 90.0}, headers=auth_headers)
+
+    resp = client.get("/v1/portfolio/analysis", headers=auth_headers)
+    body = resp.json()
+    assert body["holdings_researched"] == 0
+    assert body["unresearched_tickers"] == ["AAPL"]
+    assert body["rating_counts"] == {"Buy": 0, "Hold": 0, "Sell": 0}
+
+
+def test_portfolio_analysis_value_weights_by_usd_equivalent_market_value(client, monkeypatch, auth_headers):
+    user_id = client.get("/v1/auth/me", headers=auth_headers).json()["user_id"]
+
+    def fake_quote(ticker):
+        return _fake_quote(price=100.0 if ticker == "AAPL" else 10.0)
+
+    monkeypatch.setattr(main, "get_quote", fake_quote)
+    # AAPL: 10 * 100 = 1000 (Buy). MSFT: 100 * 10 = 1000 (Sell). Equal value -> 50/50.
+    client.post("/v1/portfolio", json={"ticker": "AAPL", "quantity": 10, "avg_cost": 90.0}, headers=auth_headers)
+    client.post("/v1/portfolio", json={"ticker": "MSFT", "quantity": 100, "avg_cost": 9.0}, headers=auth_headers)
+
+    _complete_job_with_rating(user_id, "AAPL", "Buy")
+    _complete_job_with_rating(user_id, "MSFT", "Sell")
+
+    resp = client.get("/v1/portfolio/analysis", headers=auth_headers)
+    weighted = resp.json()["value_weighted_pct"]
+    assert weighted["Buy"] == pytest.approx(50.0)
+    assert weighted["Sell"] == pytest.approx(50.0)
+
+
+def test_portfolio_analysis_value_weighted_pct_is_none_with_no_researched_value(client, auth_headers):
+    resp = client.get("/v1/portfolio/analysis", headers=auth_headers)
+    assert resp.json()["value_weighted_pct"] is None
+
+
+def test_portfolio_analysis_requires_a_session(client):
+    resp = client.get("/v1/portfolio/analysis")
+    assert resp.status_code == 401

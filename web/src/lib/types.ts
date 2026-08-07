@@ -322,6 +322,19 @@ export interface MarketSentiment {
   total_rated: number;
 }
 
+// GET /v1/portfolio/analysis's response shape -- a rollup of each
+// holding's ALREADY-completed report rating (never triggers new
+// research itself), both by simple count and by USD-equivalent
+// market-value weight. value_weighted_pct is null until at least one
+// holding both has a rating AND a valid market value to weight by.
+export interface PortfolioAnalysis {
+  holdings_total: number;
+  holdings_researched: number;
+  rating_counts: { Buy: number; Hold: number; Sell: number };
+  value_weighted_pct: { Buy: number; Hold: number; Sell: number } | null;
+  unresearched_tickers: string[];
+}
+
 export interface PortfolioSummary {
   total_market_value: number | null;
   total_cost_basis: number | null;
