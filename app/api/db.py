@@ -222,6 +222,14 @@ def init_db() -> None:
             )
             """
         )
+        # User-reported purchase date, shown on the per-holding row --
+        # optional (a user may not remember it), same nullable-with-no-
+        # backfill migration pattern as every other column added to an
+        # existing table this session (users.display_name, etc.).
+        try:
+            conn.execute("ALTER TABLE portfolio_holdings ADD COLUMN buy_date TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
 
 # ---------------------------------------------------------------- users/sessions
@@ -578,23 +586,27 @@ def get_watchlist(user_id: str) -> list:
 
 # ---------------------------------------------------------------- portfolio (self-reported)
 
-def upsert_portfolio_holding(user_id: str, ticker: str, quantity: float, avg_cost: float) -> None:
-    """Re-adding a ticker already held REPLACES its quantity/avg_cost
-    rather than accumulating a second row or averaging the two lots --
-    this is a single current-position editor, not a transaction ledger.
-    added_at is only set on first insert (COALESCE against the
-    existing row), so editing a holding doesn't bump it to the top of
-    a most-recently-added sort."""
+def upsert_portfolio_holding(
+    user_id: str, ticker: str, quantity: float, avg_cost: float, buy_date: str = None
+) -> None:
+    """Re-adding a ticker already held REPLACES its quantity/avg_cost/
+    buy_date rather than accumulating a second row or averaging the two
+    lots -- this is a single current-position editor, not a
+    transaction ledger. added_at is only set on first insert (omitted
+    from the DO UPDATE SET clause below, so ON CONFLICT leaves the
+    original value alone), so editing a holding doesn't bump it to the
+    top of a most-recently-added sort."""
     with _connect() as conn:
         conn.execute(
             """
-            INSERT INTO portfolio_holdings (user_id, ticker, quantity, avg_cost, added_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO portfolio_holdings (user_id, ticker, quantity, avg_cost, added_at, buy_date)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id, ticker) DO UPDATE SET
                 quantity=excluded.quantity,
-                avg_cost=excluded.avg_cost
+                avg_cost=excluded.avg_cost,
+                buy_date=excluded.buy_date
             """,
-            (user_id, ticker, quantity, avg_cost, time.time()),
+            (user_id, ticker, quantity, avg_cost, time.time(), buy_date),
         )
 
 
@@ -609,7 +621,7 @@ def get_portfolio_holdings(user_id: str) -> list:
     with _connect() as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT ticker, quantity, avg_cost, added_at FROM portfolio_holdings WHERE user_id=? ORDER BY added_at DESC",
+            "SELECT ticker, quantity, avg_cost, added_at, buy_date FROM portfolio_holdings WHERE user_id=? ORDER BY added_at DESC",
             (user_id,),
         ).fetchall()
     return [dict(r) for r in rows]
