@@ -63,3 +63,26 @@ def test_get_backtest_accuracy_summary_secondary_is_none_when_that_window_is_mis
 def test_get_backtest_accuracy_summary_is_none_when_primary_window_is_missing(monkeypatch):
     monkeypatch.setattr(backtest_stats, "_primary_cache", None)
     assert backtest_stats.get_backtest_accuracy_summary() is None
+
+
+# ---------------------------------------------------------------- deploy-time data dependency
+
+def test_curated_backtest_files_are_tracked_by_git():
+    # Regression guard for a real production bug: both curated files
+    # were excluded by a blanket "scripts/backtest_results_*.json"
+    # gitignore rule meant for regenerated research dumps, so Cloud
+    # Build's git clone never had them -- this module's own file reads
+    # 404'd live even though the files existed locally the whole time
+    # (local tests couldn't have caught it; `git ls-files` is the
+    # actual thing that was wrong). A negation rule in .gitignore now
+    # un-ignores just these two.
+    import subprocess
+
+    tracked = subprocess.run(
+        ["git", "ls-files", str(backtest_stats._PRIMARY_FILE), str(backtest_stats._SECONDARY_FILE)],
+        cwd=backtest_stats.BASE_DIR, capture_output=True, text=True, check=True,
+    ).stdout.splitlines()
+    assert len(tracked) == 2, (
+        f"Expected both curated backtest files tracked by git, got: {tracked!r}. "
+        "Check .gitignore's negation rules for scripts/backtest_results_curated_*.json."
+    )
