@@ -237,6 +237,36 @@ export interface NewsArticle {
   summary: string;
 }
 
+// GET /v1/market/movers' item shape -- a row in the Top Movers
+// "Tracked Universe" (curated backtest tickers + every user's
+// watchlist tickers, unioned globally -- see
+// app/reasoning/market_movers.py's module docstring). NOT full-market
+// coverage; the frontend must always label this clearly.
+export interface MoverItem {
+  ticker: string;
+  name: string;
+  price: number;
+  change_pct: number;
+}
+
+export interface MarketMoversData {
+  gainers: MoverItem[];
+  losers: MoverItem[];
+}
+
+// GET /v1/market/sentiment's response shape -- FinSight's OWN research
+// sentiment (Buy vs Sell share of every distinct ticker's latest
+// completed rating across all users), not a market-wide indicator.
+// buy_pct/sell_pct are null when nothing has been rated yet.
+export interface MarketSentiment {
+  buy_pct: number | null;
+  sell_pct: number | null;
+  buy_count: number;
+  hold_count: number;
+  sell_count: number;
+  total_rated: number;
+}
+
 export interface PortfolioSummary {
   total_market_value: number | null;
   total_cost_basis: number | null;

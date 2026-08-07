@@ -552,6 +552,46 @@ def get_latest_rating_for_ticker(user_id: str, ticker: str) -> Optional[str]:
     return row[0] if row is not None else None
 
 
+def get_all_distinct_watchlist_tickers() -> list:
+    """Every ticker on ANY user's watchlist, deduplicated -- part of
+    Market Movers' "tracked universe" (the other part is the static
+    backtest ticker list, see app/reasoning/market_movers.py). Global
+    on purpose, not scoped to the requesting user: a movers scan needs
+    a big enough pool to find real gainers/losers in, and this app's
+    real user base is small enough that per-user scoping would often
+    turn up nothing."""
+    with _connect() as conn:
+        rows = conn.execute("SELECT DISTINCT ticker FROM watchlist").fetchall()
+    return [r[0] for r in rows]
+
+
+def get_global_rating_distribution() -> dict:
+    """{"Buy": n, "Hold": n, "Sell": n, "Insufficient Data": n} counting
+    each distinct ticker ONCE, at its most recent completed rating --
+    across ALL users, not just the requesting one (see Market Movers'
+    same global-scope reasoning above; Phase 2's spec explicitly says
+    to pick one scope and be consistent between Top Movers and the
+    Sentiment Gauge). A ticker researched by five different users only
+    contributes one vote, from whichever of those reports is newest."""
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT j1.rating FROM jobs j1
+            WHERE j1.rating IS NOT NULL
+              AND j1.started_at = (
+                  SELECT MAX(j2.started_at) FROM jobs j2
+                  WHERE j2.ticker = j1.ticker AND j2.rating IS NOT NULL
+              )
+            """
+        ).fetchall()
+    counts = {"Buy": 0, "Hold": 0, "Sell": 0, "Insufficient Data": 0}
+    for row in rows:
+        rating = row[0]
+        if rating in counts:
+            counts[rating] += 1
+    return counts
+
+
 # ---------------------------------------------------------------- watchlist
 
 def add_watchlist_item(user_id: str, ticker: str) -> None:
