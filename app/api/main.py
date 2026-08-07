@@ -41,7 +41,7 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import date
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -49,7 +49,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, field_validator
 
 from app.api import auth, db, errors, jobs
-from app.core.company_resolver import resolve_companies, suggest_companies
+from app.core.company_resolver import get_company_name, resolve_companies, suggest_companies
 from app.data.market_data import TickerNotFoundError, get_corporate_actions, get_quote
 from app.reasoning.market_movers import get_top_movers
 from app.reasoning.model_consensus import compute_consensus, get_model_opinions
@@ -578,14 +578,18 @@ def get_research_pdf(
 # excluded: neither "NIFTY_FUT.NS" nor "GIFTNIFTY" resolve on Yahoo
 # Finance (confirmed empirically -- both 404 from yfinance), so there's
 # no reliable free data source for it.
+#
+# "region" powers the /indices page's Indian/Global tab split (see
+# IndicesCarousel.tsx's "VIEW ALL" link) -- the home carousel itself
+# still shows all of them together, unfiltered.
 INDEX_LIST = [
-    {"name": "S&P 500", "ticker": "^GSPC"},
-    {"name": "NASDAQ", "ticker": "^IXIC"},
-    {"name": "DOW", "ticker": "^DJI"},
-    {"name": "NIFTY 50", "ticker": "^NSEI"},
-    {"name": "SENSEX", "ticker": "^BSESN"},
-    {"name": "BANK NIFTY", "ticker": "^NSEBANK"},
-    {"name": "INDIA VIX", "ticker": "^INDIAVIX"},
+    {"name": "S&P 500", "ticker": "^GSPC", "region": "global"},
+    {"name": "NASDAQ", "ticker": "^IXIC", "region": "global"},
+    {"name": "DOW", "ticker": "^DJI", "region": "global"},
+    {"name": "NIFTY 50", "ticker": "^NSEI", "region": "india"},
+    {"name": "SENSEX", "ticker": "^BSESN", "region": "india"},
+    {"name": "BANK NIFTY", "ticker": "^NSEBANK", "region": "india"},
+    {"name": "INDIA VIX", "ticker": "^INDIAVIX", "region": "india"},
 ]
 
 
@@ -619,10 +623,50 @@ def get_market_indices(current_user: str = Depends(auth.get_current_user)):
         indices.append({
             "name": entry["name"],
             "ticker": entry["ticker"],
+            "region": entry["region"],
             "price": quote["price"] if quote else None,
             "change_pct": quote["change_pct"] if quote else None,
         })
     return {"indices": indices}
+
+
+@app.get("/v1/corporate-actions/feed")
+def get_corporate_actions_feed(
+    scope: Literal["all", "portfolio"] = Query(default="all"),
+    current_user: str = Depends(auth.get_current_user),
+):
+    # "portfolio" scope is just the self-reported holdings; "all" adds
+    # in the watchlist too -- the same two ticker sources Watchlist.tsx
+    # and Portfolio.tsx already track separately, just unioned here into
+    # one chronological feed rather than shown per-component. A ticker
+    # on both lists contributes its events only once (set union, not
+    # concatenation).
+    portfolio_tickers = {h["ticker"] for h in db.get_portfolio_holdings(current_user)}
+    if scope == "portfolio":
+        tickers = portfolio_tickers
+    else:
+        watchlist_tickers = {w["ticker"] for w in db.get_watchlist(current_user)}
+        tickers = watchlist_tickers | portfolio_tickers
+
+    events = []
+    for ticker in tickers:
+        try:
+            actions = get_corporate_actions(ticker)
+        except Exception:
+            # Same per-ticker isolation as everywhere else -- one bad
+            # symbol must not blank out the rest of the feed.
+            continue
+        name = get_company_name(ticker) or ticker
+        if actions["next_earnings_date"]:
+            events.append({"ticker": ticker, "name": name, "type": "earnings", "date": actions["next_earnings_date"]})
+        if actions["next_ex_dividend_date"]:
+            events.append({"ticker": ticker, "name": name, "type": "ex_dividend", "date": actions["next_ex_dividend_date"]})
+
+    # ISO date strings sort correctly as plain strings -- soonest
+    # upcoming event first, matching what a "what's coming up" feed
+    # should lead with.
+    events.sort(key=lambda e: e["date"])
+    return {"events": events, "scope": scope}
 
 
 @app.get("/v1/market/movers")
