@@ -13,6 +13,7 @@ import NotificationsPanel from "@/components/NotificationsPanel";
 import IndicesCarousel from "@/components/IndicesCarousel";
 import CurrencyTracker from "@/components/CurrencyTracker";
 import Portfolio from "@/components/Portfolio";
+import OrderTicket from "@/components/OrderTicket";
 import MarketNews from "@/components/MarketNews";
 import MarketMovers from "@/components/MarketMovers";
 import SentimentGauge from "@/components/SentimentGauge";
@@ -167,6 +168,8 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
         <CurrencyTracker />
 
         <Portfolio />
+
+        <OrderTicket />
 
         <MarketMovers />
 

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import RatingBadge from "./RatingBadge";
 import { currencySymbol } from "@/lib/currency";
+import { PORTFOLIO_UPDATED_EVENT } from "@/lib/portfolioEvents";
 import type { CompanySuggestion, PortfolioAnalysis, PortfolioHolding, PortfolioSummary } from "@/lib/types";
 
 function fmt(n: number): string {
@@ -55,6 +56,16 @@ export default function Portfolio() {
   }
 
   useEffect(refresh, []);
+
+  // A simulated order placed in OrderTicket (a sibling component on
+  // this same page) updates the backend's holdings correctly, but
+  // this component has no other way to know its own already-fetched
+  // data just went stale -- see lib/portfolioEvents.ts's own comment.
+  useEffect(() => {
+    window.addEventListener(PORTFOLIO_UPDATED_EVENT, refresh);
+    return () => window.removeEventListener(PORTFOLIO_UPDATED_EVENT, refresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Same debounced autocomplete as Watchlist's add-ticker input --
   // reuses the same /api/companies/suggest endpoint, not a second

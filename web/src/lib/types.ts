@@ -335,6 +335,33 @@ export interface PortfolioAnalysis {
   unresearched_tickers: string[];
 }
 
+// POST /v1/orders' response shape -- a simulated market order's
+// instant fill. NO real broker, NO real money -- see
+// db.execute_order's own docstring for the full boundary explanation.
+// new_holding_quantity is the resulting position size after this
+// order applied (0 if a SELL fully closed it out).
+export interface OrderResult {
+  order_id: string;
+  ticker: string;
+  side: "BUY" | "SELL";
+  quantity: number;
+  execution_price: number;
+  currency: string;
+  executed_at: number;
+  new_holding_quantity: number;
+}
+
+// GET /v1/orders' item shape -- one row of order history.
+export interface Order {
+  order_id: string;
+  ticker: string;
+  side: "BUY" | "SELL";
+  quantity: number;
+  execution_price: number;
+  currency: string;
+  executed_at: number;
+}
+
 export interface PortfolioSummary {
   total_market_value: number | null;
   total_cost_basis: number | null;
