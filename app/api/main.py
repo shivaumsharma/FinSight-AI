@@ -267,6 +267,24 @@ class PortfolioRequest(BaseModel):
         return v.strip()
 
 
+class OrderRequest(BaseModel):
+    ticker: str
+    side: Literal["BUY", "SELL"]
+    quantity: float
+
+    @field_validator("ticker")
+    @classmethod
+    def _normalize_ticker(cls, v: str) -> str:
+        return v.strip().upper()
+
+    @field_validator("quantity")
+    @classmethod
+    def _must_be_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("Must be greater than zero.")
+        return v
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -1016,3 +1034,46 @@ def get_portfolio_analysis(current_user: str = Depends(auth.get_current_user)):
         "value_weighted_pct": value_weighted_pct,
         "unresearched_tickers": unresearched_tickers,
     }
+
+
+# ---------------------------------------------------------------- orders (simulated paper trading)
+#
+# NO real broker, NO real credentials, NO real money -- a BUY/SELL
+# order fills instantly and completely at the live quote price at
+# order time, then updates the SAME self-reported portfolio_holdings
+# table Portfolio's manual-entry form writes to (see db.execute_order's
+# own docstring for the full boundary explanation). This is a
+# rehearsal tool for a trade decision against real prices, not a
+# brokerage integration -- that stays out of scope regardless.
+
+@app.post("/v1/orders")
+def place_order(body: OrderRequest, current_user: str = Depends(auth.get_current_user)):
+    # Same fast-path-then-resolve_companies-fallback validation as
+    # POST /v1/portfolio/POST /v1/watchlist, so a fuzzy/Indian company
+    # name works here too, not just a bare ticker.
+    ticker = body.ticker
+    try:
+        quote = get_quote(ticker)
+    except TickerNotFoundError:
+        resolved = resolve_companies(body.ticker)
+        if not resolved:
+            raise errors.ticker_not_found(body.ticker)
+        ticker = resolved[0]
+        try:
+            quote = get_quote(ticker)
+        except TickerNotFoundError:
+            raise errors.ticker_not_found(body.ticker)
+
+    try:
+        result = db.execute_order(
+            current_user, ticker, body.side, body.quantity, quote["price"], quote.get("currency", "USD"),
+        )
+    except ValueError as exc:
+        raise errors.insufficient_shares(str(exc))
+
+    return result
+
+
+@app.get("/v1/orders")
+def get_orders(limit: int = Query(default=20, le=50), current_user: str = Depends(auth.get_current_user)):
+    return {"orders": db.list_orders(current_user, limit)}
