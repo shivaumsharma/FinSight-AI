@@ -33,11 +33,18 @@ jobs:
       # lazily inside jobs.py's _run_job specifically so the rest of
       # this stays true), and app.reporting.narrative_builder's own
       # import of news_client.py (python-dotenv, for FINNHUB_API_KEY).
-      # Verified against a truly isolated venv with only this list
-      # installed, not just the (much more populated) main dev venv --
-      # that's what caught this exact gap.
+      # pywebpush (app.api.auth's VAPID push-notification support) and
+      # joblib + scikit-learn (app.valuation.ml_valuation_classifier's
+      # saved-model loader) are the same kind of lightweight, no-torch
+      # dependency -- added after this list was first curated, which
+      # silently broke every test module importing app.api.auth,
+      # app.api.jobs, or (transitively, via phase2_backtest.py) the
+      # rlvr training tests (ModuleNotFoundError at collection time)
+      # until caught here. Verified against a truly isolated venv with
+      # only this list installed, not just the (much more populated)
+      # main dev venv -- that's what caught this exact gap.
       - name: Install test dependencies
-        run: pip install pandas numpy langgraph==1.2.9 redis fastapi httpx yfinance rapidfuzz python-dotenv -r requirements-dev.txt
+        run: pip install pandas numpy langgraph==1.2.9 redis fastapi httpx yfinance rapidfuzz python-dotenv pywebpush joblib scikit-learn -r requirements-dev.txt
 
       # test_finbert.py and test_rag.py are manual smoke tests (see
       # their own docstrings) -- they need the full model stack and
