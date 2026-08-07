@@ -133,6 +133,28 @@ def test_get_top_movers_gainers_and_losers_never_overlap_on_a_small_universe(mon
     assert not (gainer_tickers & loser_tickers)
 
 
+def test_get_top_movers_retries_once_before_giving_up(monkeypatch):
+    # Simulates a transient throttle -- fails the first attempt, then
+    # succeeds on the retry, so the ticker should still show up.
+    monkeypatch.setattr(market_movers, "get_tracked_universe", lambda: ["FLAKY"])
+    monkeypatch.setattr(market_movers, "get_company_name", lambda t: None)
+
+    attempts = {"n": 0}
+
+    def flaky_then_ok(ticker):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise Exception("transient throttle")
+        return _fake_quote(100.0, 2.0)
+
+    monkeypatch.setattr(market_movers, "get_quote", flaky_then_ok)
+    monkeypatch.setattr(market_movers.time, "sleep", lambda s: None)
+
+    result = market_movers.get_top_movers(limit=5)
+    assert attempts["n"] == 2
+    assert [g["ticker"] for g in result["gainers"]] == ["FLAKY"]
+
+
 def test_get_top_movers_isolates_one_bad_ticker(monkeypatch):
     monkeypatch.setattr(market_movers, "get_tracked_universe", lambda: ["AAA", "BAD"])
     monkeypatch.setattr(market_movers, "get_company_name", lambda t: None)
