@@ -204,12 +204,14 @@ def init_db() -> None:
             )
             """
         )
-        # Self-reported holdings only -- quantity/avg_cost are
-        # whatever the user manually typed in, never synced from a
-        # real brokerage and never used to place a trade. This is a
-        # deliberate product/safety boundary, not a stopgap: the app
-        # has no brokerage integration and never executes trades, so a
-        # "portfolio" here can only ever be a manual P&L calculator.
+        # Holdings can arrive two ways: manually typed in (quantity/
+        # avg_cost as the user reports them, never synced from a real
+        # brokerage) or via a simulated order (see the `orders` table
+        # below, which updates this same table). Either way, this is
+        # still a deliberate product/safety boundary, not a stopgap:
+        # the app has no real brokerage integration and never places or
+        # executes an ACTUAL trade -- see orders' own docstring for why
+        # a simulated order layer doesn't cross that line.
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS portfolio_holdings (
@@ -230,6 +232,33 @@ def init_db() -> None:
             conn.execute("ALTER TABLE portfolio_holdings ADD COLUMN buy_date TEXT")
         except sqlite3.OperationalError:
             pass  # column already exists
+        # Simulated paper trading -- NO real broker, NO real
+        # credentials, NO real money ever changes hands. A "BUY"/"SELL"
+        # order fills instantly and completely at the live quote price
+        # at order time (see execute_order() below), the same way this
+        # app already treats every other live number (a quote, not a
+        # historical record) -- there's no matching engine, no partial
+        # fills, no order book, because simulating those would suggest
+        # a fidelity to real market mechanics this app doesn't have and
+        # doesn't need for its actual purpose (letting a user rehearse
+        # a trade decision against real prices). currency is captured
+        # per-order (not re-derived later from a possibly-different
+        # current quote) so a past order's own record stays accurate
+        # even if the ticker's currency classification ever changed.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS orders (
+                order_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                side TEXT NOT NULL,
+                quantity REAL NOT NULL,
+                execution_price REAL NOT NULL,
+                currency TEXT NOT NULL,
+                executed_at REAL NOT NULL
+            )
+            """
+        )
 
 
 # ---------------------------------------------------------------- users/sessions
@@ -663,6 +692,104 @@ def get_portfolio_holdings(user_id: str) -> list:
         rows = conn.execute(
             "SELECT ticker, quantity, avg_cost, added_at, buy_date FROM portfolio_holdings WHERE user_id=? ORDER BY added_at DESC",
             (user_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------- simulated orders (paper trading)
+
+def execute_order(
+    user_id: str, ticker: str, side: str, quantity: float, execution_price: float, currency: str
+) -> dict:
+    """Simulated market-order fill -- instant and complete at
+    `execution_price` (the live quote main.py's endpoint fetches right
+    before calling this; db.py stays free of any market-data
+    dependency, same separation as everywhere else in this module).
+    Updates portfolio_holdings in the SAME transaction as recording the
+    order, so a holding's quantity/avg_cost and its order history can
+    never drift apart.
+
+    BUY either opens a new position (avg_cost = execution_price) or
+    extends an existing one (avg_cost becomes the weighted average of
+    the old and new lots -- the standard "average cost basis" a real
+    brokerage would compute). SELL reduces quantity WITHOUT changing
+    avg_cost (the cost basis of the shares that remain doesn't change
+    just because some were sold) and removes the holding entirely once
+    quantity reaches zero.
+
+    Raises ValueError if a SELL would take quantity negative -- this is
+    a simulation of owning and trading real positions, not a margin
+    account, so short positions aren't modeled. Callers (main.py)
+    translate that into a 400, same as every other user-input
+    validation error in this app.
+    """
+    if side not in ("BUY", "SELL"):
+        raise ValueError(f"Invalid order side: {side!r}")
+
+    order_id = str(uuid.uuid4())
+    now = time.time()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT quantity, avg_cost FROM portfolio_holdings WHERE user_id=? AND ticker=?",
+            (user_id, ticker),
+        ).fetchone()
+        current_quantity = row[0] if row else 0.0
+        current_avg_cost = row[1] if row else 0.0
+
+        if side == "BUY":
+            new_quantity = current_quantity + quantity
+            new_avg_cost = (current_quantity * current_avg_cost + quantity * execution_price) / new_quantity
+        else:
+            if quantity > current_quantity:
+                raise ValueError(
+                    f"Cannot sell {quantity} shares of {ticker}: only {current_quantity} held."
+                )
+            new_quantity = current_quantity - quantity
+            new_avg_cost = current_avg_cost
+
+        if new_quantity > 0:
+            conn.execute(
+                """
+                INSERT INTO portfolio_holdings (user_id, ticker, quantity, avg_cost, added_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, ticker) DO UPDATE SET
+                    quantity=excluded.quantity,
+                    avg_cost=excluded.avg_cost
+                """,
+                (user_id, ticker, new_quantity, new_avg_cost, now),
+            )
+        else:
+            conn.execute("DELETE FROM portfolio_holdings WHERE user_id=? AND ticker=?", (user_id, ticker))
+
+        conn.execute(
+            """
+            INSERT INTO orders (order_id, user_id, ticker, side, quantity, execution_price, currency, executed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (order_id, user_id, ticker, side, quantity, execution_price, currency, now),
+        )
+
+    return {
+        "order_id": order_id,
+        "ticker": ticker,
+        "side": side,
+        "quantity": quantity,
+        "execution_price": execution_price,
+        "currency": currency,
+        "executed_at": now,
+        "new_holding_quantity": new_quantity,
+    }
+
+
+def list_orders(user_id: str, limit: int = 20) -> list:
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT order_id, ticker, side, quantity, execution_price, currency, executed_at
+            FROM orders WHERE user_id=? ORDER BY executed_at DESC LIMIT ?
+            """,
+            (user_id, limit),
         ).fetchall()
     return [dict(r) for r in rows]
 

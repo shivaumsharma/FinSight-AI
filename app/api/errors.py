@@ -25,6 +25,7 @@ FORBIDDEN = "FORBIDDEN"
 RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED"
 TICKER_NOT_FOUND = "TICKER_NOT_FOUND"
 BACKTEST_ACCURACY_UNAVAILABLE = "BACKTEST_ACCURACY_UNAVAILABLE"
+INSUFFICIENT_SHARES = "INSUFFICIENT_SHARES"
 
 
 class APIError(Exception):
@@ -111,4 +112,12 @@ def backtest_accuracy_unavailable() -> APIError:
         BACKTEST_ACCURACY_UNAVAILABLE,
         "Backtest accuracy data is unavailable.",
         status_code=status.HTTP_404_NOT_FOUND,
+    )
+
+
+def insufficient_shares(message: str) -> APIError:
+    return APIError(
+        INSUFFICIENT_SHARES,
+        message,
+        status_code=status.HTTP_400_BAD_REQUEST,
     )
