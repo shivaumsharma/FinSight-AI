@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import RatingBadge from "./RatingBadge";
+import { currencySymbol } from "@/lib/currency";
 import type { CompanySuggestion, PortfolioHolding, PortfolioSummary } from "@/lib/types";
 
 function fmt(n: number): string {
@@ -128,15 +129,21 @@ export default function Portfolio() {
         <div className="mt-2 rounded-lg border border-border bg-card px-3.5 py-2.5">
           <div className="flex items-baseline justify-between">
             <div>
-              <div className="font-mono text-[10px] text-dim">PORTFOLIO VALUE</div>
-              <span className="font-mono text-lg font-bold text-text">${fmt(summary.total_market_value)}</span>
+              <div className="font-mono text-[10px] text-dim">
+                PORTFOLIO VALUE{summary.mixed_currency && " (USD EQUIV.)"}
+              </div>
+              <span className="font-mono text-lg font-bold text-text">
+                {currencySymbol(summary.currency)}
+                {fmt(summary.total_market_value)}
+              </span>
             </div>
             {summary.total_unrealized_pnl !== null && (
               <div className="text-right">
                 <div className="font-mono text-[10px] text-dim">OVERALL P&amp;L</div>
                 <span className={`font-mono text-xs font-bold ${summary.total_unrealized_pnl >= 0 ? "text-accent" : "text-danger"}`}>
                   {summary.total_unrealized_pnl >= 0 ? "+" : ""}
-                  ${fmt(summary.total_unrealized_pnl)}
+                  {currencySymbol(summary.currency)}
+                  {fmt(summary.total_unrealized_pnl)}
                   {summary.total_unrealized_pnl_pct !== null && ` (${summary.total_unrealized_pnl_pct.toFixed(2)}%)`}
                 </span>
               </div>
@@ -146,7 +153,10 @@ export default function Portfolio() {
             {summary.total_cost_basis !== null && (
               <div>
                 <div className="font-mono text-[10px] text-dim">INVESTED</div>
-                <span className="font-mono text-xs text-muted">${fmt(summary.total_cost_basis)}</span>
+                <span className="font-mono text-xs text-muted">
+                  {currencySymbol(summary.currency)}
+                  {fmt(summary.total_cost_basis)}
+                </span>
               </div>
             )}
             {summary.total_today_pnl !== null && (
@@ -154,7 +164,8 @@ export default function Portfolio() {
                 <div className="font-mono text-[10px] text-dim">TODAY&apos;S P&amp;L</div>
                 <span className={`font-mono text-xs font-bold ${summary.total_today_pnl >= 0 ? "text-accent" : "text-danger"}`}>
                   {summary.total_today_pnl >= 0 ? "+" : ""}
-                  ${fmt(summary.total_today_pnl)}
+                  {currencySymbol(summary.currency)}
+                  {fmt(summary.total_today_pnl)}
                   {summary.total_today_pnl_pct !== null && ` (${summary.total_today_pnl_pct.toFixed(2)}%)`}
                 </span>
               </div>
@@ -162,6 +173,8 @@ export default function Portfolio() {
           </div>
           <p className="mt-2 font-mono text-[10px] text-dim">
             Self-reported holdings, not connected to a brokerage -- unrealized P&amp;L only, no orders placed here.
+            {summary.mixed_currency && " Totals above are converted to USD at the live exchange rate."}
+            {summary.excluded_from_summary && " A holding in an unsupported currency is excluded from the totals."}
           </p>
         </div>
       )}
@@ -185,17 +198,22 @@ export default function Portfolio() {
                   )}
                 </div>
                 <div className="font-mono text-[10px] text-dim">
-                  {h.quantity} sh @ ${fmt(h.avg_cost)}
+                  {h.quantity} sh @ {currencySymbol(h.currency)}
+                  {fmt(h.avg_cost)}
                   {h.buy_date && ` · bought ${h.buy_date}`}
                 </div>
               </div>
               <div className="flex items-center gap-3">
                 {h.market_value !== null && h.unrealized_pnl !== null ? (
                   <div className="text-right">
-                    <div className="font-mono text-sm text-text">${fmt(h.market_value)}</div>
+                    <div className="font-mono text-sm text-text">
+                      {currencySymbol(h.currency)}
+                      {fmt(h.market_value)}
+                    </div>
                     <div className={`font-mono text-[10px] ${h.unrealized_pnl >= 0 ? "text-accent" : "text-danger"}`}>
                       {h.unrealized_pnl >= 0 ? "+" : ""}
-                      ${fmt(h.unrealized_pnl)}
+                      {currencySymbol(h.currency)}
+                      {fmt(h.unrealized_pnl)}
                       {h.unrealized_pnl_pct !== null && ` (${h.unrealized_pnl_pct.toFixed(1)}%)`}
                     </div>
                   </div>

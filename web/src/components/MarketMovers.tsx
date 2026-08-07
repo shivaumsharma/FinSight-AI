@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { currencySymbol } from "@/lib/currency";
 import type { MarketMoversData, MoverItem } from "@/lib/types";
 
 function BookmarkIcon({ filled }: { filled: boolean }) {
@@ -52,7 +53,10 @@ function MoverRow({ item }: { item: MoverItem }) {
       </div>
       <div className="flex items-center gap-3">
         <div className="text-right">
-          <div className="font-mono text-sm text-text">{item.price.toFixed(2)}</div>
+          <div className="font-mono text-sm text-text">
+            {currencySymbol(item.currency)}
+            {item.price.toFixed(2)}
+          </div>
           <div className={`font-mono text-[10px] font-bold ${item.change_pct >= 0 ? "text-accent" : "text-danger"}`}>
             {item.change_pct >= 0 ? "+" : ""}
             {item.change_pct.toFixed(2)}%

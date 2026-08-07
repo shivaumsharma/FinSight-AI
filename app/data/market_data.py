@@ -45,13 +45,16 @@ _QUOTE_CACHE_TTL_SECONDS = 45
 
 def get_quote(ticker: str) -> dict:
     """Cheap current-price lookup for the Watchlist -- {"price",
-    "change_pct", "previous_close"}. previous_close is exposed
-    (already fetched internally to compute change_pct) so callers that
-    need today's-dollar-move math (e.g. the Portfolio's Today's P&L)
-    don't have to back-derive it from change_pct and risk float drift.
-    Raises TickerNotFoundError if fast_info has no usable price
-    (bad/delisted symbol), same exception the rest of this module
-    already uses for that condition."""
+    "change_pct", "previous_close", "currency"}. previous_close is
+    exposed (already fetched internally to compute change_pct) so
+    callers that need today's-dollar-move math (e.g. the Portfolio's
+    Today's P&L) don't have to back-derive it from change_pct and risk
+    float drift. currency (e.g. "USD", "INR") comes from fast_info at
+    no extra network cost -- NOT a ticker-suffix guess -- and is what
+    lets Portfolio/Watchlist show a rupee-priced holding with a rupee
+    sign instead of always assuming dollars. Raises TickerNotFoundError
+    if fast_info has no usable price (bad/delisted symbol), same
+    exception the rest of this module already uses for that condition."""
     ticker = ticker.upper()
 
     cached = _quote_cache.get(ticker)
@@ -62,6 +65,7 @@ def get_quote(ticker: str) -> dict:
         fast_info = yf.Ticker(ticker).fast_info
         price = fast_info.last_price
         previous_close = fast_info.previous_close
+        currency = fast_info.currency or "USD"
     except Exception as exc:
         # fast_info raises its own internal errors (e.g. KeyError deep
         # in yfinance's response parsing) for an invalid/delisted
@@ -73,9 +77,37 @@ def get_quote(ticker: str) -> dict:
         raise TickerNotFoundError(f"No price data found for {ticker}")
 
     change_pct = ((price - previous_close) / previous_close * 100) if previous_close else None
-    quote = {"price": price, "change_pct": change_pct, "previous_close": previous_close}
+    quote = {"price": price, "change_pct": change_pct, "previous_close": previous_close, "currency": currency}
     _quote_cache[ticker] = (time.time(), quote)
     return quote
+
+
+# Only the one non-USD currency this app's actual company/index
+# coverage needs (US via SEC, India via NSE -- see
+# app/core/company_resolver.py's own scope) gets an FX ticker here.
+# Yahoo quotes "INR=X" as INR-per-1-USD (the same convention Google/XE
+# use for USD/INR), so converting a native amount TO USD divides by it.
+_FX_TICKERS_BY_CURRENCY = {"INR": "INR=X"}
+
+
+def get_usd_conversion_rate(currency: str):
+    """How many USD equal 1 unit of `currency` -- 1.0 for USD (no
+    conversion needed). Used by the Portfolio summary to make a mixed
+    USD/INR total meaningful (each holding still displays in its own
+    native currency; only the aggregate needs a common unit). Returns
+    None if there's no known FX ticker for `currency` or its live quote
+    fails -- callers must then exclude that holding from the aggregate
+    rather than silently mixing units again."""
+    if not currency or currency == "USD":
+        return 1.0
+    fx_ticker = _FX_TICKERS_BY_CURRENCY.get(currency)
+    if fx_ticker is None:
+        return None
+    try:
+        rate = get_quote(fx_ticker)["price"]
+    except Exception:
+        return None
+    return (1.0 / rate) if rate else None
 
 
 # Same lightweight-and-cached spirit as get_quote() above, for a

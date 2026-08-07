@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import RatingBadge from "./RatingBadge";
 import { formatShortDate } from "@/lib/format";
+import { currencySymbol } from "@/lib/currency";
 import type { CompanySuggestion, WatchlistItem } from "@/lib/types";
 
 // Always renders, even with zero items -- the add-ticker input is the
@@ -114,7 +115,10 @@ export default function Watchlist() {
                   <div className="flex items-center gap-3">
                     {item.price !== null && (
                       <div className="text-right">
-                        <div className="font-mono text-sm text-text">{item.price.toFixed(2)}</div>
+                        <div className="font-mono text-sm text-text">
+                          {currencySymbol(item.currency)}
+                          {item.price.toFixed(2)}
+                        </div>
                         {item.change_pct !== null && (
                           <div className={`font-mono text-[10px] ${item.change_pct >= 0 ? "text-accent" : "text-danger"}`}>
                             {item.change_pct >= 0 ? "+" : ""}

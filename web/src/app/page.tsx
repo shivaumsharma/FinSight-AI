@@ -11,6 +11,7 @@ import BottomNav from "@/components/BottomNav";
 import SearchOverlay from "@/components/SearchOverlay";
 import NotificationsPanel from "@/components/NotificationsPanel";
 import IndicesCarousel from "@/components/IndicesCarousel";
+import CurrencyTracker from "@/components/CurrencyTracker";
 import Portfolio from "@/components/Portfolio";
 import MarketNews from "@/components/MarketNews";
 import MarketMovers from "@/components/MarketMovers";
@@ -162,6 +163,8 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
         </h1>
 
         <IndicesCarousel />
+
+        <CurrencyTracker />
 
         <Portfolio />
 
