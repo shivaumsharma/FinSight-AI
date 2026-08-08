@@ -178,6 +178,66 @@ def get_corporate_actions(ticker: str) -> dict:
     return result
 
 
+# Same lightweight-and-cached spirit as get_quote()/get_corporate_actions()
+# above, for AlphaFactorsEngine's market/risk/macro factors (Relative
+# Strength vs Index, Sector Relative Performance, Interest Rate
+# Sensitivity -- see app/analysis/alpha_factors.py). A 6-hour TTL, not
+# 45s like get_quote(): this is 5 years of daily-close reference data,
+# identical for every single research request on a given day, not a
+# live intraday price -- 6h avoids re-fetching ^GSPC/^TNX/a sector ETF
+# on every ticker's report while staying fresh across a trading day.
+_benchmark_history_cache: dict = {}
+_BENCHMARK_HISTORY_CACHE_TTL_SECONDS = 6 * 3600
+
+# yfinance's own sector taxonomy (confirmed via a live fetch across
+# Technology/Financial Services/Energy/Healthcare/Consumer Defensive/
+# Consumer Cyclical/Utilities/Real Estate/Industrials/Communication
+# Services/Basic Materials -- AAPL/JPM/XOM/JNJ/PG/AMZN/NEE/AMT/CAT/
+# DIS/LIN) doesn't match GICS's own official sector names exactly (e.g.
+# "Financial Services" not "Financials", "Consumer Cyclical" not
+# "Consumer Discretionary") -- these keys are the real strings, not
+# textbook GICS names. Best-effort SPDR sector-ETF proxy, not a strict
+# GICS mapping: a company's true competitive peer set is narrower than
+# its whole sector, but there's no peer-multiple data source wired into
+# this pipeline (see relative_valuation.py's own docstring) and this is
+# the closest available reference without one.
+SECTOR_ETF_PROXIES = {
+    "Technology": "XLK",
+    "Financial Services": "XLF",
+    "Energy": "XLE",
+    "Healthcare": "XLV",
+    "Consumer Defensive": "XLP",
+    "Consumer Cyclical": "XLY",
+    "Utilities": "XLU",
+    "Real Estate": "XLRE",
+    "Industrials": "XLI",
+    "Communication Services": "XLC",
+    "Basic Materials": "XLB",
+}
+
+
+def get_benchmark_history(ticker: str, period: str = "5y"):
+    """Daily OHLCV history for a benchmark/index/ETF ticker (e.g.
+    "^GSPC", "^TNX", a sector ETF) -- returns None on any fetch failure
+    rather than raising, since every caller treats a missing benchmark
+    series as "that factor degrades to None," not a request-ending
+    error (see AlphaFactorsEngine's own degrade-independently
+    contract)."""
+    cached = _benchmark_history_cache.get(ticker)
+    if cached is not None and time.time() - cached[0] < _BENCHMARK_HISTORY_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    try:
+        df = yf.Ticker(ticker).history(period=period)
+    except Exception:
+        return None
+    if df.empty:
+        return None
+
+    _benchmark_history_cache[ticker] = (time.time(), df)
+    return df
+
+
 class MarketDataLoader:
   
   def __init__(self,ticker:str):

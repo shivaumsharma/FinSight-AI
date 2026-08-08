@@ -79,4 +79,11 @@ METRIC_MAPPINGS={
     "Total Equity Gross Minority Interest",
     "Common Stock Equity"
 ],
+  "total_assets": [
+    "Total Assets"
+  ],
+  "retained_earnings": [
+    "Retained Earnings",
+    "Retained Earnings Accumulated Deficit"
+  ],
 }

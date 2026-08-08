@@ -67,6 +67,35 @@ def test_align_and_clean_drops_rows_that_are_entirely_nan():
     assert len(cleaned) == 1
 
 
+def test_extract_metric_finds_total_assets():
+    # Confirmed against a live yfinance fetch (AAPL and RELIANCE.NS both
+    # use this exact label) before adding it to METRIC_MAPPINGS.
+    balance_sheet = _statement(["Total Assets"], ["2023-12-31"], [[1000]])
+    normaliser = FinancialStatementNormaliser(pd.DataFrame(), balance_sheet, pd.DataFrame())
+    series = normaliser.extract_metric(balance_sheet, ["Total Assets"])
+    assert list(series) == [1000]
+
+
+def test_extract_metric_falls_back_to_second_alias_for_retained_earnings():
+    balance_sheet = _statement(["Retained Earnings Accumulated Deficit"], ["2023-12-31"], [[500]])
+    normaliser = FinancialStatementNormaliser(pd.DataFrame(), balance_sheet, pd.DataFrame())
+    series = normaliser.extract_metric(
+        balance_sheet, ["Retained Earnings", "Retained Earnings Accumulated Deficit"]
+    )
+    assert list(series) == [500]
+
+
+def test_normalise_includes_total_assets_and_retained_earnings_columns():
+    income = _statement(["Total Revenue"], ["2023-12-31"], [[100]])
+    balance_sheet = _statement(
+        ["Total Assets", "Retained Earnings"], ["2023-12-31"], [[1000], [400]]
+    )
+    normaliser = FinancialStatementNormaliser(income, balance_sheet, pd.DataFrame())
+    df = normaliser.normalise()
+    assert df["total_assets"].iloc[0] == 1000
+    assert df["retained_earnings"].iloc[0] == 400
+
+
 def test_validate_financials_flags_negative_revenue():
     df = pd.DataFrame({"revenue": [100, -10]})
     normaliser = FinancialStatementNormaliser(pd.DataFrame(), pd.DataFrame(), pd.DataFrame())

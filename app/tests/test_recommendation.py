@@ -370,3 +370,44 @@ def test_compute_signal_agreement_sell_matches_expensive():
 def test_compute_signal_agreement_none_for_hold_or_missing_data():
     assert compute_signal_agreement("Hold", {"signal": "cheap"}) is None
     assert compute_signal_agreement("Buy", None) is None
+
+
+# ---------------------------------------------------------- alpha_factors isolation
+#
+# The single most important test in this file (arguably in the whole
+# Alpha Factors feature, see app/analysis/alpha_factors.py's own module
+# docstring): derive_recommendation must be BYTE-FOR-BYTE identical
+# regardless of whether valuation_results["alpha_factors"] is present,
+# absent, or None. This is the automated proof of that non-negotiable
+# boundary, not just a code-review claim -- derive_recommendation was
+# independently confirmed (by reading its full body) to never reference
+# the "alpha_factors" key at all, and this test would catch it the day
+# that ever stops being true.
+
+def test_derive_recommendation_ignores_alpha_factors_entirely():
+    base = _valuation(
+        upside_percent=22.0,
+        relative_valuation={"signal": "cheap", "vs_history_pct": -15.0},
+        monte_carlo=_mc(90.0, 110.0),
+        current_price=100.0,
+    )
+    without_key = dict(base)
+    with_none = {**base, "alpha_factors": None}
+    with_populated = {
+        **base,
+        "alpha_factors": {
+            "financial": {"Revenue CAGR (%)": 12.5},
+            "quality": {"Altman Z-Score": 5.08, "Piotroski F-Score (0-9, proxy)": 9},
+            "valuation": {"P/E vs Own History": {"signal": "expensive", "vs_history_pct": 100.0}},
+            "market": {"Relative Strength vs Index (%)": 8.2},
+            "risk": {"Beta": 1.35},
+            "sentiment": {"Management/SEC Filing Sentiment": "Positive"},
+            "macro": {"Interest Rate Sensitivity": -0.42},
+        },
+    }
+
+    result_without = derive_recommendation(without_key)
+    result_none = derive_recommendation(with_none)
+    result_populated = derive_recommendation(with_populated)
+
+    assert result_without == result_none == result_populated
