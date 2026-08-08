@@ -50,5 +50,20 @@ jobs:
       # their own docstrings) -- they need the full model stack and
       # live network access (SEC EDGAR, Hugging Face), so they're
       # excluded from CI and left for a developer to run locally.
+      # Runs with -x --tb=short so a failure stops fast and prints a
+      # short traceback, then re-emits the actual failure (not just
+      # pytest's own exit code) as a GitHub Actions error annotation.
+      # Annotations are readable via the Checks API without needing a
+      # signed-in session (unlike the raw log stream, which now requires
+      # sign-in even on a public repo) -- this is what makes a CI
+      # failure diagnosable from outside the browser at all.
       - name: Run unit tests
-        run: pytest app/tests/ --ignore=app/tests/test_finbert.py --ignore=app/tests/test_rag.py -v
+        run: |
+          set +e
+          pytest app/tests/ --ignore=app/tests/test_finbert.py --ignore=app/tests/test_rag.py -x --tb=short 2>&1 | tee pytest_output.txt
+          exit_code=${PIPESTATUS[0]}
+          if [ "$exit_code" -ne 0 ]; then
+            summary=$(tail -60 pytest_output.txt | awk '{gsub(/%/,"%25"); gsub(/\r/,"%0D"); printf "%s%%0A", $0}')
+            echo "::error::pytest failed (exit $exit_code):%0A$summary"
+          fi
+          exit $exit_code
