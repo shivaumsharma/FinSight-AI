@@ -263,7 +263,15 @@ class AlphaFactorsEngine:
             curr_op_margin > prior_op_margin,
             curr_turnover > prior_turnover,
         ]
-        return sum(tests)
+        # sum() of numpy.bool_ comparisons (curr/prior come from a
+        # pandas Series, so these are numpy scalars, not Python floats)
+        # returns numpy.int64, not a plain Python int -- confirmed via a
+        # real live run (not caught by unit tests, which build their
+        # DataFrames from Python float literals): FastAPI's default JSON
+        # encoder serializes numpy.float64 fine (it subclasses float)
+        # but raises "Object of type int64 is not JSON serializable" on
+        # numpy.int64, which does NOT subclass Python's int.
+        return int(sum(tests))
 
     # Original (1968) public-company Altman Z-Score, market value of
     # equity -- not the private-company Z'-Score variant. total_liabilities

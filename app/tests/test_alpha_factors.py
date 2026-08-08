@@ -9,6 +9,8 @@ markets (Relative Strength vs Index, Sector Relative Performance,
 Interest Rate Sensitivity).
 """
 
+import json
+
 import pandas as pd
 import pytest
 
@@ -143,7 +145,19 @@ def test_piotroski_f_score_all_nine_signals_positive():
         current_assets=[200, 300], current_liabilities=[150, 150],
         shares_outstanding=[100, 100], ebit=[50, 88], revenue=[500, 605],
     )
-    assert _engine(financials=df)._piotroski_f_score() == 9
+    score = _engine(financials=df)._piotroski_f_score()
+    assert score == 9
+    # A genuine Python int, not numpy.int64 -- `== 9` alone doesn't
+    # catch this (numpy defines __eq__ to compare by value across
+    # types), but numpy.int64 is NOT JSON-serializable by FastAPI's
+    # default encoder, unlike numpy.float64 (which subclasses float).
+    # Confirmed via a real live run: sum() of the 9 numpy.bool_
+    # comparisons (curr/prior come from a pandas row, so these are
+    # numpy scalars even when every test fixture in this file uses
+    # plain Python int/float literals -- pandas stores them as a numpy
+    # dtype column regardless) silently returned numpy.int64, which
+    # every test here comparing with `== 9`/`== 0` never caught.
+    assert type(score) is int
 
 
 def test_piotroski_f_score_all_nine_signals_negative():
@@ -529,3 +543,13 @@ def test_valuation_tool_wires_alpha_factors_onto_the_context(monkeypatch):
     # not just that the dict shape is right.
     assert alpha_factors["quality"]["Current Ratio"] is not None
     assert alpha_factors["risk"]["Beta"] == 1.2
+
+    # The regression that actually broke production (caught only by a
+    # real live run, not by any of the value-correctness assertions
+    # above): json.dumps must succeed on the whole scorecard, the same
+    # serialization path FastAPI's response encoder exercises. Piotroski's
+    # int(sum(...)) fix (see alpha_factors.py) is what this proves stays
+    # fixed -- str(default=str) below is deliberately NOT used, since
+    # that would silently paper back over a numpy.int64 regression
+    # instead of failing on it.
+    json.dumps(alpha_factors)

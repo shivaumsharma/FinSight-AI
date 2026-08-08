@@ -93,6 +93,32 @@ def _dict_table(data: dict, formatters: Optional[dict] = None) -> Table:
     return table
 
 
+def _alpha_factor_value(value: Any) -> str:
+    """Formatter for one Alpha Factors scorecard cell -- most values are
+    plain numbers/strings, but "P/E vs Own History"/"P/B vs Own History"
+    (see alpha_factors.py) are small nested dicts (current multiple,
+    historical average, %, signal), which need their own compact
+    rendering rather than falling through to Python's raw dict repr."""
+    if value is None:
+        return "Unavailable"
+    if isinstance(value, dict):
+        pct = value.get("vs_history_pct")
+        signal = value.get("signal")
+        if pct is not None and signal:
+            return (
+                f"{value.get('current')}x vs {value.get('historical_avg')}x "
+                f"{value.get('years_used')}yr avg ({pct:+.1f}%, {signal})"
+            )
+        return str(value)
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int):
+        return f"{value:,}"
+    if isinstance(value, float):
+        return f"{value:,.2f}"
+    return str(value)
+
+
 def _sensitivity_table(df, symbol: str = "$") -> Optional[Table]:
     if df is None or df.empty:
         return None
@@ -310,8 +336,43 @@ def build_pdf_report(report_data: dict) -> bytes:
         }
         story.append(_dict_table(rv_fields))
 
-    # ---------------- 8. Market and Earnings Analysis ----------------
-    story.append(Paragraph("8. Market and Earnings Analysis", _SECTION_STYLE))
+    # ---------------- 8. Alpha Factors Scorecard ----------------
+    # Display-only, same non-negotiable boundary as the ML classifier
+    # and relative-valuation cross-check above -- see alpha_factors.py's
+    # own module docstring. Each category's dict may carry an
+    # underscore-prefixed "_..._note"/"_..._definition" key (e.g. the
+    # .NS-ticker gating explanation) -- rendered as a small caption
+    # below that category's table, not as a numeric row.
+    alpha_factors = valuation.get("alpha_factors")
+    if alpha_factors:
+        story.append(Paragraph("8. Alpha Factors Scorecard", _SECTION_STYLE))
+        story.append(Paragraph(
+            "A transparent set of financial, valuation, quality, market, risk, "
+            "sentiment, and macro signals shown for context alongside the DCF above "
+            "&mdash; informational only, not part of the Buy/Hold/Sell recommendation.",
+            _BODY_STYLE,
+        ))
+        category_labels = {
+            "financial": "Financial", "quality": "Quality", "valuation": "Valuation",
+            "market": "Market", "risk": "Risk", "sentiment": "Sentiment", "macro": "Macro",
+        }
+        for key, label in category_labels.items():
+            category = alpha_factors.get(key) or {}
+            fields = {k: v for k, v in category.items() if not k.startswith("_")}
+            note = next(
+                (v for k, v in category.items() if k.startswith("_") and isinstance(v, str)), None,
+            )
+            if not fields:
+                continue
+            story.append(Spacer(1, 8))
+            story.append(Paragraph(label, _BODY_STYLE))
+            story.append(_dict_table(fields, {k: _alpha_factor_value for k in fields}))
+            if note:
+                story.append(Spacer(1, 4))
+                story.append(Paragraph(f'<font size="8" color="#888888">{note}</font>', _BODY_STYLE))
+
+    # ---------------- 9. Market and Earnings Analysis ----------------
+    story.append(Paragraph("9. Market and Earnings Analysis", _SECTION_STYLE))
     market = report_data["market_earnings_snapshot"]
     market_fields = {
         "Current Price": _fmt_number(market["current_price"], prefix=symbol),
@@ -329,8 +390,8 @@ def build_pdf_report(report_data: dict) -> bytes:
     story.append(Spacer(1, 8))
     story.append(Paragraph(narrative.get("Market and Earnings Analysis", "Not available."), _BODY_STYLE))
 
-    # ---------------- 9. Risk Analysis ----------------
-    story.append(Paragraph("9. Risk Analysis", _SECTION_STYLE))
+    # ---------------- 10. Risk Analysis ----------------
+    story.append(Paragraph("10. Risk Analysis", _SECTION_STYLE))
     story.append(Paragraph(narrative.get("Risk Analysis", "Not available."), _BODY_STYLE))
 
     # ---------------- News Sources Used in This Analysis ----------------
@@ -367,12 +428,12 @@ def build_pdf_report(report_data: dict) -> bytes:
             _BODY_STYLE,
         ))
 
-    # ---------------- 10. Investment Thesis ----------------
-    story.append(Paragraph("10. Investment Thesis", _SECTION_STYLE))
+    # ---------------- 11. Investment Thesis ----------------
+    story.append(Paragraph("11. Investment Thesis", _SECTION_STYLE))
     story.append(Paragraph(narrative.get("Investment Thesis", "Not available."), _BODY_STYLE))
 
-    # ---------------- 11. Recommendation (recap) ----------------
-    story.append(Paragraph("11. Buy / Hold / Sell Recommendation", _SECTION_STYLE))
+    # ---------------- 12. Recommendation (recap) ----------------
+    story.append(Paragraph("12. Buy / Hold / Sell Recommendation", _SECTION_STYLE))
     story.append(Paragraph(
         f'<font color="{rating_color.hexval()}"><b>{rating}</b></font> &mdash; {recommendation["basis"]}',
         _BODY_STYLE,
@@ -383,22 +444,22 @@ def build_pdf_report(report_data: dict) -> bytes:
             _BODY_STYLE,
         ))
 
-    # ---------------- 12. Confidence Scores ----------------
-    story.append(Paragraph("12. Confidence Scores", _SECTION_STYLE))
+    # ---------------- 13. Confidence Scores ----------------
+    story.append(Paragraph("13. Confidence Scores", _SECTION_STYLE))
     confidence = report_data["confidence_scores"]
     confidence_formatters = {k: _fmt_percent for k in confidence if "%" in k}
     story.append(_dict_table(confidence, confidence_formatters))
 
-    # ---------------- 13. References ----------------
-    story.append(Paragraph("13. References", _SECTION_STYLE))
+    # ---------------- 14. References ----------------
+    story.append(Paragraph("14. References", _SECTION_STYLE))
     for i, ref in enumerate(report_data["references"], 1):
         text = f"[{i}] {ref['type']}: {ref['label']}"
         if ref.get("url"):
             text += f' &mdash; <a href="{ref["url"]}">{ref["url"]}</a>'
         story.append(Paragraph(text, _BODY_STYLE))
 
-    # ---------------- 14. Institutional Consensus Score ----------------
-    story.append(Paragraph("14. Institutional Consensus Score", _SECTION_STYLE))
+    # ---------------- 15. Institutional Consensus Score ----------------
+    story.append(Paragraph("15. Institutional Consensus Score", _SECTION_STYLE))
     consensus = (report_data.get("institutional_consensus") or {}).get("recommendation_consensus")
     if not consensus:
         story.append(Paragraph(
