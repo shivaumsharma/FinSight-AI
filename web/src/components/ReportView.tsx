@@ -117,8 +117,27 @@ function fmtLargeDollar(v: number, symbol: string): string {
   return `${symbol}${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 }
 
+// "P/E vs Own History"/"P/B vs Own History" (app/analysis/alpha_factors.py)
+// are the one case a field value is a small nested object rather than a
+// plain number/string -- same shape pdf_report_builder.py's own
+// _alpha_factor_value renders, kept in sync with that compact form.
+function isVsHistoryValue(value: unknown): value is {
+  current?: number; historical_avg?: number; years_used?: number; vs_history_pct?: number; signal?: string;
+} {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "vs_history_pct" in value &&
+    "signal" in value
+  );
+}
+
 function formatFieldValue(key: string, value: unknown, symbol: string): string {
   if (value === null || value === undefined) return "N/A";
+  if (isVsHistoryValue(value)) {
+    const pct = value.vs_history_pct ?? 0;
+    return `${value.current}x vs ${value.historical_avg}x ${value.years_used}yr avg (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%, ${value.signal})`;
+  }
   if (typeof value !== "number") return String(value);
 
   if (FRACTION_KEYS.has(key)) return `${(value * 100).toFixed(2)}%`;
@@ -129,9 +148,14 @@ function formatFieldValue(key: string, value: unknown, symbol: string): string {
   return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
+// Underscore-prefixed keys (e.g. alpha_factors' "_market_note"/
+// "_macro_note"/"_interest_rate_sensitivity_definition") are captions,
+// not fields -- excluded here and rendered separately by FactorCategory
+// below. No existing caller's data has ever used a leading underscore
+// key, so this filter is a no-op everywhere else.
 function KeyValueGrid({ data, symbol }: { data: Record<string, unknown> | undefined; symbol: string }) {
   if (!data) return null;
-  const entries = Object.entries(data).filter(([, v]) => v !== null && v !== undefined);
+  const entries = Object.entries(data).filter(([k, v]) => !k.startsWith("_") && v !== null && v !== undefined);
   return (
     <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
       {entries.map(([k, v]) => (
@@ -140,6 +164,29 @@ function KeyValueGrid({ data, symbol }: { data: Record<string, unknown> | undefi
           <div className="font-mono text-sm text-text">{formatFieldValue(k, v, symbol)}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// One Alpha Factors category block (Financial/Quality/Valuation/Market/
+// Risk/Sentiment/Macro) -- label + KeyValueGrid + an optional note
+// caption pulled out of that category's own underscore-prefixed key.
+// Renders nothing for a category with zero real fields (e.g. Macro for
+// an .NS ticker, where Interest Rate Sensitivity is gated to null and
+// only the note remains) -- a lone caption with no data above it would
+// read as broken, not informative.
+function FactorCategory({ label, data, symbol }: { label: string; data: Record<string, unknown> | undefined; symbol: string }) {
+  if (!data) return null;
+  const hasFields = Object.entries(data).some(([k, v]) => !k.startsWith("_") && v !== null && v !== undefined);
+  if (!hasFields) return null;
+  const note = Object.entries(data).find(([k, v]) => k.startsWith("_") && typeof v === "string")?.[1] as
+    | string
+    | undefined;
+  return (
+    <div>
+      <div className="mb-2 font-mono text-[11px] font-bold tracking-wide text-muted">{label.toUpperCase()}</div>
+      <KeyValueGrid data={data} symbol={symbol} />
+      {note && <p className="mt-2 text-[10px] leading-relaxed text-dim">{note}</p>}
     </div>
   );
 }
@@ -179,6 +226,7 @@ export default function ReportView({
   const valuation = rd.valuation_analysis || {};
   const monteCarlo = valuation.monte_carlo;
   const mlClassifier = valuation.ml_classifier;
+  const alphaFactors = valuation.alpha_factors;
   const consensus = rd.institutional_consensus?.recommendation_consensus;
   const news = rd.news_sources || {};
   const company = (rd.company_overview as Record<string, unknown>) || {};
@@ -357,6 +405,27 @@ export default function ReportView({
                     </div>
                   )}
                 </div>
+              ),
+            },
+            {
+              label: "Factors",
+              content: alphaFactors ? (
+                <div className="space-y-5">
+                  <p className="text-[11px] leading-relaxed text-muted">
+                    A transparent scorecard of financial, valuation, quality, market, risk, sentiment, and
+                    macro signals shown for context alongside the DCF -- informational only, not part of the
+                    recommendation above.
+                  </p>
+                  <FactorCategory label="Financial" data={alphaFactors.financial} symbol={symbol} />
+                  <FactorCategory label="Quality" data={alphaFactors.quality} symbol={symbol} />
+                  <FactorCategory label="Valuation" data={alphaFactors.valuation} symbol={symbol} />
+                  <FactorCategory label="Market" data={alphaFactors.market} symbol={symbol} />
+                  <FactorCategory label="Risk" data={alphaFactors.risk} symbol={symbol} />
+                  <FactorCategory label="Sentiment" data={alphaFactors.sentiment} symbol={symbol} />
+                  <FactorCategory label="Macro" data={alphaFactors.macro} symbol={symbol} />
+                </div>
+              ) : (
+                <p className="text-sm text-muted">Not available for this report.</p>
               ),
             },
             {
