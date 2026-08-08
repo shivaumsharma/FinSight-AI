@@ -21,6 +21,8 @@ from app.valuation.relative_valuation import RelativeValuationEngine
 from app.valuation.monte_carlo_dcf import MonteCarloDCFEngine
 from app.valuation.ml_features import extract_features
 from app.valuation.ml_valuation_classifier import predict_verdict
+from app.analysis.alpha_factors import AlphaFactorsEngine
+from app.data.market_data import get_benchmark_history, SECTOR_ETF_PROXIES
 from .base_tool import BaseTool
 
 
@@ -101,6 +103,45 @@ class ValuationTool(BaseTool):
         # extract_features).
         ml_features = extract_features(context)
         results["ml_classifier"] = predict_verdict(ml_features) if ml_features else None
+
+        # Alpha Factors scorecard -- see alpha_factors.py's own module
+        # docstring. Same non-negotiable boundary as ml_classifier
+        # above: display-only, never read by report_data_builder.py's
+        # composite score. The three benchmark-comparison factors
+        # (Relative Strength vs Index, Sector Relative Performance,
+        # Interest Rate Sensitivity) are skipped entirely for .NS
+        # tickers -- comparing a rupee-denominated stock against a
+        # USD-denominated benchmark isn't a meaningful signal (see
+        # AlphaFactorsEngine's own docstring) -- so those fetches are
+        # never even made for an NSE ticker.
+        is_non_us_listing = (context.ticker or "").upper().endswith(".NS")
+        benchmark_history = None
+        sector_history = None
+        rate_proxy_history = None
+        if not is_non_us_listing:
+            benchmark_history = get_benchmark_history("^GSPC")
+            rate_proxy_history = get_benchmark_history("^TNX")
+            sector_etf = SECTOR_ETF_PROXIES.get((context.company_info or {}).get("sector"))
+            if sector_etf:
+                sector_history = get_benchmark_history(sector_etf)
+
+        results["alpha_factors"] = AlphaFactorsEngine(
+            normalized_financials=context.normalized_financials,
+            historical_prices=context.historical_prices,
+            beta=context.beta,
+            company_info=context.company_info,
+            # financial_summary/sentiment_summary default to "" (an
+            # empty string, not a dict) on a fresh ResearchContext until
+            # their own tools populate them -- see research_context.py's
+            # dataclass fields. Guard rather than assume dict.
+            financial_summary=context.financial_summary if isinstance(context.financial_summary, dict) else {},
+            sentiment_summary=context.sentiment_summary if isinstance(context.sentiment_summary, dict) else {},
+            news_sentiment_summary=context.news_sentiment_summary or {},
+            is_non_us_listing=is_non_us_listing,
+            benchmark_history=benchmark_history,
+            sector_history=sector_history,
+            rate_proxy_history=rate_proxy_history,
+        ).evaluate()
 
         context.valuation_summary = ValuationSummaryBuilder().build(results)
 

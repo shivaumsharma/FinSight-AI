@@ -730,6 +730,7 @@ def build_report_data(context: ResearchContext) -> Dict[str, Any]:
             "relative_valuation": valuation_results.get("relative_valuation"),
             "monte_carlo": valuation_results.get("monte_carlo"),
             "ml_classifier": valuation_results.get("ml_classifier"),
+            "alpha_factors": valuation_results.get("alpha_factors"),
         },
 
         "market_earnings_snapshot": {
