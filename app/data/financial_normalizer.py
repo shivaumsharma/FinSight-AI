@@ -38,6 +38,8 @@ class FinancialStatementNormaliser:
     self.balance_sheet,
     METRIC_MAPPINGS["total_equity"]
 )
+        normalised_data["total_assets"] = self.extract_metric(self.balance_sheet, METRIC_MAPPINGS["total_assets"])
+        normalised_data["retained_earnings"] = self.extract_metric(self.balance_sheet, METRIC_MAPPINGS["retained_earnings"])
 
         normalised_df=pd.DataFrame(normalised_data)
         cleaned_df=self.align_and_clean(normalised_df)

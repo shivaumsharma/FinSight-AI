@@ -196,3 +196,76 @@ def test_get_corporate_actions_is_cached_within_the_ttl(monkeypatch):
     md.get_corporate_actions("MSFT")
     md.get_corporate_actions("MSFT")
     assert len(calls) == 1
+
+
+# ---------------------------------------------------------------- get_benchmark_history / SECTOR_ETF_PROXIES
+
+class _FakeBenchmarkStock:
+    def __init__(self, history_df):
+        self._history_df = history_df
+
+    def history(self, period="5y"):
+        return self._history_df
+
+
+@pytest.fixture(autouse=True)
+def _clear_benchmark_history_cache(monkeypatch):
+    monkeypatch.setattr(md, "_benchmark_history_cache", {})
+
+
+def test_get_benchmark_history_returns_the_fetched_dataframe(monkeypatch):
+    df = pd.DataFrame({"Close": [100.0, 101.0]}, index=pd.to_datetime(["2024-01-01", "2024-01-02"]))
+    monkeypatch.setattr(md.yf, "Ticker", lambda ticker: _FakeBenchmarkStock(df))
+
+    result = md.get_benchmark_history("^GSPC")
+    assert list(result["Close"]) == [100.0, 101.0]
+
+
+def test_get_benchmark_history_is_cached_within_the_ttl(monkeypatch):
+    calls = []
+
+    def make_stock(ticker):
+        calls.append(ticker)
+        return _FakeBenchmarkStock(pd.DataFrame({"Close": [100.0]}, index=pd.to_datetime(["2024-01-01"])))
+
+    monkeypatch.setattr(md.yf, "Ticker", make_stock)
+
+    md.get_benchmark_history("^GSPC")
+    md.get_benchmark_history("^GSPC")
+    assert len(calls) == 1
+
+
+def test_get_benchmark_history_caches_different_tickers_independently(monkeypatch):
+    monkeypatch.setattr(
+        md.yf, "Ticker",
+        lambda ticker: _FakeBenchmarkStock(pd.DataFrame({"Close": [1.0]}, index=pd.to_datetime(["2024-01-01"]))),
+    )
+    md.get_benchmark_history("^GSPC")
+    md.get_benchmark_history("^TNX")
+    assert set(md._benchmark_history_cache.keys()) == {"^GSPC", "^TNX"}
+
+
+def test_get_benchmark_history_returns_none_on_empty_data(monkeypatch):
+    monkeypatch.setattr(md.yf, "Ticker", lambda ticker: _FakeBenchmarkStock(pd.DataFrame()))
+    assert md.get_benchmark_history("^GSPC") is None
+
+
+def test_get_benchmark_history_returns_none_instead_of_raising(monkeypatch):
+    def raise_error(ticker):
+        raise ValueError("network error")
+
+    monkeypatch.setattr(md.yf, "Ticker", raise_error)
+    assert md.get_benchmark_history("^GSPC") is None
+
+
+def test_sector_etf_proxies_cover_every_yfinance_sector_confirmed_live():
+    # Confirmed via a live fetch (AAPL/JPM/XOM/JNJ/PG/AMZN/NEE/AMT/CAT/
+    # DIS/LIN) before this dict was written -- see market_data.py's own
+    # comment. Guards against a future edit silently dropping one of
+    # these 11 real yfinance sector strings.
+    expected_sectors = {
+        "Technology", "Financial Services", "Energy", "Healthcare",
+        "Consumer Defensive", "Consumer Cyclical", "Utilities",
+        "Real Estate", "Industrials", "Communication Services", "Basic Materials",
+    }
+    assert set(md.SECTOR_ETF_PROXIES.keys()) == expected_sectors
