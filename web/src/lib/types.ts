@@ -52,6 +52,14 @@ export interface ValuationAnalysis {
     probabilities: Record<string, number>;
     model_name: string;
   } | null;
+  // Category -> {label: value}, from app/analysis/alpha_factors.py.
+  // Deliberately loose on the value type: most entries are number |
+  // string | null, but "P/E vs Own History"/"P/B vs Own History" are
+  // small nested objects, and a category may carry an underscore-
+  // prefixed "_..._note"/"_..._definition" string key -- see
+  // ReportView.tsx's formatFieldValue/KeyValueGrid for how each shape
+  // renders.
+  alpha_factors?: Record<string, Record<string, unknown>> | null;
   [key: string]: unknown;
 }
 
