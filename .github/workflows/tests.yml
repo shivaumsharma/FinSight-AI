@@ -50,20 +50,33 @@ jobs:
       # their own docstrings) -- they need the full model stack and
       # live network access (SEC EDGAR, Hugging Face), so they're
       # excluded from CI and left for a developer to run locally.
-      # Runs with -x --tb=short so a failure stops fast and prints a
-      # short traceback, then re-emits the actual failure (not just
-      # pytest's own exit code) as a GitHub Actions error annotation.
-      # Annotations are readable via the Checks API without needing a
-      # signed-in session (unlike the raw log stream, which now requires
-      # sign-in even on a public repo) -- this is what makes a CI
-      # failure diagnosable from outside the browser at all.
+      # test_company_resolver.py belongs in that same category and was
+      # missed when this exclusion list was first drawn up: it has zero
+      # mocking and builds its US/NSE company indices from a genuinely
+      # live fetch on every run (see company_resolver.py's
+      # COMPANY_INDEX_CACHE/NSE_INDEX_CACHE, both gitignored -- there is
+      # no committed snapshot for CI to load instead). Confirmed via a
+      # CI annotation (2026-08-08) showing NSE fuzzy-name resolution
+      # ("bajaj finance" -> BAJFINANCE.NS) returning [] specifically on
+      # GitHub's runners while passing reliably from a local machine --
+      # consistent with archives.nseindia.com blocking/throttling
+      # requests from cloud-datacenter IP ranges, the same class of
+      # issue already diagnosed for Yahoo Finance against Cloud Run
+      # earlier this project (see market_movers.py's own docstring).
+      # Runs with --tb=short (not -x, so one CI round-trip surfaces
+      # every failure, not just the first) and re-emits the actual
+      # pytest output (not just its exit code) as a GitHub Actions error
+      # annotation -- annotations are readable via the Checks API
+      # without a signed-in session (unlike the raw log stream, which
+      # now requires sign-in even on a public repo), which is what makes
+      # a CI failure diagnosable at all without opening a browser.
       - name: Run unit tests
         run: |
           set +e
-          pytest app/tests/ --ignore=app/tests/test_finbert.py --ignore=app/tests/test_rag.py -x --tb=short 2>&1 | tee pytest_output.txt
+          pytest app/tests/ --ignore=app/tests/test_finbert.py --ignore=app/tests/test_rag.py --ignore=app/tests/test_company_resolver.py --tb=short 2>&1 | tee pytest_output.txt
           exit_code=${PIPESTATUS[0]}
           if [ "$exit_code" -ne 0 ]; then
-            summary=$(tail -60 pytest_output.txt | awk '{gsub(/%/,"%25"); gsub(/\r/,"%0D"); printf "%s%%0A", $0}')
+            summary=$(tail -150 pytest_output.txt | awk '{gsub(/%/,"%25"); gsub(/\r/,"%0D"); printf "%s%%0A", $0}')
             echo "::error::pytest failed (exit $exit_code):%0A$summary"
           fi
           exit $exit_code
