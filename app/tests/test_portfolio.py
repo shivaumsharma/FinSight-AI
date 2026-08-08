@@ -237,7 +237,14 @@ def test_holding_rating_reflects_the_users_last_completed_report(client, monkeyp
     job_id = submit_resp.json()["job_id"]
 
     import time
-    deadline = time.time() + 5.0
+    # 15s, not 5s -- GitHub Actions' shared 2-core runners are
+    # consistently slower than a dev machine, and this test was caught
+    # failing there (CI runs 2026-08-05 through 2026-08-07, every single
+    # one) while passing reliably in isolation locally. 5s was already
+    # observed flaking locally too under heavy concurrent CPU load
+    # earlier this session -- CI just hits that same margin every time,
+    # not occasionally.
+    deadline = time.time() + 15.0
     while time.time() < deadline:
         if client.get(f"/v1/research/{job_id}", headers=auth_headers).json()["status"] == db.STATUS_DONE:
             break
