@@ -248,7 +248,12 @@ def test_watchlist_rating_reflects_the_users_last_completed_report(client, monke
     job_id = submit_resp.json()["job_id"]
 
     import time
-    deadline = time.time() + 5.0
+    # 15s, not 5s -- see test_portfolio.py's identical polling loop for
+    # why: GitHub Actions' shared runners are slower than a dev machine,
+    # and this exact test was observed failing on every CI run
+    # 2026-08-05 through 2026-08-07 while passing reliably in isolation
+    # locally.
+    deadline = time.time() + 15.0
     while time.time() < deadline:
         if client.get(f"/v1/research/{job_id}", headers=auth_headers).json()["status"] == db.STATUS_DONE:
             break
