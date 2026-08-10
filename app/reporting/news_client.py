@@ -30,6 +30,8 @@ from typing import Dict, List, Optional
 import requests
 from dotenv import load_dotenv
 
+from app.core.retry import retry_on_transient_error
+
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -117,13 +119,16 @@ def fetch_market_news(limit: int = 20) -> List[Dict]:
         return []
 
     try:
-        resp = requests.get(
-            "https://finnhub.io/api/v1/news",
-            params={"category": "general", "token": FINNHUB_API_KEY},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        raw_articles = resp.json()
+        def _do():
+            resp = requests.get(
+                "https://finnhub.io/api/v1/news",
+                params={"category": "general", "token": FINNHUB_API_KEY},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            return resp
+
+        raw_articles = retry_on_transient_error(_do).json()
     except (requests.RequestException, ValueError):
         return []
 
@@ -188,18 +193,21 @@ def fetch_company_news(ticker: str, days: int = DAYS_LOOKBACK) -> List[Dict]:
         to_date = datetime.utcnow().date()
         from_date = to_date - timedelta(days=days)
 
-        resp = requests.get(
-            "https://finnhub.io/api/v1/company-news",
-            params={
-                "symbol": ticker.upper(),
-                "from": from_date.isoformat(),
-                "to": to_date.isoformat(),
-                "token": FINNHUB_API_KEY,
-            },
-            timeout=15,
-        )
-        resp.raise_for_status()
-        raw_articles = resp.json()
+        def _do():
+            resp = requests.get(
+                "https://finnhub.io/api/v1/company-news",
+                params={
+                    "symbol": ticker.upper(),
+                    "from": from_date.isoformat(),
+                    "to": to_date.isoformat(),
+                    "token": FINNHUB_API_KEY,
+                },
+                timeout=15,
+            )
+            resp.raise_for_status()
+            return resp
+
+        raw_articles = retry_on_transient_error(_do).json()
     except (requests.RequestException, ValueError):
         return []
 

@@ -26,6 +26,7 @@ why persistence exists at all (surviving a restart), which a
 still-in-memory PDF blob would have quietly defeated.
 """
 
+import logging
 import os
 from typing import Callable, Optional
 
@@ -35,6 +36,10 @@ from app.core.llm_provider import LLMProviderError, get_llm_provider, is_local_p
 from app.core.logger import ResearchLogger
 from app.core.paths import REPORTS_DIR, RESEARCH_LOG_DIR  # noqa: F401 -- re-exported; see app/core/paths.py
 from concurrent.futures import ThreadPoolExecutor
+
+# Uses the root logger's handler/level/format configured once by
+# main.py's logging.basicConfig() call at import time -- see there.
+logger = logging.getLogger(__name__)
 
 
 def _resolve_max_workers() -> int:
@@ -140,12 +145,12 @@ def _notify_job_complete(job_id: str) -> None:
                     # transient failure worth ever retrying.
                     db.remove_push_subscription(sub["endpoint"])
                 else:
-                    print(f"[job {job_id}] push notification failed for one subscription (non-fatal): {e}")
+                    logger.warning(f"[job {job_id}] push notification failed for one subscription (non-fatal): {e}")
             except Exception as e:
-                print(f"[job {job_id}] push notification failed for one subscription (non-fatal): {e}")
+                logger.warning(f"[job {job_id}] push notification failed for one subscription (non-fatal): {e}")
 
     except Exception as e:
-        print(f"[job {job_id}] _notify_job_complete failed entirely (non-fatal): {e}")
+        logger.warning(f"[job {job_id}] _notify_job_complete failed entirely (non-fatal): {e}")
 
 
 def _run_job(job_id: str, question: str, orchestrator_name: str,
@@ -225,7 +230,7 @@ def _run_job(job_id: str, question: str, orchestrator_name: str,
             try:
                 ResearchLogger(log_directory=str(RESEARCH_LOG_DIR)).save(context)
             except Exception as e:
-                print(f"[job {job_id}] ResearchLogger.save failed (non-fatal): {e}")
+                logger.warning(f"[job {job_id}] ResearchLogger.save failed (non-fatal): {e}")
 
             pdf_path = None
             if context.pdf_bytes:
@@ -238,7 +243,7 @@ def _run_job(job_id: str, question: str, orchestrator_name: str,
             usage = provider.get_last_usage()
             result["llm_usage"] = usage
             if usage:
-                print(f"[job {job_id}] {context.ticker}: llm_usage={usage}")
+                logger.info(f"[job {job_id}] {context.ticker}: llm_usage={usage}")
             db.mark_done(job_id, result, pdf_path)
 
         except TickerNotFoundError as e:
@@ -259,7 +264,10 @@ def _run_job(job_id: str, question: str, orchestrator_name: str,
         # handling above itself. Best-effort: db.mark_error could
         # theoretically fail too (e.g. disk full), in which case there
         # is genuinely nothing left to do but let the timeout sweep
-        # catch it eventually.
+        # catch it eventually. Logged at error level either way -- this
+        # branch means a bug in this function's OWN error handling, not
+        # just an ordinary pipeline failure, and was previously silent.
+        logger.error(f"[job {job_id}] unhandled error in job runner: {e}")
         try:
             db.mark_error(job_id, "INTERNAL_ERROR", f"Unhandled error in job runner: {e}")
         except Exception:

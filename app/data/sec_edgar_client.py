@@ -32,6 +32,8 @@ from typing import Optional, Dict
 import requests
 from bs4 import BeautifulSoup
 
+from app.core.retry import retry_on_transient_error
+
 BASE_DIR = Path(__file__).resolve().parents[2]
 CACHE_DIR = BASE_DIR / "filings_cache"
 TICKER_MAP_CACHE = CACHE_DIR / "ticker_cik_map.json"
@@ -71,13 +73,16 @@ class SECEdgarClient:
                     self._ticker_to_cik = json.load(f)
                     return self._ticker_to_cik
 
-        resp = requests.get(
-            "https://www.sec.gov/files/company_tickers.json",
-            headers=HEADERS,
-            timeout=15,
-        )
-        resp.raise_for_status()
-        raw = resp.json()
+        def _do():
+            resp = requests.get(
+                "https://www.sec.gov/files/company_tickers.json",
+                headers=HEADERS,
+                timeout=15,
+            )
+            resp.raise_for_status()
+            return resp
+
+        raw = retry_on_transient_error(_do).json()
 
         mapping = {
             entry["ticker"].upper(): str(entry["cik_str"]).zfill(10)
@@ -98,13 +103,16 @@ class SECEdgarClient:
     # ------------------------------------------------------------
 
     def _get_submissions(self, cik: str) -> dict:
-        resp = requests.get(
-            f"https://data.sec.gov/submissions/CIK{cik}.json",
-            headers=HEADERS,
-            timeout=15,
-        )
-        resp.raise_for_status()
-        return resp.json()
+        def _do():
+            resp = requests.get(
+                f"https://data.sec.gov/submissions/CIK{cik}.json",
+                headers=HEADERS,
+                timeout=15,
+            )
+            resp.raise_for_status()
+            return resp
+
+        return retry_on_transient_error(_do).json()
 
     def _filings_by_form(self, submissions: dict, form_type: str, limit: int, require_item: str = None) -> list:
         """
@@ -186,13 +194,16 @@ class SECEdgarClient:
         acc_nodash = accession_number.replace("-", "")
         cik_int = str(int(cik))
 
-        resp = requests.get(
-            f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc_nodash}/index.json",
-            headers=HEADERS,
-            timeout=15,
-        )
-        resp.raise_for_status()
-        items = resp.json().get("directory", {}).get("item", [])
+        def _do():
+            resp = requests.get(
+                f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc_nodash}/index.json",
+                headers=HEADERS,
+                timeout=15,
+            )
+            resp.raise_for_status()
+            return resp
+
+        items = retry_on_transient_error(_do).json().get("directory", {}).get("item", [])
 
         # "ex99"/"ex-99" alone misses filenames spelled out as
         # "exhibit99..." (no abbreviation) -- confirmed on the real
@@ -219,13 +230,17 @@ class SECEdgarClient:
         acc_nodash = accession_number.replace("-", "")
         cik_int = str(int(cik))
         url = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc_nodash}/{document}"
-        resp = requests.get(url, headers=HEADERS, timeout=20)
-        resp.raise_for_status()
+
+        def _do():
+            resp = requests.get(url, headers=HEADERS, timeout=20)
+            resp.raise_for_status()
+            return resp
+
         # Pass raw bytes to BeautifulSoup rather than resp.text -- its
         # UnicodeDammit encoding detection handles SEC's mix of UTF-8
         # and legacy Windows-1252 filings more reliably than requests'
         # own guess.
-        return resp.content
+        return retry_on_transient_error(_do).content
 
     def _html_to_text(self, html_bytes) -> str:
         soup = BeautifulSoup(html_bytes, "html.parser")
