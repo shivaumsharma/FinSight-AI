@@ -5,7 +5,7 @@ import BacktestBadge from "./BacktestBadge";
 import ModelCompare from "./ModelCompare";
 import RatingBadge, { ratingColorClass } from "./RatingBadge";
 import Tabs from "./Tabs";
-import type { ResearchResult } from "@/lib/types";
+import type { ResearchResult, SignalQuality } from "@/lib/types";
 
 function ShareButton({ jobId }: { jobId: string }) {
   const [state, setState] = useState<"idle" | "sharing" | "copied" | "error">("idle");
@@ -77,6 +77,57 @@ function StatTile({ label, value, valueClass }: { label: string; value: React.Re
     <div className="flex-1 rounded-lg border border-border bg-card px-3 py-2.5">
       <div className="font-mono text-[10px] text-muted">{label}</div>
       <div className={`mt-0.5 font-mono text-sm font-bold ${valueClass || "text-text"}`}>{value}</div>
+    </div>
+  );
+}
+
+// Separates *direction* (the rating above, already final) from *quality
+// of evidence* -- see app/reporting/report_data_builder.py's
+// derive_signal_quality() docstring. Display-only: never changes the
+// rating, same visual pattern (label + StatTile row + a small grid) as
+// FactorCategory's Alpha Factors blocks below.
+function SignalQualityBlock({ signalQuality }: { signalQuality: SignalQuality | undefined }) {
+  if (!signalQuality) return null;
+
+  const labelClass =
+    signalQuality.quality_label === "HIGH"
+      ? "text-accent"
+      : signalQuality.quality_label === "LOW"
+      ? "text-danger"
+      : "text-warn";
+
+  const directionClass = (direction: string) =>
+    direction === "Bullish" ? "text-accent" : direction === "Bearish" ? "text-danger" : "text-warn";
+
+  return (
+    <div className="mt-3 rounded-lg border border-border bg-card px-3.5 py-3">
+      <div className="flex items-center justify-between">
+        <div className="font-mono text-[11px] font-bold tracking-wide text-muted">SIGNAL QUALITY</div>
+        <div className={`font-mono text-xs font-bold ${labelClass}`}>{signalQuality.quality_label}</div>
+      </div>
+      <div className="mt-2 flex gap-2">
+        <StatTile
+          label="CONFIDENCE"
+          value={signalQuality.confidence !== null ? `${signalQuality.confidence}%` : "N/A"}
+        />
+        <StatTile
+          label="EVIDENCE COVERAGE"
+          value={signalQuality.evidence_coverage !== null ? `${signalQuality.evidence_coverage}%` : "N/A"}
+        />
+        <StatTile label="MODEL AGREEMENT" value={signalQuality.model_agreement} />
+      </div>
+      <div className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-3">
+        {Object.entries(signalQuality.breakdown).map(([key, direction]) => (
+          <div key={key} className="flex items-center justify-between text-[11px]">
+            <span className="text-muted">{key.replace(/_/g, " ").toUpperCase()}</span>
+            <span className={`font-mono font-bold ${directionClass(direction)}`}>{direction}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2.5 text-[10px] text-dim">
+        How much of the supporting evidence and independent cross-checks agree -- separate from, and never a
+        factor in, the rating above.
+      </p>
     </div>
   );
 }
@@ -296,6 +347,7 @@ export default function ReportView({
           <strong>Low-confidence signal:</strong> {rec.confidence_flag}
         </div>
       )}
+      <SignalQualityBlock signalQuality={rd.signal_quality} />
 
       {/* Stat tiles */}
       <div className="mt-3 flex gap-2">
