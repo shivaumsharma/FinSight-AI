@@ -53,3 +53,9 @@ httpx
 # bigger, more failure-prone thing to hand-roll than a single hash/HMAC
 # call. Pulls in py_vapid and cryptography as transitive dependencies.
 pywebpush
+
+# Read-side PDF text extraction for NSE India filing evidence
+# (app/data/nse_filings_client.py) -- reportlab above is write-only,
+# for the PDF *export*; NSE's corporate announcements are individual
+# PDFs with no SEC-EDGAR-style HTML equivalent.
+pypdf
