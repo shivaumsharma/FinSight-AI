@@ -819,19 +819,26 @@ def build_report_data(context: ResearchContext) -> Dict[str, Any]:
     )
 
     # NSE-listed tickers (see company_resolver.py's NSE index) carry a
-    # ".NS" suffix and structurally have no SEC filings -- RAGTool/
-    # SECEdgarClient already degrade gracefully with zero filings found
-    # (empty citations, sentiment skipped), but that looks identical to
-    # "we tried and found nothing" for a US ticker with genuinely thin
-    # coverage. Surfaced explicitly here so a reader sees this is
-    # expected market coverage, not a silent retrieval gap.
+    # ".NS" suffix and route through NSEFilingsClient instead of SEC
+    # EDGAR (see rag_pipeline.py's ingest_company_disclosure) -- but
+    # NSE's live announcements API is a real, unproven-at-scale
+    # dependency (see nse_filings_client.py's own docstring on why it
+    # might not be reachable from every deploy environment), so this
+    # note fires only when a filing was actually NOT found for THIS
+    # run, not unconditionally for every .NS ticker regardless of
+    # outcome -- context.metadata["disclosure_source"] (the same field
+    # _references() below reads) is only ever set when RAGTool actually
+    # found and ingested a real filing, from either source.
     is_non_us_listing = (context.ticker or "").upper().endswith(".NS")
+    disclosure_found = bool((context.metadata or {}).get("disclosure_source"))
     filing_evidence_note = (
-        "SEC filing evidence is unavailable for this market -- FinSight's evidence "
-        "retrieval currently covers SEC EDGAR (US-listed companies) only. Management "
-        "Sentiment below and its supporting citations don't apply here; market data, "
-        "valuation, and news sentiment are unaffected."
-        if is_non_us_listing else None
+        "NSE filing evidence could not be retrieved for this report -- FinSight "
+        "attempts to fetch a recent NSE corporate disclosure (quarterly results "
+        "announcement) for .NS-listed tickers, but no qualifying filing was found "
+        "or NSE couldn't be reached for this run. Management Sentiment below and "
+        "its supporting citations don't apply here; market data, valuation, and "
+        "news sentiment are unaffected."
+        if is_non_us_listing and not disclosure_found else None
     )
 
     return {

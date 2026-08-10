@@ -1,11 +1,14 @@
 """
 rag_tool.py
 
-Retrieves grounded evidence from a real SEC disclosure (an 8-K
-earnings-release exhibit, or a 10-Q/10-K's MD&A section as fallback),
-fetched live for whatever ticker the question is about -- not from a
-handful of hand-authored transcript files for a fixed list of
-companies.
+Retrieves grounded evidence from a real regulatory disclosure --
+SEC EDGAR (an 8-K earnings-release exhibit, or a 10-Q/10-K's MD&A
+section as fallback) for US-listed tickers, NSE India (a "Financial
+Result Updates"/"Outcome of Board Meeting" announcement) for .NS-listed
+ones -- fetched live for whatever ticker the question is about, not
+from a handful of hand-authored transcript files for a fixed list of
+companies. See RAGPipeline.ingest_company_disclosure for the SEC-vs-NSE
+branch; everything below that point is source-agnostic.
 
 Reuses, unchanged:
  - QueryClassifier         (rule-based intent detection)
@@ -50,10 +53,10 @@ class RAGTool(BaseTool):
 
     name = "rag_tool"
     description = (
-        "Retrieves relevant evidence from the company's most recent SEC "
+        "Retrieves relevant evidence from the company's most recent regulatory "
         "disclosure (earnings release or filing), with citations. Required "
         "for questions about management commentary, guidance, or recent results. "
-        "Works for any ticker SEC has a filing for."
+        "Works for any ticker SEC (US-listed) or NSE (.NS-listed) has a filing for."
     )
 
     def run(self, context: ResearchContext) -> ResearchContext:
