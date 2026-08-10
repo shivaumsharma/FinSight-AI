@@ -110,6 +110,15 @@ _ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").spl
 # middleware landed.
 _API_KEY = os.environ.get("API_KEY")
 
+# Configures the ROOT logger once, here, at import time -- every other
+# module in this app (jobs.py included) just calls
+# logging.getLogger(__name__) and inherits this handler/level/format
+# rather than each configuring its own. Cloud Run already captures
+# stdout as Cloud Logging regardless of this call; this is about real
+# severity levels and structured "logger name: message" output instead
+# of bare print(), not a new destination.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
 logger = logging.getLogger(__name__)
 
 
@@ -129,7 +138,7 @@ async def lifespan(app: FastAPI):
     db.init_db()
     reconciled = db.reconcile_interrupted_jobs()
     if reconciled:
-        print(f"[startup] reconciled {reconciled} orphaned job(s) from a previous run -> INTERRUPTED")
+        logger.info(f"[startup] reconciled {reconciled} orphaned job(s) from a previous run -> INTERRUPTED")
 
     sweep_thread = threading.Thread(target=_timeout_sweep_loop, daemon=True)
     sweep_thread.start()
