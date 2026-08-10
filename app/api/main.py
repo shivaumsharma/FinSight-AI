@@ -98,10 +98,11 @@ _ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").spl
 # NOT real authentication or authorization: a single shared secret,
 # checked with a plain string comparison -- no per-user identity, no
 # expiry, no scopes, no rate limiting of its own. Its actual job: once
-# this service has a public Railway URL, it's one HTTP request away
-# from anyone on the internet burning through this deployment's real
-# Finnhub free-tier quota and Groq API spend on every question
-# submitted. This is a lock on the front door against that, not a
+# this service has a public URL (Cloud Run in production; Railway is
+# still a supported alternative -- see README.md's deploy section), it's
+# one HTTP request away from anyone on the internet burning through this
+# deployment's real Finnhub free-tier quota and Groq API spend on every
+# question submitted. This is a lock on the front door against that, not a
 # security boundary -- a real product needs real per-user auth on top
 # of this, not instead of it. If API_KEY isn't set at all, the check
 # below is a no-op (existing local-dev/test behavior is unchanged) --
