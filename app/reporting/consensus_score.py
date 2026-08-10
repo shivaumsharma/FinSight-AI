@@ -27,6 +27,15 @@ STRONG_AGREEMENT_THRESHOLD = 75.0
 MODERATE_AGREEMENT_THRESHOLD = 50.0
 LOW_AGREEMENT_THRESHOLD = 25.0
 
+# Below this many covering institutions, a percentage score is
+# statistically misleading -- one firm agreeing reads as a 100% "Strong
+# Agreement" the same way ten firms agreeing would, even though the two
+# convey wildly different confidence. Disclosed via low_sample_size/
+# sample_size_note below rather than silently changing the score itself
+# (the score stays a plain, statable binary-match percentage either way
+# -- see this module's own docstring on why v1 stays that simple).
+LOW_SAMPLE_THRESHOLD = 3
+
 
 def _agreement_label(score: float) -> str:
     if score >= STRONG_AGREEMENT_THRESHOLD:
@@ -73,6 +82,7 @@ def build_consensus_report(
 
     total = len(institutional_ratings)
     score = round(len(agreeing) / total * 100)
+    low_sample_size = total < LOW_SAMPLE_THRESHOLD
 
     return {
         "score": score,
@@ -82,6 +92,13 @@ def build_consensus_report(
         "agreeing_count": len(agreeing),
         "disagreeing_count": len(disagreeing),
         "total_count": total,
+        "low_sample_size": low_sample_size,
+        "sample_size_note": (
+            f"Based on only {total} covering institution{'s' if total != 1 else ''} -- "
+            f"a small sample, so this score is less statistically meaningful than "
+            f"it would be with broader coverage."
+            if low_sample_size else None
+        ),
         "summary": (
             f"{len(agreeing)} institution{'s' if len(agreeing) != 1 else ''} "
             f"{'agree' if len(agreeing) != 1 else 'agrees'}. "
