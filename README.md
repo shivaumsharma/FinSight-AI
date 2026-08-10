@@ -145,9 +145,48 @@ To deploy your own copy:
 2. Link it to this GitHub repo (Space Settings → "Link to a GitHub repository"), or push directly: `git remote add space https://huggingface.co/spaces/<you>/<space-name>` then `git push space main`.
 3. The `sdk`/`app_file` front matter at the top of this README configures the Space automatically.
 
-### Deploying the API to Railway
+### Deploying the API + frontend: Google Cloud Run + Vercel
 
-The FastAPI service (`app/api/`, `Dockerfile`) is a separate deployable artifact from the Streamlit demo above — a job-queue API meant for a real client (mobile app, another service) to poll, not a UI. Picked Railway specifically for first-class Docker + persistent-volume support without extra config.
+Production runs the FastAPI service (`app/api/`, `Dockerfile`) on **Google Cloud Run** and the Next.js frontend (`web/`) on **Vercel** — not Railway (still fully supported, see "Alternative: Railway" below; the same `Dockerfile`/`railway.json` this section used to document work unchanged). Cloud Run was picked for the same Docker-first reasoning Railway originally was; Vercel is the natural fit for `web/`'s Next.js App Router frontend, which didn't exist yet when the Railway instructions below were first written.
+
+**One-time setup (Cloud Run):**
+1. Create a GCP project, enable Cloud Run, Cloud Build, and Artifact Registry.
+2. Cloud Console → Cloud Run → **Create Service → Continuously deploy from a repository** → connect this GitHub repo, branch `main`, build type Dockerfile. This provisions both the Cloud Run service and the Cloud Build trigger that redeploys use (a build trigger ID, referenced below).
+3. Set every var from `.env.example` on the service (Console → your service → **Edit & Deploy New Revision → Variables**, or `gcloud run services update <service> --region=<region> --set-env-vars KEY=value,...`). `API_KEY` is required before this is exposed anywhere public — see `.env.example` and `app/api/main.py`'s `require_api_key` for why.
+4. Note whether your Cloud Run instance's filesystem is ephemeral across revisions (it is, by default) — `jobs.db`/`reports/`/`llm_logs/` need `DATA_DIR` pointed at a real persistent volume (Cloud Storage FUSE or Filestore) if you need them to survive a redeploy, same requirement Railway's volume step below has always had. This repo's own production deploy does not yet have one wired up — see the Roadmap section.
+
+**Redeploy after a change** (what this repo's own commits actually run):
+```bash
+gcloud builds triggers run <your-trigger-id> --region=global --branch=main
+```
+Builds `Dockerfile`, pushes the image to Artifact Registry, and rolls out a new Cloud Run revision — the manually-invoked equivalent of Railway's auto-deploy-on-push (no `cloudbuild.yaml` is committed to this repo, so nothing redeploys automatically on push yet — see the Roadmap section).
+
+**Verify:**
+```bash
+curl https://<your-cloud-run-url>/health
+curl -X POST https://<your-cloud-run-url>/v1/research \
+  -H "X-API-Key: your-api-key" -H "Content-Type: application/json" \
+  -d '{"question": "Should I invest in Apple?"}'
+# poll GET /v1/research/{job_id} until status is "done", then:
+curl https://<your-cloud-run-url>/v1/research/{job_id}/pdf -o report.pdf
+```
+
+**Frontend (Vercel), one-time setup:**
+```bash
+cd web
+npx vercel@latest link          # links this directory to a Vercel project
+```
+Then set `FINSIGHT_API_URL` (the Cloud Run URL above) and `FINSIGHT_API_KEY` (matching `API_KEY` on the backend) as Environment Variables in the Vercel dashboard — see `web/.env.example`.
+
+**Redeploy after a change:**
+```bash
+cd web
+npx vercel@latest --prod
+```
+
+#### Alternative: Railway
+
+Railway remains a fully supported one-service deploy for the API via the committed `Dockerfile`/`railway.json` — potentially simpler for a from-scratch setup, since Railway auto-provisions its build trigger for you instead of the manual Cloud Console wizard above.
 
 **1. Install the CLI and log in** (one-time, interactive browser login):
 ```bash
@@ -175,7 +214,7 @@ railway variables set DATA_DIR=/data
 railway variables set API_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 railway variables set ALLOWED_ORIGINS=https://your-frontend.example.com
 ```
-`DATA_DIR` must match the volume's mount path from step 3 exactly, or `jobs.db`/`reports/`/`llm_logs/` silently land back on the ephemeral container filesystem. `API_KEY` is required before this is exposed anywhere public — see `.env.example` and `app/api/main.py`'s `require_api_key` for why. `PORT` is set automatically by Railway; don't set it yourself.
+`DATA_DIR` must match the volume's mount path from step 3 exactly, or `jobs.db`/`reports/`/`llm_logs/` silently land back on the ephemeral container filesystem. `PORT` is set automatically by Railway; don't set it yourself.
 
 **5. Deploy:**
 ```bash
@@ -187,14 +226,6 @@ Railway builds `Dockerfile` and deploys automatically on every push once the pro
 ```bash
 railway domain            # generates/shows the public URL if one isn't set yet
 curl https://<your-app>.up.railway.app/health
-```
-Then confirm a real job end-to-end (replace the URL and key):
-```bash
-curl -X POST https://<your-app>.up.railway.app/v1/research \
-  -H "X-API-Key: your-api-key" -H "Content-Type: application/json" \
-  -d '{"question": "Should I invest in Apple?"}'
-# poll GET /v1/research/{job_id} until status is "done", then:
-curl https://<your-app>.up.railway.app/v1/research/{job_id}/pdf -o report.pdf
 ```
 
 ---

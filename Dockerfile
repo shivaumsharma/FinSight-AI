@@ -1,4 +1,8 @@
-# FastAPI research service (app/api/) for Railway deployment.
+# FastAPI research service (app/api/) -- deployed to Google Cloud Run in
+# production (see README.md's "Deploying the API + frontend" section);
+# also fully supported on Railway via railway.json as an alternative.
+# Nothing in this Dockerfile is platform-specific -- both read $PORT at
+# runtime (see the CMD line below).
 #
 # Deliberately NOT a minimal image: RAG retrieval (chromadb +
 # sentence-transformers) and FinBERT sentiment scoring are separate
@@ -34,9 +38,10 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 FROM python:3.11-slim
 
 # curl: Railway's own healthcheck (railway.json) hits this over the
-# network from outside the container, not from in here -- kept only in
-# case a future in-container healthcheck/debugging needs it. Cheap
-# enough to keep; drop it if that never materializes.
+# network from outside the container, not from in here; Cloud Run's
+# healthcheck likewise hits it over the network -- kept only in case a
+# future in-container healthcheck/debugging needs it. Cheap enough to
+# keep; drop it if that never materializes.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
     && rm -rf /var/lib/apt/lists/*
@@ -49,9 +54,10 @@ COPY . .
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# $PORT is assigned by Railway at runtime, not fixed here -- the
-# ${PORT:-8000} fallback only matters for `docker run` without -e PORT
-# set (local testing convenience), Railway always sets it. Shell form
+# $PORT is assigned at runtime by whichever platform this runs on
+# (Cloud Run sets it to 8080, Railway sets its own value), not fixed
+# here -- the ${PORT:-8000} fallback only matters for `docker run`
+# without -e PORT set (local testing convenience). Shell form
 # (not exec-form CMD ["..."]) is required for ${PORT} to actually
 # expand -- exec form passes the literal string through with no shell
 # to interpolate it.
