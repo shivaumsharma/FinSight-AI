@@ -273,16 +273,19 @@ def _run_job(job_id: str, question: str, orchestrator_name: str,
         _notify_job_complete(job_id)
 
 
-def submit_job(
-    question: str, orchestrator: str = "hand_rolled", user_id: str = "anonymous",
+def enqueue_job(
+    job_id: str, question: str, orchestrator: str = "hand_rolled",
     agent_factory: Optional[Callable] = None,
-) -> str:
+) -> None:
     """
+    Hands an already-created job row off to the worker pool -- row
+    creation itself now happens in main.py via db.create_job_if_under_limit
+    (the atomic count-and-insert that closes the quota race; see its own
+    docstring), not here, so this is just the executor.submit() half of
+    what used to be a single submit_job() that also created the row.
     Company-name validation (resolve_companies/NoCompanyDetectedError)
-    happens in main.py's endpoint handler BEFORE this is called, not
-    here -- a request that fails that check should never create a row
-    or occupy the single worker slot at all.
+    happens in main.py's endpoint handler before either step, not here --
+    a request that fails that check should never create a row or occupy
+    the single worker slot at all.
     """
-    job_id = db.create_job(question=question, orchestrator=orchestrator, user_id=user_id)
     _executor.submit(_run_job, job_id, question, orchestrator, agent_factory)
-    return job_id
