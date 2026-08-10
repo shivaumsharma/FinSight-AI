@@ -24,9 +24,11 @@ import pytest
 
 from app.reporting.report_data_builder import (
     BUY_THRESHOLD, SELL_THRESHOLD, DCF_WEIGHT, RELATIVE_WEIGHT, SCORE_CAP,
+    QUALITY_HIGH_THRESHOLD, QUALITY_LOW_THRESHOLD,
     _DCF_UPSIDE_PCT_PERCENTILES,
     _dcf_score, _relative_score, _composite_score, _percentile_rank_score,
     _rating_from_score, compute_signal_agreement, derive_recommendation,
+    derive_signal_quality,
 )
 
 
@@ -411,3 +413,124 @@ def test_derive_recommendation_ignores_alpha_factors_entirely():
     result_populated = derive_recommendation(with_populated)
 
     assert result_without == result_none == result_populated
+
+
+# ---------------------------------------------------------- derive_signal_quality
+
+def _rec(rating="Buy", composite_score=10.0, dcf_only_rating="Buy",
+         signal_disagreement=False, mc_wide_ci=False):
+    return {
+        "rating": rating,
+        "composite_score": composite_score,
+        "dcf_only_rating": dcf_only_rating,
+        "signal_disagreement": signal_disagreement,
+        "mc_wide_ci": mc_wide_ci,
+    }
+
+
+def test_signal_quality_high_at_or_above_the_high_threshold():
+    result = derive_signal_quality(_rec(), {}, {"overall_score": QUALITY_HIGH_THRESHOLD}, {}, None)
+    assert result["quality_label"] == "HIGH"
+    assert result["confidence"] == QUALITY_HIGH_THRESHOLD
+    assert result["evidence_coverage"] == QUALITY_HIGH_THRESHOLD
+
+
+def test_signal_quality_low_below_the_low_threshold():
+    result = derive_signal_quality(_rec(), {}, {"overall_score": QUALITY_LOW_THRESHOLD - 1}, {}, None)
+    assert result["quality_label"] == "LOW"
+
+
+def test_signal_quality_medium_between_the_two_thresholds():
+    midpoint = (QUALITY_LOW_THRESHOLD + QUALITY_HIGH_THRESHOLD) / 2
+    result = derive_signal_quality(_rec(), {}, {"overall_score": midpoint}, {}, None)
+    assert result["quality_label"] == "MEDIUM"
+
+
+def test_signal_quality_is_low_when_evidence_coverage_is_unavailable():
+    # No numeric "Overall Score" -- nothing to be confident about, so
+    # this must degrade to LOW rather than crash or silently pass as
+    # HIGH/MEDIUM.
+    result = derive_signal_quality(_rec(), {}, {"overall_score": "Unavailable"}, {}, None)
+    assert result["quality_label"] == "LOW"
+    assert result["confidence"] is None
+    assert result["evidence_coverage"] is None
+
+
+def test_signal_quality_confidence_is_docked_for_disagreement_and_wide_ci():
+    baseline = derive_signal_quality(_rec(), {}, {"overall_score": 90}, {}, None)
+    docked = derive_signal_quality(
+        _rec(signal_disagreement=True, mc_wide_ci=True), {}, {"overall_score": 90}, {}, None
+    )
+    assert docked["confidence"] < baseline["confidence"]
+    assert docked["evidence_coverage"] == baseline["evidence_coverage"]  # evidence_coverage itself is undocked
+
+
+def test_signal_quality_confidence_never_drops_below_zero():
+    result = derive_signal_quality(
+        _rec(signal_disagreement=True, mc_wide_ci=True), {}, {"overall_score": 5}, {}, None
+    )
+    assert result["confidence"] >= 0
+
+
+def test_model_agreement_is_na_when_no_votes_are_available():
+    result = derive_signal_quality(_rec(dcf_only_rating=None), {}, {}, {}, None)
+    assert result["model_agreement"] == "N/A"
+
+
+def test_model_agreement_is_na_for_insufficient_data_rating():
+    result = derive_signal_quality(
+        _rec(rating="Insufficient Data", dcf_only_rating="Buy"),
+        {"relative_valuation": {"signal": "cheap"}}, {}, {}, None,
+    )
+    assert result["model_agreement"] == "N/A"
+
+
+def test_model_agreement_counts_agreeing_votes_against_the_final_rating():
+    valuation_results = {
+        "relative_valuation": {"signal": "cheap"},  # -> Buy
+        "ml_classifier": {"verdict": "OVERVALUED"},  # -> Sell
+    }
+    result = derive_signal_quality(
+        _rec(rating="Buy", dcf_only_rating="Buy"), valuation_results, {}, {}, None,
+    )
+    # DCF-only (Buy) agrees, relative valuation (Buy) agrees, ML classifier (Sell) disagrees.
+    assert result["model_agreement"] == "2/3"
+
+
+def test_signal_quality_breakdown_degrades_to_neutral_when_data_is_missing():
+    # No alpha_factors, no sentiment, no institutional_consensus -- must
+    # never crash, and every dimension without real data reads Neutral.
+    result = derive_signal_quality(_rec(dcf_only_rating=None), {}, {}, {}, None)
+    breakdown = result["breakdown"]
+    assert breakdown["fundamentals"] == "Neutral"
+    assert breakdown["momentum"] == "Neutral"
+    assert breakdown["sentiment"] == "Neutral"
+    assert breakdown["institutional_consensus"] == "Neutral"
+
+
+def test_signal_quality_breakdown_reads_real_alpha_factors_and_sentiment():
+    valuation_results = {
+        "alpha_factors": {
+            "financial": {"Revenue Growth YoY (%)": 12.0},
+            "market": {"6-Month Price Momentum (%)": -5.0},
+        },
+    }
+    result = derive_signal_quality(
+        _rec(), valuation_results, {}, {"Overall Sentiment": "Positive"}, None,
+    )
+    breakdown = result["breakdown"]
+    assert breakdown["fundamentals"] == "Bullish"
+    assert breakdown["momentum"] == "Bearish"
+    assert breakdown["sentiment"] == "Bullish"
+
+
+def test_signal_quality_breakdown_institutional_consensus_majority_vote():
+    institutional_consensus = {
+        "recommendation_consensus": {
+            "institutional_ratings": [
+                {"rating": "BUY"}, {"rating": "BUY"}, {"rating": "SELL"},
+            ],
+        },
+    }
+    result = derive_signal_quality(_rec(), {}, {}, {}, institutional_consensus)
+    assert result["breakdown"]["institutional_consensus"] == "Bullish"
