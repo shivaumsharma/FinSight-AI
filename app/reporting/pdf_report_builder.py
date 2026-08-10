@@ -475,23 +475,27 @@ def build_pdf_report(report_data: dict) -> bytes:
             _BODY_STYLE,
         ))
         story.append(Paragraph(consensus["methodology"], _BODY_STYLE))
+        if consensus.get("low_sample_size") and consensus.get("sample_size_note"):
+            story.append(Paragraph(consensus["sample_size_note"], _DISCLAIMER_STYLE))
         story.append(Spacer(1, 8))
 
         story.append(Paragraph("Market Consensus", _BODY_STYLE))
-        consensus_rows = [
-            [r["firm"], r["rating"]] for r in consensus["institutional_ratings"]
+        consensus_rows = [["Firm", "Date", "Raw Grade", "Rating"]] + [
+            [r["firm"], r.get("date") or "--", r.get("raw_grade") or "--", r["rating"]]
+            for r in consensus["institutional_ratings"]
         ]
-        consensus_table = Table(consensus_rows, colWidths=[3.4 * inch, 1.5 * inch])
+        consensus_table = Table(consensus_rows, colWidths=[2.6 * inch, 1.1 * inch, 1.8 * inch, 1.2 * inch])
         row_styles = [
             ("FONTSIZE", (0, 0), (-1, -1), 9.5),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
             ("TOPPADDING", (0, 0), (-1, -1), 5),
             ("LINEBELOW", (0, 0), (-1, -1), 0.5, colors.HexColor("#dddddd")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ]
-        for i, r in enumerate(consensus["institutional_ratings"]):
+        for i, r in enumerate(consensus["institutional_ratings"], start=1):
             color = _RATING_COLORS.get(r["rating"].title(), colors.black)
-            row_styles.append(("TEXTCOLOR", (1, i), (1, i), color))
-            row_styles.append(("FONTNAME", (1, i), (1, i), "Helvetica-Bold"))
+            row_styles.append(("TEXTCOLOR", (3, i), (3, i), color))
+            row_styles.append(("FONTNAME", (3, i), (3, i), "Helvetica-Bold"))
         consensus_table.setStyle(TableStyle(row_styles))
         story.append(consensus_table)
 

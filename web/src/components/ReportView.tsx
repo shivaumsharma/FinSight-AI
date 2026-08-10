@@ -457,16 +457,27 @@ export default function ReportView({
                       <div className="font-mono text-2xl font-bold text-text">{consensus.score}%</div>
                       <div className="text-xs text-muted">{consensus.label}</div>
                       <p className="mt-2 text-[11px] text-muted">{consensus.methodology}</p>
+                      {consensus.low_sample_size && consensus.sample_size_note && (
+                        <div className="mt-2 rounded-lg border border-amber-900/60 bg-amber-950/40 px-3 py-2 text-[11px] text-warn">
+                          <strong>Note:</strong> {consensus.sample_size_note}
+                        </div>
+                      )}
                       <div className="mt-3 space-y-1">
                         {consensus.institutional_ratings.map((r, i) => (
-                          <div key={i} className="flex justify-between text-xs">
-                            <span className="text-text/80">{r.firm}</span>
-                            <span
-                              className={`font-mono font-bold ${ratingColorClass(
-                                r.rating.charAt(0).toUpperCase() + r.rating.slice(1).toLowerCase()
-                              )}`}
-                            >
-                              {r.rating}
+                          <div key={i} className="flex items-baseline justify-between text-xs">
+                            <span className="text-text/80">
+                              {r.firm}
+                              {r.date && <span className="ml-1.5 text-[10px] text-dim">{r.date}</span>}
+                            </span>
+                            <span className="flex items-baseline gap-1.5">
+                              {r.raw_grade && <span className="text-[10px] text-muted">{r.raw_grade}</span>}
+                              <span
+                                className={`font-mono font-bold ${ratingColorClass(
+                                  r.rating.charAt(0).toUpperCase() + r.rating.slice(1).toLowerCase()
+                                )}`}
+                              >
+                                {r.rating}
+                              </span>
                             </span>
                           </div>
                         ))}
