@@ -3,12 +3,15 @@ Production RAG Pipeline
 
 Responsibilities
 ----------------
-- Fetch a real SEC disclosure for any ticker (via SECEdgarClient)
+- Fetch a real disclosure for any ticker -- SEC EDGAR (SECEdgarClient)
+  for US-listed tickers, NSE India (NSEFilingsClient) for .NS-listed
+  ones (see ingest_company_disclosure's own docstring for the branch)
 - Avoid duplicate ingestion, scoped per company
 - Query vector database
 - Return retrieved chunks
 """
 
+from app.data.nse_filings_client import NSEFilingsClient
 from app.data.sec_edgar_client import SECEdgarClient
 from app.rag.Text_chunker import FinancialTranscriptChunker
 from app.rag.chroma_store import ChromaVectorStore
@@ -20,6 +23,7 @@ class RAGPipeline:
 
         self.vector_store = ChromaVectorStore()
         self.sec_client = SECEdgarClient()
+        self.nse_client = NSEFilingsClient()
 
     # =========================================================
     # Disclosure Ingestion
@@ -27,33 +31,43 @@ class RAGPipeline:
 
     def ingest_company_disclosure(self, ticker):
         """
-        Fetches this ticker's most useful recent SEC disclosure (an
-        8-K earnings-release exhibit, falling back to a 10-Q/10-K's
-        MD&A section) and ingests it into the vector store, unless
-        this company's stored chunks are already from that exact
-        filing.
+        Fetches this ticker's most useful recent disclosure -- for a
+        US-listed ticker, an 8-K earnings-release exhibit falling back
+        to a 10-Q/10-K's MD&A section (SECEdgarClient); for a .NS-listed
+        ticker, NSE's own most recent "Outcome of Board Meeting"/
+        "Financial Result Updates" announcement (NSEFilingsClient) --
+        and ingests it into the vector store, unless this company's
+        stored chunks are already from that exact filing. Everything
+        downstream of the returned dict (chunking, embedding, citation
+        building) is entirely source-agnostic; this branch is the
+        entire SEC-vs-NSE integration point.
 
         Previously this skipped ingestion whenever the company had
         ANY chunks stored at all, regardless of which filing they
-        came from -- fetch_company_disclosure() always re-checks SEC
-        for whatever filing is CURRENTLY the latest (its own disk
-        cache is keyed per accession number, not "per ticker"), but
-        the vector store never got refreshed to match, so a ticker
+        came from -- fetch_company_disclosure() always re-checks the
+        source for whatever filing is CURRENTLY the latest (its own
+        disk cache is keyed per accession number, not "per ticker"),
+        but the vector store never got refreshed to match, so a ticker
         queried once would keep serving that same filing's content
         indefinitely, even years later once new filings existed. Now
-        compares accession numbers -- SEC's unique ID for a specific
-        filing -- so ingestion actually re-runs when a newer filing is
-        available, and stays skipped (cheap) when it isn't.
+        compares accession numbers -- a unique ID for a specific
+        filing, from either source -- so ingestion actually re-runs
+        when a newer filing is available, and stays skipped (cheap)
+        when it isn't.
 
         Returns (chunks, disclosure_metadata). disclosure_metadata is
-        None if SEC has no CIK / no qualifying filing for this ticker
-        (e.g. some foreign private issuers file 20-F/6-K instead) --
+        None if the relevant source has no qualifying filing for this
+        ticker (e.g. a US foreign-private-issuer filing 20-F/6-K
+        instead, or NSE being unreachable/having nothing to show) --
         callers should treat that as "no evidence available" rather
         than an error, the same way a missing transcript used to be
         handled.
         """
 
-        disclosure = self.sec_client.fetch_company_disclosure(ticker)
+        if (ticker or "").upper().endswith(".NS"):
+            disclosure = self.nse_client.fetch_company_disclosure(ticker[:-3])
+        else:
+            disclosure = self.sec_client.fetch_company_disclosure(ticker)
 
         if not disclosure:
             return [], None
