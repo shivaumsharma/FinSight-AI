@@ -68,9 +68,17 @@ export interface InstitutionalConsensus {
     score: number;
     label: string;
     methodology: string;
-    institutional_ratings: { firm: string; rating: string }[];
+    institutional_ratings: { firm: string; rating: string; raw_grade?: string; date?: string }[];
     finsight_rating: string;
     summary: string;
+    agreeing_count?: number;
+    disagreeing_count?: number;
+    total_count?: number;
+    // See app/reporting/consensus_score.py's LOW_SAMPLE_THRESHOLD -- a
+    // score from very few covering institutions is statistically less
+    // meaningful than the same score from broad coverage.
+    low_sample_size?: boolean;
+    sample_size_note?: string | null;
   } | null;
 }
 
