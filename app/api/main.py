@@ -35,6 +35,7 @@ docstring for the documented limitation this does NOT solve (it can't
 force-kill the actual stuck worker thread).
 """
 
+import logging
 import os
 import re
 import threading
@@ -64,6 +65,13 @@ TIMEOUT_SWEEP_INTERVAL_SECONDS = 60
 # a code change.
 DAILY_JOB_LIMIT = int(os.environ.get("DAILY_JOB_LIMIT", db.DEFAULT_DAILY_JOB_LIMIT))
 RATE_LIMIT_WINDOW_SECONDS = 24 * 3600
+
+# See db.find_recent_duplicate_job's docstring -- how recently an
+# identical (ticker/question/orchestrator) DONE job must have completed
+# for a new submission to be served that result instead of recomputing it.
+DUPLICATE_REQUEST_WINDOW_SECONDS = int(
+    os.environ.get("DUPLICATE_REQUEST_WINDOW_SECONDS", db.DEFAULT_DUPLICATE_REQUEST_WINDOW_SECONDS)
+)
 
 # How long a login/signup session stays valid -- env-configurable
 # (previously hardcoded to db.DEFAULT_SESSION_TTL_SECONDS regardless of
@@ -101,6 +109,8 @@ _ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").spl
 # can't accidentally break every existing caller the moment this
 # middleware landed.
 _API_KEY = os.environ.get("API_KEY")
+
+logger = logging.getLogger(__name__)
 
 
 def _timeout_sweep_loop():
@@ -164,6 +174,25 @@ async def api_error_handler(request, exc: errors.APIError):
     return JSONResponse(
         status_code=exc.status_code,
         content={"code": exc.code, "message": exc.message},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request, exc: Exception):
+    # Catch-all beneath api_error_handler above -- FastAPI resolves
+    # exception handlers by most-specific registered type, so an
+    # errors.APIError (a subclass of Exception) still routes to its own
+    # handler first; this only ever fires for something that wasn't
+    # already translated into a structured APIError. Without this,
+    # any endpoint lacking its own try/except (e.g. /v1/companies/suggest)
+    # would leak Starlette's raw unhandled-exception response instead of
+    # this API's normal {code, message} shape. Logged here, not just
+    # swallowed -- this is the one place a real bug in an endpoint that
+    # nobody wrapped in try/except would otherwise vanish with no trace.
+    logger.exception(f"Unhandled exception on {request.method} {request.url.path}: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"code": errors.INTERNAL_ERROR, "message": "An internal error occurred."},
     )
 
 
@@ -479,11 +508,30 @@ def submit_research(
     if not companies:
         raise errors.no_company_detected(body.question)
 
-    recent = db.count_recent_jobs(current_user, time.time() - RATE_LIMIT_WINDOW_SECONDS)
-    if recent >= DAILY_JOB_LIMIT:
+    # Checked before the quota path -- a real repeat of the exact same
+    # question shouldn't cost the user a quota unit or a full pipeline
+    # run just to recompute an answer they already have. Only matches a
+    # DONE job (see find_recent_duplicate_job's own docstring), so this
+    # never masks a genuinely new attempt after a prior error.
+    duplicate_job_id = db.find_recent_duplicate_job(
+        current_user, companies[0], body.question, orchestrator,
+        since=time.time() - DUPLICATE_REQUEST_WINDOW_SECONDS,
+    )
+    if duplicate_job_id is not None:
+        return {"job_id": duplicate_job_id, "reused": True}
+
+    # create_job_if_under_limit does the count-check and the insert
+    # atomically (see its own docstring for the race this closes) --
+    # replaces what used to be a separate count_recent_jobs() check
+    # here followed by jobs.submit_job()'s own un-transacted create_job().
+    job_id = db.create_job_if_under_limit(
+        question=body.question, orchestrator=orchestrator, user_id=current_user,
+        limit=DAILY_JOB_LIMIT, window_start=time.time() - RATE_LIMIT_WINDOW_SECONDS,
+    )
+    if job_id is None:
         raise errors.rate_limit_exceeded(DAILY_JOB_LIMIT)
 
-    job_id = jobs.submit_job(question=body.question, orchestrator=orchestrator, user_id=current_user)
+    jobs.enqueue_job(job_id, question=body.question, orchestrator=orchestrator)
     return {"job_id": job_id}
 
 

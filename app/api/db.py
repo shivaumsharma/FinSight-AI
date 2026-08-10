@@ -60,6 +60,15 @@ ERROR_TIMEOUT = "TIMEOUT"
 DEFAULT_SESSION_TTL_SECONDS = 30 * 24 * 3600
 DEFAULT_DAILY_JOB_LIMIT = 20
 
+# How recently a user's own identical (same ticker/question/orchestrator)
+# DONE job must have completed for a new submission to be served that
+# result instead of recomputing it -- see find_recent_duplicate_job below.
+# 10 minutes covers the real case this targets (an accidental double
+# submit, a page refresh that resubmits, opening the same question in two
+# tabs) without going so long that a deliberate "ask again" days later
+# gets silently served a stale report.
+DEFAULT_DUPLICATE_REQUEST_WINDOW_SECONDS = 600
+
 
 @contextmanager
 def _connect():
@@ -466,6 +475,97 @@ def create_job(question: str, orchestrator: str, user_id: str = "anonymous") -> 
             (job_id, user_id, STATUS_PENDING, question, orchestrator, now, now),
         )
     return job_id
+
+
+def create_job_if_under_limit(
+    question: str, orchestrator: str, user_id: str, limit: int, window_start: float
+) -> Optional[str]:
+    """
+    Atomic count-then-insert, closing the race create_job() alone has
+    when a caller does its own count_recent_jobs() check first: those
+    are two separate connections/transactions (see _connect()'s own
+    docstring on why every function here opens a short-lived connection),
+    so two concurrent requests from the same user can both read the
+    same pre-insert count, both see it under `limit`, and both insert --
+    net result, one user over their limit. Confirmed exploitable, not
+    theoretical: nothing in this module previously took any lock spanning
+    the count and the insert.
+
+    Fix: BEGIN IMMEDIATE grabs SQLite's single write lock up front (SQLite
+    only ever has one writer at a time regardless), so a second
+    connection's own BEGIN IMMEDIATE blocks until this transaction
+    commits or rolls back -- the COUNT a second caller sees is always
+    the post-commit truth, never a stale snapshot racing an in-flight
+    insert from another thread/request.
+
+    isolation_level = None on this connection disables sqlite3's own
+    implicit transaction handling, which otherwise wraps each execute()
+    in its own begin/commit and would fight these explicit BEGIN IMMEDIATE
+    / COMMIT / ROLLBACK statements. Getting this wrong produces code that
+    still passes under sequential testing (no concurrent caller to expose
+    the race) -- see app/tests/test_api.py's dedicated threaded test for
+    the one place this is actually exercised under real concurrency.
+
+    Returns the new job_id, or None (no row created, no quota consumed)
+    if `user_id` already has `limit` or more jobs started after
+    `window_start`.
+    """
+    job_id = str(uuid.uuid4())
+    now = time.time()
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.isolation_level = None
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE user_id=? AND started_at > ?",
+                (user_id, window_start),
+            ).fetchone()
+            if row[0] >= limit:
+                conn.execute("ROLLBACK")
+                return None
+            conn.execute(
+                """
+                INSERT INTO jobs (job_id, user_id, status, question, orchestrator, started_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (job_id, user_id, STATUS_PENDING, question, orchestrator, now, now),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+    return job_id
+
+
+def find_recent_duplicate_job(
+    user_id: str, ticker: str, question: str, orchestrator: str, since: float
+) -> Optional[str]:
+    """
+    job_id of `user_id`'s own most recent DONE job for the exact same
+    ticker/question/orchestrator, started after `since` -- lets
+    submit_research hand back an already-computed report instead of
+    spending another quota unit (and another full research pipeline run)
+    recomputing an answer the user already has. Only DONE jobs match --
+    a pending/running job isn't a result to hand back yet, and an errored
+    one shouldn't be silently re-served as if it succeeded; either way
+    the new request should get its own fresh attempt. None if there's no
+    such job, which is the common case and means "proceed normally."
+    """
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT job_id FROM jobs
+            WHERE user_id=? AND ticker=? AND question=? AND orchestrator=? AND status=?
+              AND started_at > ?
+            ORDER BY started_at DESC
+            LIMIT 1
+            """,
+            (user_id, ticker, question, orchestrator, STATUS_DONE, since),
+        ).fetchone()
+    return row[0] if row is not None else None
 
 
 def mark_running(job_id: str) -> None:

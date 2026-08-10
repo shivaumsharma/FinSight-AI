@@ -9,6 +9,7 @@ runner, and the real SQLite persistence (pointed at a per-test temp file).
 """
 
 import io
+import threading
 import time
 
 import pandas as pd
@@ -687,11 +688,30 @@ def test_model_compare_409s_while_job_is_not_done(client, auth_headers):
 def test_exceeding_the_daily_job_limit_is_rejected(client, monkeypatch, auth_headers):
     monkeypatch.setattr(main, "DAILY_JOB_LIMIT", 2)
 
-    for _ in range(2):
-        resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
+    # Distinct question text per request, deliberately -- an identical
+    # repeat would hit find_recent_duplicate_job's reuse path (see
+    # test_duplicate_request_reuses_existing_job below, which tests that
+    # path directly) and never consume quota at all, which is a
+    # different mechanism from the one this test exercises.
+    #
+    # Polled to completion here (not left running) -- jobs.py's executor
+    # is a single module-level ThreadPoolExecutor shared by every test in
+    # the process, not recreated per test. A job left queued past this
+    # test's own teardown would get picked up later with this test's
+    # monkeypatched ORCHESTRATORS/LLM_PROVIDER already reverted, i.e. it
+    # would run the real orchestrator instead of _StubAgent -- slow (or
+    # network-dependent) and liable to starve whatever test runs next
+    # while it sits at the front of that single-worker queue.
+    for i in range(2):
+        resp = client.post(
+            "/v1/research", json={"question": f"Should I invest in AAPL? (request {i})"}, headers=auth_headers
+        )
         assert resp.status_code == 200
+        _poll_until_terminal(client, resp.json()["job_id"], auth_headers, timeout=15.0)
 
-    resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
+    resp = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL? (request 2)"}, headers=auth_headers
+    )
     assert resp.status_code == 429
     assert resp.json()["code"] == "RATE_LIMIT_EXCEEDED"
 
@@ -704,12 +724,114 @@ def test_rate_limit_is_scoped_per_user_not_global(client, monkeypatch, auth_head
 
     resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
     assert resp.status_code == 200
-    resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
+    # Polled to completion -- see the identical note in
+    # test_exceeding_the_daily_job_limit_is_rejected above (shared
+    # single-worker executor across the whole test process).
+    _poll_until_terminal(client, resp.json()["job_id"], auth_headers, timeout=15.0)
+    # Distinct question text -- see the same note in
+    # test_exceeding_the_daily_job_limit_is_rejected above; an identical
+    # repeat would hit the duplicate-reuse path instead of the quota path.
+    resp = client.post("/v1/research", json={"question": "Should I invest in AAPL? (again)"}, headers=auth_headers)
     assert resp.status_code == 429
 
     other_user_headers = _signup(client, email="ninacountsseparately@example.com", password="ninaspassword")
     resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=other_user_headers)
     assert resp.status_code == 200
+    _poll_until_terminal(client, resp.json()["job_id"], other_user_headers, timeout=15.0)
+
+
+def test_create_job_if_under_limit_boundary_sequential(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "jobs.db")
+    db.init_db()
+
+    window_start = time.time() - 3600
+    for i in range(3):
+        job_id = db.create_job_if_under_limit(
+            question=f"q{i}", orchestrator="hand_rolled", user_id="alice",
+            limit=3, window_start=window_start,
+        )
+        assert job_id is not None
+
+    # The 4th call is over the limit -- no row created, quota untouched.
+    assert db.create_job_if_under_limit(
+        question="q3", orchestrator="hand_rolled", user_id="alice",
+        limit=3, window_start=window_start,
+    ) is None
+    assert db.count_recent_jobs("alice", window_start) == 3
+
+
+def test_create_job_if_under_limit_is_race_free_under_concurrency(tmp_path, monkeypatch):
+    # The one genuinely novel test pattern in this suite -- see
+    # create_job_if_under_limit's own docstring for the check-then-act
+    # race this closes (two concurrent callers both reading the same
+    # pre-insert COUNT). Sequential testing (the test above) cannot
+    # expose a regression back to that race; only real concurrent
+    # callers hitting the same connection-per-call SQLite file can.
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "jobs.db")
+    db.init_db()
+
+    window_start = time.time() - 3600
+    limit = 5
+    n_threads = 20
+    results = [None] * n_threads
+
+    def _attempt(i):
+        results[i] = db.create_job_if_under_limit(
+            question=f"concurrent {i}", orchestrator="hand_rolled", user_id="bob",
+            limit=limit, window_start=window_start,
+        )
+
+    threads = [threading.Thread(target=_attempt, args=(i,)) for i in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    succeeded = [r for r in results if r is not None]
+    assert len(succeeded) == limit
+    assert len(set(succeeded)) == limit  # every success got its own distinct job_id
+    assert db.count_recent_jobs("bob", window_start) == limit
+
+
+def test_duplicate_request_reuses_existing_job(client, auth_headers):
+    resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+    # 15s, not the 5s default -- see test_portfolio.py/test_watchlist.py's
+    # identical polling loops (and 26c55a2's commit message) for why:
+    # shared/loaded runners are consistently slower than a quiet dev
+    # machine, and this exact class of test was caught flaking on both.
+    _poll_until_terminal(client, job_id, auth_headers, timeout=15.0)
+
+    used_before = client.get("/v1/auth/me", headers=auth_headers).json()["jobs_used_today"]
+    # Same user, same exact question, while the prior job is still
+    # within the duplicate window and DONE -- reuses it instead of
+    # spending another quota unit re-running the pipeline.
+    resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["job_id"] == job_id
+    assert body["reused"] is True
+    used_after = client.get("/v1/auth/me", headers=auth_headers).json()["jobs_used_today"]
+    assert used_after == used_before
+
+
+def test_duplicate_request_outside_window_creates_new_job(client, monkeypatch, auth_headers):
+    # Window of 0 means "since" is effectively now -- the prior job's
+    # started_at (in the past) no longer satisfies started_at > since,
+    # so it must not be treated as a reusable duplicate.
+    monkeypatch.setattr(main, "DUPLICATE_REQUEST_WINDOW_SECONDS", 0)
+
+    resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+    _poll_until_terminal(client, job_id, auth_headers, timeout=15.0)
+
+    resp = client.post("/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["job_id"] != job_id
+    assert "reused" not in body
 
 
 # ---------------------------------------------------------------- push notifications
@@ -867,3 +989,37 @@ def test_normalized_financials_round_trip_handles_none():
 
     assert api_dict["normalized_financials"] is None
     assert financial_df_from_json(api_dict["normalized_financials"]) is None
+
+
+def test_unhandled_exception_returns_structured_internal_error(client, monkeypatch, auth_headers):
+    # /v1/companies/suggest has no try/except of its own -- a real bug
+    # here (or anywhere else lacking one) would otherwise leak
+    # Starlette's raw unhandled-exception response instead of this API's
+    # normal {code, message} shape.
+    #
+    # A dedicated TestClient with raise_server_exceptions=False -- the
+    # default client fixture leaves that True, which makes Starlette's
+    # ServerErrorMiddleware re-raise into the test process even after
+    # invoking a registered handler and building its response (by
+    # design, so test suites can see the traceback); that would defeat
+    # the point of this test, which is to inspect the actual HTTP
+    # response a real caller gets back.
+    def _boom(q, limit=8):
+        raise RuntimeError("synthetic failure for the generic handler test")
+
+    monkeypatch.setattr(main, "suggest_companies", _boom)
+    no_raise_client = TestClient(app, raise_server_exceptions=False)
+    resp = no_raise_client.get("/v1/companies/suggest?q=tata", headers=auth_headers)
+    assert resp.status_code == 500
+    assert resp.json()["code"] == "INTERNAL_ERROR"
+
+
+def test_api_error_still_routes_to_its_own_handler_not_the_generic_one(client, auth_headers):
+    # FastAPI resolves exception handlers by most-specific registered
+    # type -- errors.APIError is a subclass of Exception, so this must
+    # keep hitting api_error_handler (its real status code/code/message)
+    # rather than falling through to the generic 500/INTERNAL_ERROR path
+    # now that both are registered.
+    resp = client.get("/v1/research/does-not-exist", headers=auth_headers)
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "JOB_NOT_FOUND"
