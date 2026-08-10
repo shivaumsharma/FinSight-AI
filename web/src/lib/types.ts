@@ -101,6 +101,26 @@ export type NarrativeSection =
   | "Risk Analysis"
   | "Investment Thesis";
 
+// From app/reporting/report_data_builder.py's derive_signal_quality() --
+// display-only consolidation of signals already computed elsewhere in
+// the report (never feeds back into `recommendation`). confidence/
+// evidence_coverage are 0-100 or null when there's nothing to be
+// confident about; model_agreement is "N/M" or "N/A" when no votes
+// were available (e.g. Insufficient Data rating).
+export interface SignalQuality {
+  quality_label: "HIGH" | "MEDIUM" | "LOW";
+  confidence: number | null;
+  evidence_coverage: number | null;
+  model_agreement: string;
+  breakdown: {
+    valuation: "Bullish" | "Bearish" | "Neutral";
+    fundamentals: "Bullish" | "Bearish" | "Neutral";
+    momentum: "Bullish" | "Bearish" | "Neutral";
+    sentiment: "Bullish" | "Bearish" | "Neutral";
+    institutional_consensus: "Bullish" | "Bearish" | "Neutral";
+  };
+}
+
 export interface ReportData {
   currency?: string;
   currency_symbol?: string;
@@ -113,6 +133,7 @@ export interface ReportData {
     "Citation Coverage (%)"?: number | string;
     "Completeness (%)"?: number | string;
   };
+  signal_quality?: SignalQuality;
   narrative?: Partial<Record<NarrativeSection, string>>;
   market_earnings_snapshot?: MarketEarningsSnapshot;
   valuation_analysis?: ValuationAnalysis;

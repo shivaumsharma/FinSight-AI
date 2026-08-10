@@ -568,6 +568,160 @@ def _confidence_flag(
     return " ".join(flags)
 
 
+# ---------------------------------------------------------------- signal quality (display-only)
+#
+# Five signals already exist and are already computed on every report,
+# but were never combined into one reader-facing view: confidence_scores'
+# Overall Score, signal_disagreement/mc_wide_ci (already on `recommendation`,
+# see derive_recommendation above), Alpha Factors' own financial/market
+# categories, Management Sentiment, and real institutional analyst
+# ratings. derive_signal_quality() below is the consolidation -- called
+# strictly AFTER derive_recommendation() returns (see build_report_data)
+# and reads only already-computed values from it and other already-built
+# dicts. Same non-negotiable boundary as Alpha Factors and the ML
+# classifier (see alpha_factors.py's own module docstring): display-only,
+# never written back into `recommendation`/_composite_score.
+#
+# Thresholds below are disclosed, adjustable constants, NOT backtested
+# like BUY_THRESHOLD/SELL_THRESHOLD above -- "signal quality" has no
+# ground-truth outcome (a stock doesn't go up or down because the
+# evidence behind a call was thin) to score a threshold choice against
+# the way a directional call does.
+QUALITY_HIGH_THRESHOLD = 70
+QUALITY_LOW_THRESHOLD = 40
+CONFIDENCE_DISAGREEMENT_PENALTY = 15
+CONFIDENCE_WIDE_CI_PENALTY = 15
+
+_ML_VERDICT_TO_RATING = {"UNDERVALUED": "Buy", "FAIRLY VALUED": "Hold", "OVERVALUED": "Sell"}
+_RELATIVE_SIGNAL_TO_RATING = {"cheap": "Buy", "in-line": "Hold", "expensive": "Sell"}
+_INSTITUTIONAL_RATING_TO_DIRECTION = {"BUY": "Bullish", "HOLD": "Neutral", "SELL": "Bearish"}
+_SENTIMENT_LABEL_TO_DIRECTION = {"Positive": "Bullish", "Negative": "Bearish", "Neutral": "Neutral"}
+
+
+def _direction_label(value: Optional[float], bullish_at: float = 0.0, bearish_at: float = 0.0) -> str:
+    """Sign-based Bullish/Bearish/Neutral label for an already-computed
+    percentage -- shared by signal_quality's breakdown so fundamentals/
+    momentum/valuation don't each reimplement the same three-way split.
+    None (missing/unavailable -- e.g. a .NS ticker with no benchmark
+    history, see alpha_factors.py's _market_note) degrades to "Neutral",
+    the safest default when there's nothing to judge, not a guess."""
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return "Neutral"
+    if value > bullish_at:
+        return "Bullish"
+    if value < bearish_at:
+        return "Bearish"
+    return "Neutral"
+
+
+def _institutional_direction(institutional_consensus: Optional[Dict[str, Any]]) -> str:
+    """Majority vote among covering institutions' OWN ratings (BUY/HOLD/
+    SELL) -- independent of whether they agree with FinSight's rating
+    (that's consensus_score.py's separate job). Reuses the same
+    institutional_ratings list already fetched for Institutional
+    Consensus, no new data source. Ties resolve to whichever of
+    BUY/HOLD/SELL is checked first below -- a disclosed simplification,
+    not a strict-majority guarantee."""
+    consensus = (institutional_consensus or {}).get("recommendation_consensus") or {}
+    ratings = consensus.get("institutional_ratings") or []
+    if not ratings:
+        return "Neutral"
+    counts = {"BUY": 0, "HOLD": 0, "SELL": 0}
+    for r in ratings:
+        if r.get("rating") in counts:
+            counts[r["rating"]] += 1
+    top_rating = max(counts, key=counts.get)
+    return _INSTITUTIONAL_RATING_TO_DIRECTION[top_rating] if counts[top_rating] else "Neutral"
+
+
+def derive_signal_quality(
+    recommendation: Dict[str, Any],
+    valuation_results: Dict[str, Any],
+    evaluation: Dict[str, Any],
+    sentiment_summary: Dict[str, Any],
+    institutional_consensus: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Separates *direction* (the Buy/Hold/Sell rating itself, already
+    final by the time this runs) from *quality of evidence* (how much
+    of the supporting machinery actually agrees, and how well-grounded
+    the underlying report is) -- the two were previously conflated: a
+    thinly-evidenced Buy and a thoroughly-corroborated Buy read
+    identically on the report today.
+
+    Returns {quality_label: HIGH|MEDIUM|LOW, confidence: 0-100 or None,
+    evidence_coverage: 0-100 or None, model_agreement: "N/M" or "N/A",
+    breakdown: {valuation, fundamentals, momentum, sentiment,
+    institutional_consensus: each Bullish/Bearish/Neutral}}.
+    """
+    rating = recommendation.get("rating")
+
+    overall_score = evaluation.get("overall_score")
+    evidence_coverage = overall_score if isinstance(overall_score, (int, float)) else None
+
+    confidence = evidence_coverage
+    if confidence is not None:
+        if recommendation.get("signal_disagreement"):
+            confidence -= CONFIDENCE_DISAGREEMENT_PENALTY
+        if recommendation.get("mc_wide_ci"):
+            confidence -= CONFIDENCE_WIDE_CI_PENALTY
+        confidence = max(0.0, min(100.0, confidence))
+
+    if confidence is None or confidence < QUALITY_LOW_THRESHOLD:
+        quality_label = "LOW"
+    elif confidence >= QUALITY_HIGH_THRESHOLD:
+        quality_label = "HIGH"
+    else:
+        quality_label = "MEDIUM"
+
+    # model_agreement: a 3-way vote among independently-derived
+    # directional calls -- DCF alone (ignoring the relative-valuation
+    # blend), the relative-valuation cross-check's own signal, and the
+    # ML classifier's verdict -- against the FINAL rating. Genuinely new
+    # only in that these three were never compared against each other
+    # before; each already exists and is already computed.
+    votes = []
+    if recommendation.get("dcf_only_rating"):
+        votes.append(recommendation["dcf_only_rating"])
+
+    relative_signal = (valuation_results.get("relative_valuation") or {}).get("signal")
+    if relative_signal in _RELATIVE_SIGNAL_TO_RATING:
+        votes.append(_RELATIVE_SIGNAL_TO_RATING[relative_signal])
+
+    ml_verdict = (valuation_results.get("ml_classifier") or {}).get("verdict")
+    if ml_verdict in _ML_VERDICT_TO_RATING:
+        votes.append(_ML_VERDICT_TO_RATING[ml_verdict])
+
+    if votes and rating in ("Buy", "Hold", "Sell"):
+        model_agreement = f"{sum(1 for v in votes if v == rating)}/{len(votes)}"
+    else:
+        model_agreement = "N/A"
+
+    alpha_factors = valuation_results.get("alpha_factors") or {}
+    financial = alpha_factors.get("financial") or {}
+    market = alpha_factors.get("market") or {}
+    composite_score = recommendation.get("composite_score")
+
+    return {
+        "quality_label": quality_label,
+        "confidence": round(confidence) if confidence is not None else None,
+        "evidence_coverage": round(evidence_coverage) if evidence_coverage is not None else None,
+        "model_agreement": model_agreement,
+        "breakdown": {
+            "valuation": (
+                _direction_label(composite_score, bullish_at=BUY_THRESHOLD, bearish_at=SELL_THRESHOLD)
+                if isinstance(composite_score, (int, float)) else "Neutral"
+            ),
+            "fundamentals": _direction_label(financial.get("Revenue Growth YoY (%)")),
+            "momentum": _direction_label(market.get("6-Month Price Momentum (%)")),
+            "sentiment": _SENTIMENT_LABEL_TO_DIRECTION.get(
+                (sentiment_summary or {}).get("Overall Sentiment"), "Neutral"
+            ),
+            "institutional_consensus": _institutional_direction(institutional_consensus),
+        },
+    }
+
+
 def _references(context: ResearchContext) -> list:
     """
     One unified, sequentially-numbered reference list -- SEC evidence
@@ -654,6 +808,14 @@ def build_report_data(context: ResearchContext) -> Dict[str, Any]:
 
     recommendation = derive_recommendation(
         valuation_results, sentiment_summary, context.news_sentiment_summary, currency
+    )
+
+    # Strictly downstream of derive_recommendation() above -- reads its
+    # output, never influences it. See derive_signal_quality's own
+    # docstring/module comment for the display-only boundary.
+    signal_quality = derive_signal_quality(
+        recommendation, valuation_results, evaluation, sentiment_summary,
+        context.institutional_consensus,
     )
 
     # NSE-listed tickers (see company_resolver.py's NSE index) carry a
@@ -771,6 +933,11 @@ def build_report_data(context: ResearchContext) -> Dict[str, Any]:
             "Citation Coverage (%)": evaluation.get("citation_score", "Unavailable"),
             "Completeness (%)": evaluation.get("completeness_score", "Unavailable"),
         },
+
+        # Display-only consolidation of signals already computed above --
+        # see derive_signal_quality's own docstring for the display-only
+        # boundary and exactly which already-computed values feed it.
+        "signal_quality": signal_quality,
 
         "references": _references(context),
 
