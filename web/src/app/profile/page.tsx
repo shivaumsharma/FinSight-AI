@@ -554,7 +554,7 @@ function ProfilePage({
         <SectionHeader icon={<UsageIcon />} label="USAGE TODAY" />
         <div className="mt-2 flex gap-3">
           <div className="flex-1 rounded-lg border border-border bg-card px-3.5 py-3">
-            <div className="font-mono text-[10px] text-muted">REPORTS REMAINING</div>
+            <div className="font-mono text-[10px] text-muted">REQUESTS REMAINING</div>
             <div className="mt-0.5 font-mono text-lg font-bold text-text">{remaining}</div>
             <div className="mt-0.5 font-mono text-[10px] text-dim">
               {countdown ? `Resets in ${countdown}` : "of " + limit + " today"}
@@ -574,7 +574,7 @@ function ProfilePage({
         </div>
         <p className="mt-1.5 font-mono text-[10px] text-dim">
           Rolling 24h window, not a fixed reset time
-          {totalReports !== null && ` · ${totalReports} report${totalReports === 1 ? "" : "s"} all-time`}.
+          {totalReports !== null && ` · ${totalReports} request${totalReports === 1 ? "" : "s"} all-time`}.
         </p>
 
         {watchlist && watchlist.length > 0 && (
