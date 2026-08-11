@@ -59,3 +59,10 @@ pywebpush
 # for the PDF *export*; NSE's corporate announcements are individual
 # PDFs with no SEC-EDGAR-style HTML equivalent.
 pypdf
+
+# Required by FastAPI's UploadFile/File(...) form parsing -- previously
+# only present as a transitive dependency (chromadb pulls it in) and
+# never actually exercised until app/api/main.py's
+# POST /v1/voice/transcribe (first real multipart endpoint in this
+# codebase, for the home page's voice-input mic button).
+python-multipart

@@ -23,6 +23,7 @@ from app.api.main import app
 from app.api.serialization import context_to_api_dict, financial_df_from_json
 from app.core import llm_provider as lp
 from app.core.research_context import ResearchContext
+from app.data import sarvam_client
 from app.data.market_data import TickerNotFoundError
 
 
@@ -1023,3 +1024,65 @@ def test_api_error_still_routes_to_its_own_handler_not_the_generic_one(client, a
     resp = client.get("/v1/research/does-not-exist", headers=auth_headers)
     assert resp.status_code == 404
     assert resp.json()["code"] == "JOB_NOT_FOUND"
+
+
+# ---------------------------------------------------------- POST /v1/voice/transcribe
+
+def test_transcribe_voice_success(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(sarvam_client, "transcribe", lambda *a, **k: "Should I invest in AAPL?")
+
+    resp = client.post(
+        "/v1/voice/transcribe",
+        files={"file": ("recording.webm", b"fake-audio-bytes", "audio/webm")},
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"transcript": "Should I invest in AAPL?"}
+
+
+def test_transcribe_voice_requires_auth(client):
+    resp = client.post(
+        "/v1/voice/transcribe",
+        files={"file": ("recording.webm", b"fake-audio-bytes", "audio/webm")},
+    )
+    assert resp.status_code == 401
+
+
+def test_transcribe_voice_maps_sarvam_failure_to_503(client, monkeypatch, auth_headers):
+    def _boom(*a, **k):
+        raise sarvam_client.SarvamTranscriptionError("Sarvam STT request failed: synthetic")
+
+    monkeypatch.setattr(sarvam_client, "transcribe", _boom)
+
+    resp = client.post(
+        "/v1/voice/transcribe",
+        files={"file": ("recording.webm", b"fake-audio-bytes", "audio/webm")},
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 503
+    assert resp.json()["code"] == "STT_UNAVAILABLE"
+
+
+def test_transcribe_voice_rejects_empty_file(client, auth_headers):
+    resp = client.post(
+        "/v1/voice/transcribe",
+        files={"file": ("recording.webm", b"", "audio/webm")},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "INVALID_AUDIO"
+
+
+def test_transcribe_voice_rejects_oversized_file(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "MAX_VOICE_AUDIO_BYTES", 10)
+
+    resp = client.post(
+        "/v1/voice/transcribe",
+        files={"file": ("recording.webm", b"x" * 100, "audio/webm")},
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "INVALID_AUDIO"

@@ -18,6 +18,7 @@ import OrderTicket from "@/components/OrderTicket";
 import MarketNews from "@/components/MarketNews";
 import MarketMovers from "@/components/MarketMovers";
 import SentimentGauge from "@/components/SentimentGauge";
+import VoiceInputButton from "@/components/VoiceInputButton";
 
 const QUICK_TICKERS = ["AAPL", "NVDA", "TSLA", "MSFT"];
 
@@ -204,6 +205,7 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
               disabled={isBusy}
               className="flex-1 bg-transparent font-mono text-sm text-text placeholder:text-muted focus:outline-none disabled:opacity-60"
             />
+            <VoiceInputButton onTranscript={setQuery} disabled={isBusy} />
           </div>
           <div className="mt-2.5 flex flex-wrap gap-2">
             {QUICK_TICKERS.map((t) => (
