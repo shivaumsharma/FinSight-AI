@@ -100,7 +100,22 @@ def transcribe(audio_bytes: bytes, filename: str, content_type: str,
         resp = _post_to_sarvam(audio_bytes, filename, content_type, language_code, api_key)
     except (requests.exceptions.Timeout, requests.exceptions.ConnectionError,
             requests.exceptions.HTTPError) as e:
-        raise SarvamTranscriptionError(f"Sarvam STT request failed: {e}") from e
+        # Sarvam's error responses carry a real diagnostic body (e.g.
+        # exactly why the audio was rejected) -- surfacing bare
+        # "400 Bad Request" throws that away right when it's most
+        # needed. Found the hard way: a real recording and a
+        # synthetic garbage-bytes test both produced an identical
+        # "400 Client Error: Bad Request" with the body swallowed,
+        # making the two indistinguishable and the real cause
+        # (a MediaRecorder webm blob with no duration metadata in its
+        # header -- see VoiceInputButton.tsx's fixWebmDuration call)
+        # invisible without this.
+        detail = str(e)
+        if isinstance(e, requests.exceptions.HTTPError) and e.response is not None:
+            body_snippet = (e.response.text or "").strip()[:300]
+            if body_snippet:
+                detail = f"{e} -- {body_snippet}"
+        raise SarvamTranscriptionError(f"Sarvam STT request failed: {detail}") from e
 
     transcript = (resp.json().get("transcript") or "").strip()
     if not transcript:
