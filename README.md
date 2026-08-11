@@ -9,25 +9,53 @@ pinned: false
 python_version: "3.11"
 ---
 
-# FinSight AI — Agentic Financial Research Platform
+# FinSight AI — Agentic Financial Research & Trading Platform
 
-**[Try the live demo →](https://shivaum-finsight-ai.streamlit.app)**
+An agentic equity-research and paper-trading platform built using Python, FastAPI, Next.js, and a self-hosted or hosted LLM backend to plan, retrieve, value, and write institutional-style research on any publicly listed company — grounded in live market data and real SEC/NSE filings, not the model's training data.
 
-An agentic research assistant that answers open-ended financial questions ("Should I invest in Apple?", "What did management say about AI demand?") by planning which tools to run, executing them against live market data and SEC filings, and synthesizing a cited, self-scored equity research report. The LLM backend is pluggable (`app/core/llm_provider.py`): a hosted, OpenAI-compatible chat API (Groq, Together, OpenRouter, OpenAI, ...) by default, or a fully local, open-weight model (Qwen2.5-1.5B-Instruct via `llama.cpp`, no external API key) with `LLM_PROVIDER=local`.
+The platform combines an LLM tool-planning agent, a real DCF valuation engine, retrieval-augmented generation over live regulatory filings, a self-evaluation scoring pass, a 31-signal quantitative factor scorecard, a simulated paper-trading layer, voice input, and a rigorously benchmarked evaluation framework into one deployable, tested system.
+
+**[Try the research demo →](https://shivaum-finsight-ai.streamlit.app)** · **[Try the full platform →](https://web-ten-blond-39.vercel.app)**
 
 ---
 
-## What it actually does
+## Features
 
-Ask a question, get back a 14-section institutional-style research report — company overview, financial/ratio/growth/valuation analysis, an LLM-written narrative (Executive Summary, Business Analysis, Market and Earnings Analysis, Risk Analysis, Investment Thesis), a Buy/Hold/Sell recommendation, confidence scores, and a downloadable PDF — grounded in:
+- LLM planning agent that decides which tools a question actually needs (a valuation question skips RAG; a "what did management say" question skips the DCF)
+- Real DCF valuation: WACC → FCFF forecast → enterprise value → intrinsic value, with a 5×5 sensitivity grid and 2,000-sample Monte Carlo simulation
+- Retrieval-augmented generation over **live** SEC EDGAR filings (US tickers) and **live** NSE India corporate announcements (`.NS` tickers) — cited, not paraphrased from training data
+- FinBERT sentiment scoring, run separately over filing tone and recent news tone
+- Self-evaluation pass: every report scores its own grounding, retrieval quality, citation coverage, and completeness before it's shown to you
+- 31-signal Alpha Factors scorecard (Piotroski F-Score, Altman Z-Score, momentum, relative strength, macro sensitivity) — strictly display-only, architecturally and test-enforced to never influence the recommendation
+- Signal Quality panel that separates *direction* (the rating) from *confidence in the evidence behind it*
+- Institutional Consensus scoring against real analyst ratings, with a small-sample-size caveat
+- Concurrent multi-model "second opinion" — three independent LLMs vote on the same evidence
+- Simulated paper trading: watchlist, self-reported portfolio, order execution with real weighted-average-cost-basis accounting — no real money, ever
+- Voice input: tap-to-talk mic button, speech transcribed via Sarvam AI, auto-stops on silence
+- Full auth system (PBKDF2, HMAC-signed share links), Progressive Web App with offline support and Web Push notifications
+- Point-in-time backtesting harness with explicit no-look-ahead controls, run across 1,000+ tickers
 
-- **Live market data** pulled from yfinance (financial statements, market cap, beta, price history)
-- **A real DCF valuation** (WACC → FCFF → enterprise value → intrinsic value), not a canned number
-- **Retrieved SEC filing evidence**, cited, not paraphrased from the model's training data
-- **FinBERT sentiment scoring** of that retrieved evidence
-- **A self-evaluation pass** that scores the generated report's grounding, retrieval quality, citation coverage, and completeness before showing it to you
+---
 
-The system doesn't run a fixed pipeline for every question — an LLM planner decides which tools a given question actually needs (a valuation question skips RAG; a "what did management say" question skips the DCF), with a deterministic rule-based fallback so the plan never silently drops a tool the question clearly requires.
+## Platform Capabilities
+
+### Research Engine
+Ask a question, get back a 14-section institutional-style report — company overview, financial/ratio/growth/valuation analysis, an LLM-written narrative (Executive Summary, Business Analysis, Market & Earnings Analysis, Risk Analysis, Investment Thesis), a Buy/Hold/Sell recommendation, confidence scores, and a downloadable PDF.
+
+### Predictive & Quantitative Analytics
+A custom WACC/FCFF/DCF engine, a Logistic Regression vs. XGBoost valuation classifier (display-only, honestly gated on training-set size), and a 31-factor quantitative scorecard spanning financial, quality, valuation, market, risk, sentiment, and macro signals.
+
+### Evaluation Framework
+Every report is scored, not just produced — grounding (40%), retrieval quality (20%), citation coverage (20%), and completeness (20%). A dedicated benchmark harness checks prompt/retrieval/model changes against a fixed baseline instead of eyeballing them. Full methodology and results — including the ones that didn't come out as hoped — in [EVALUATION.md](EVALUATION.md).
+
+### Trading Platform
+Self-reported portfolio tracking, a global watchlist, Top Movers and a market Sentiment Gauge over a real tracked universe, Corporate Actions and Global Indices feeds, and simulated paper order execution — a rehearsal tool for a trade decision against real prices, never a real broker connection.
+
+### Voice Input
+A mic button transcribes your spoken question via Sarvam AI's Speech-to-Text API and fills it into the question box for you to review before submitting — never auto-submitted, so a mistranscription costs nothing but the API call.
+
+### Account, Offline & Notifications
+Session-based auth, HMAC-signed shareable PDF links, a service worker with offline fallback and cache-first static assets, and end-to-end encrypted Web Push notifications when a long-running report finishes.
 
 ---
 
@@ -35,14 +63,14 @@ The system doesn't run a fixed pipeline for every question — an LLM planner de
 
 ```mermaid
 flowchart TD
-    UI["Streamlit UI"] --> Agent["ResearchAgent"]
+    UI["Streamlit UI / Next.js Frontend"] --> Agent["ResearchAgent"]
     Agent --> Resolver["Ticker Resolver\n(deterministic company/ticker lookup)"]
     Agent --> Planner["Planner\n(LLM proposal ∪ rule-based fallback)"]
     Planner --> Plan["Ordered tool plan"]
 
     Plan --> MarketTool["market_data_tool\n(yfinance + statement normalization)"]
-    Plan --> ValuationTool["valuation_tool\n(WACC → FCFF → DCF)"]
-    Plan --> RAGTool["rag_tool\n(chunk → embed → ChromaDB → cite,\nlive SEC filings, any ticker)"]
+    Plan --> ValuationTool["valuation_tool\n(WACC → FCFF → DCF, Alpha Factors)"]
+    Plan --> RAGTool["rag_tool\n(chunk → embed → ChromaDB → cite,\nSEC EDGAR + NSE India, any ticker)"]
     Plan --> SentimentTool["sentiment_tool\n(FinBERT over retrieved evidence)"]
     Plan --> ComparisonTool["comparison_tool\n(two-company side-by-side)"]
 
@@ -54,13 +82,13 @@ flowchart TD
 
     Context --> ConsensusTool["institutional_consensus_tool\n(analyst-rating agreement, market-context only)"]
     Context --> NewsTool["news_tool\n(Finnhub news + dual sentiment)"]
-    ConsensusTool --> ReportTool["report_tool\n(deterministic sections + Qwen2.5-1.5B-Instruct narrative)"]
+    ConsensusTool --> ReportTool["report_tool\n(deterministic sections + LLM narrative)"]
     NewsTool --> ReportTool
     ReportTool --> EvalTool["evaluation_tool\n(grounding / retrieval / citation / completeness scoring)"]
     EvalTool --> UI
 ```
 
-Every tool reads from and writes to one shared `ResearchContext` object. The planner only chooses among the five evidence-gathering tools at the top; `institutional_consensus_tool`, `news_tool`, `report_tool`, and `evaluation_tool` always run afterward regardless of what the planner picked — there's no reasoning needed on "should this run."
+Every tool reads from and writes to one shared `ResearchContext` object. The planner only chooses among the five evidence-gathering tools at the top; `institutional_consensus_tool`, `news_tool`, `report_tool`, and `evaluation_tool` always run afterward regardless of what the planner picked.
 
 ---
 
@@ -68,62 +96,99 @@ Every tool reads from and writes to one shared `ResearchContext` object. The pla
 
 | Layer | Tools |
 |---|---|
-| LLM (planning + report generation) | Hosted OpenAI-compatible chat API by default (`LLM_PROVIDER=hosted`); Qwen2.5-1.5B-Instruct served locally via `llama.cpp` (Q8_0 GGUF) with `LLM_PROVIDER=local` |
+| LLM (planning + report generation) | Hosted OpenAI-compatible chat API by default (`LLM_PROVIDER=hosted`, Groq/Together/OpenRouter/OpenAI); Qwen2.5-1.5B-Instruct served locally via `llama.cpp` (Q8_0 GGUF) with `LLM_PROVIDER=local` |
+| Backend API | FastAPI, session auth (PBKDF2-SHA256, 600k iterations), SQLite (stdlib, no ORM), background job queue |
+| Frontend | Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS, PWA (service worker, Web Push) |
 | Retrieval | ChromaDB + `BAAI/bge-base-en-v1.5` embeddings, raw (a cross-encoder reranker was tried and measured worse — see [EVALUATION.md](EVALUATION.md)) |
-| Filing sourcing | Live SEC EDGAR API (`app/data/sec_edgar_client.py`) — any ticker with a CIK, not a fixed set |
-| Sentiment | FinBERT (`ProsusAI/finbert`) — scored separately for SEC filing tone and recent news tone |
-| Financial data | yfinance |
+| Filing sourcing | Live SEC EDGAR API (US tickers) + live NSE India corporate-announcements API (`.NS` tickers) — any ticker with coverage, not a fixed set |
+| Sentiment | FinBERT (`ProsusAI/finbert`) — scored separately for filing tone and news tone |
+| Financial data | yfinance, with in-process caching and a batched-request pattern to survive cloud-datacenter IP throttling |
 | News | Finnhub company-news API, keyword-categorized by risk type |
-| Institutional ratings | yfinance analyst upgrades/downgrades, normalized into a Buy/Hold/Sell consensus check |
-| Valuation | Custom WACC / FCFF / DCF engines (`app/valuation/`) |
-| Company resolution | Regex + fuzzy match (rapidfuzz) against SEC's ~10,000-company index — deterministic, not LLM-based |
-| Orchestration | Hand-rolled controller (`research_agent.py`), plus a LangGraph port (`langgraph_agent.py`) kept alongside it as a documented, benchmarked alternative — see [EVALUATION.md](EVALUATION.md) |
-| Caching | Redis (`app/core/cache.py`) — content-addressed for valuation/narrative output, TTL-only for statement fetches; degrades to a no-op if unreachable |
+| Voice | Sarvam AI Speech-to-Text (`saaras:v3`), browser `MediaRecorder` + Web Audio silence detection |
+| Valuation | Custom WACC / FCFF / DCF engines, Monte Carlo simulation, Logistic Regression / XGBoost classifier |
+| ML training | GRPO reinforcement fine-tuning (LoRA on Qwen2.5-7B via `trl`/`peft`) using realized returns as a verifiable reward |
+| Company resolution | Regex + fuzzy match (rapidfuzz) against SEC's ~10,000-company index and NSE's index — deterministic, not LLM-based |
+| Orchestration | Hand-rolled controller, plus a LangGraph port kept alongside it as a documented, benchmarked alternative — see [EVALUATION.md](EVALUATION.md) |
+| Caching | Redis — content-addressed for valuation/narrative output, TTL-only for statement fetches; degrades to a no-op if unreachable |
 | Report output | reportlab (downloadable PDF) |
-| Interface | Streamlit |
+| Deployment | Google Cloud Run (API) + Vercel (frontend); Streamlit Community Cloud / Hugging Face Spaces (research demo); Railway supported as an alternative |
+| Testing / CI | pytest (540+ test functions, 34 files), GitHub Actions with failure-annotation diagnostics |
 
 ---
 
-## Company coverage
+## Project Structure
 
-There is no fixed company list. `market_data_tool` and `valuation_tool` work for **any valid yfinance ticker**, and `rag_tool` sources evidence live from **any ticker SEC has a CIK for** — the most recent 8-K earnings-release exhibit, falling back to a 10-Q/10-K's MD&A section, fetched directly from SEC EDGAR's public API (`app/data/sec_edgar_client.py`), not from hand-authored transcript files.
-
-A ticker with no qualifying SEC filing (some foreign private issuers file 20-F/6-K instead of 10-K/10-Q/8-K) still returns financials and a DCF valuation, just without cited evidence or sentiment.
+```
+Autonomous_Financial_Research_Agent/
+│
+├── app/                        # Core Python backend
+│   ├── agents/                 # ResearchAgent + LangGraph orchestration
+│   ├── analysis/                # Alpha Factors engine (31 signals, 7 categories)
+│   ├── api/                    # FastAPI service — auth, jobs, voice, main
+│   ├── benchmarks/               # Fixed evaluation benchmark sets
+│   ├── core/                   # LLM provider abstraction, retry, cache, currency
+│   ├── data/                   # SEC EDGAR, NSE India, Sarvam, market data clients
+│   ├── evaluation/               # Grounding / citation / retrieval scorers
+│   ├── nlp/                    # Sentiment summarization
+│   ├── planner/                 # LLM + rule-based tool planning
+│   ├── rag/                    # Chunking, embeddings, ChromaDB, report generation
+│   ├── reasoning/               # Market movers, model consensus, backtest stats
+│   ├── reporting/               # Report/PDF building, news, institutional ratings
+│   ├── tests/                  # 540+ tests across 34 files
+│   ├── tools/                  # Agent tools (market, valuation, RAG, sentiment, ...)
+│   ├── training/                # GRPO / RLVR fine-tuning pipeline
+│   ├── utils/
+│   └── valuation/                # WACC / FCFF / DCF engines + ML classifier
+│
+├── web/                        # Next.js 16 production frontend
+│   ├── src/
+│   │   ├── app/                 # App Router pages + backend proxy routes
+│   │   ├── components/          # ReportView, VoiceInputButton, Portfolio, ...
+│   │   └── lib/                 # useResearch, auth session, config
+│   └── public/                  # Service worker, PWA icons
+│
+├── scripts/                    # Backtests, benchmarks, training-set builders
+├── streamlit_app.py              # Original Streamlit research demo
+├── EVALUATION.md                 # Full evaluation results & methodology
+├── requirements.txt
+├── Dockerfile
+└── README.md
+```
 
 ---
 
-## Evaluation framework
+## Key Engineering Highlights
 
-Every generated report is scored, not just produced — `evaluation_tool` runs after every request and reports:
-
-- **Grounding score** — how much of the answer is actually supported by retrieved evidence
-- **Retrieval score** — relevance of the retrieved chunks to the question
-- **Citation coverage** — how much of the report cites its sources
-- **Completeness** — whether all five required report sections were actually generated
-- **Latency** — end-to-end wall-clock time
-
-`app/evaluation/benchmark_runner.py` runs this scoring against a fixed benchmark set (`app/benchmarks/*.json`) so changes to prompts/retrieval/models can be compared against a baseline instead of eyeballed.
-
-**[Full results, including the backtest findings that didn't come out as hoped →](EVALUATION.md)** — point-in-time recommendation backtest across 1,000+ tickers, the RAG reranker that was measured and rejected, embedding fine-tune methodology, and ML classifier metrics.
-
----
-
-## Notable engineering decisions
-
-A few things that were broken and got deliberately fixed, not just left alone:
-
-- **The LLM planner could silently starve tools.** A small local model returning a *valid but wrong* plan (e.g. only `["rag_tool"]` for an investment question) meant the fallback rules never ran. Fixed by *unioning* the LLM's plan with the deterministic rule-based plan — the LLM can add tools, never omit ones the rules say are required.
-- **Every tool run reloaded its models from disk.** `ResearchAgent`/`ToolRegistry` are rebuilt fresh on every Streamlit click, which meant the reranker, embedding model, and FinBERT were being reconstructed (and reloaded from disk) on every single query. Fixed with process-wide singletons, mirroring the pattern already used for the shared Qwen generator — cut several seconds off every query after the first.
-- **Ticker resolution is deliberately not LLM-based.** Entity resolution over a known, enumerable set of ~10,000 SEC-registered companies is a lookup problem, not a reasoning problem — asking an LLM to "spell the ticker correctly" is an unnecessary source of hallucination.
-- **The cross-encoder reranker made retrieval worse, not better.** Measured, not assumed: a hand-labeled retrieval eval (`scripts/evaluate_retrieval.py`) showed mean Precision@5 drop from 0.552 (raw embedding retrieval) to 0.438 with reranking, and a live A/B on one real query showed citation-grounding collapse from 60.0 to 0.0 with the reranker active. `rag_tool.py` uses raw retrieval directly; the reranker code stays in the repo as a documented, evaluated, and rejected approach — see [EVALUATION.md](EVALUATION.md).
-- **Narrative generation needs guardrails, not just a good prompt.** The local model reliably writes all five narrative sections in the right order with real content, but doesn't reliably stay consistent with the deterministic Buy/Hold/Sell verdict it's given, or cleanly separate a heading from the sentence before it. `narrative_builder.py` handles this with a drift detector (trims meta-commentary and repetition once the model starts wandering past what it actually has to say), a deterministic contradiction guardrail (flags bullish phrasing against a Sell rating and vice versa, appending a corrective note rather than trusting the prompt alone), and a heading-normalization pass before section-splitting.
-- **A framework rewrite is only as good as the benchmark behind it.** The first attempt to measure LangGraph's orchestration overhead against the hand-rolled controller produced a 964s outlier that looked like a dramatic difference — actually a stalled SEC/yfinance call on that one run, not the framework. Isolating pure control-flow dispatch (all tools stubbed, 20 reps, median reported) instead found the real, honest number: ~7-13ms of LangGraph overhead per run, negligible against the tens of seconds real tool execution takes — see [EVALUATION.md](EVALUATION.md).
-- **A cache is only correct if it's keyed on what actually determines the output.** The Redis layer content-addresses valuation/narrative caching by a hash of every real input (financials, market cap rounded to the nearest $100M, the full prompt) rather than a naive ticker+TTL key — so a cache hit can never silently serve a result computed from different inputs, and a genuine market move naturally busts the cache instead of needing separate invalidation logic.
+- Built a point-in-time backtesting harness with explicit no-look-ahead controls (filing-lag gating, trailing-window beta, as-of-date pricing) across 1,000+ tickers and two independent historical windows; used it to find and remove a recommendation rule that measurably hurt accuracy, rather than assuming it helped.
+- Diagnosed via a hand-labeled precision/NDCG/MRR evaluation that a cross-encoder reranker was silently *degrading* RAG retrieval quality, and shipped the fix (raw retrieval) with the disproved approach documented in place, not deleted.
+- Fine-tuned a retrieval embedding model with contrastive learning and a frozen-candidate-pool evaluation methodology — then correctly declined to ship it once the evaluation showed it underperformed baseline.
+- Built an ML valuation classifier with stratified k-fold CV and a held-out test split, while being explicit that a small training set doesn't yet clear the bar for production and gating it out of the recommendation logic until it does.
+- Designed and implemented a GRPO reinforcement-learning fine-tuning pipeline (LoRA on Qwen2.5-7B) using realized stock returns as a verifiable reward, with a two-axis (ticker + time-window) holdout to prevent train/eval leakage.
+- Ported the agent's control flow onto LangGraph as a benchmarked alternative — catching and discarding a misleading first measurement (network I/O variance that looked like a 30x orchestration difference) before reporting the real, isolated overhead number.
+- Diagnosed and fixed a check-then-act concurrency race in a production rate limiter using SQLite's `BEGIN IMMEDIATE`, verified with a dedicated multi-threaded test since the bug was invisible under sequential testing.
+- Root-caused a production API integration returning as few as 1–3/80 successful results down to per-request cloud-IP throttling (not the fetch logic), and fixed it with a single batched request — verified against the live deployment.
+- Implemented auth from stdlib primitives only: PBKDF2-SHA256 at 600,000 iterations, constant-time comparison, HMAC-signed share links with the expiry baked into the signed payload itself, and end-to-end encrypted Web Push.
+- Reverse-engineered a live, undocumented NSE India filings API through a manual endpoint spike (not guesswork), correctly identifying which subdomains required browser-spoofed headers — verified end-to-end against the production deployment before shipping.
+- Diagnosed a 3-day silent CI outage by building a GitHub Actions failure-annotation mechanism rather than guessing at fixes, tracing it to a live-network test blocked by GitHub's own IP ranges.
+- Added a two-tier Redis caching layer (content-addressed for correctness-sensitive output, TTL-only for genuinely time-bound data) and measured real 500–1,700x cache-hit speedups — after catching a cross-contamination bug in the benchmark's own methodology first.
 
 ---
 
-## Running locally
+## Models & Methodology
 
+**Valuation**: a from-scratch WACC → FCFF → DCF engine, cross-checked against relative (EV/EBITDA) valuation and a Monte Carlo simulation over growth/WACC/terminal-growth uncertainty. The Buy/Hold/Sell threshold and DCF/relative-valuation blend weights were tuned via backtesting across two independent historical windows, not chosen by hand.
+
+**ML valuation classifier**: Logistic Regression vs. XGBoost/GradientBoosting, trained on realized forward-return outcomes from the platform's own point-in-time backtest (not analyst agreement, avoiding look-ahead bias), evaluated with stratified 5-fold CV *and* a held-out test split with per-class precision/recall. Explicitly display-only — never part of the recommendation composite.
+
+**RLVR / GRPO fine-tuning**: a from-scratch reinforcement-learning pipeline (`app/training/`) that fine-tunes a local LLM to predict Buy/Hold/Sell using realized stock returns as a binary, verifiable reward — built and unit-tested, not yet executed to a trained checkpoint.
+
+**Honest limitations**, documented rather than hidden: the DCF's fixed terminal-growth assumption structurally undervalues high-growth compounders relative to mature businesses, and backtested directional accuracy currently loses to a naive always-Buy baseline in both tested windows. Full numbers, methodology, and the reasoning behind every one of these findings are in [EVALUATION.md](EVALUATION.md).
+
+---
+
+## Installation
+
+**Research demo (Streamlit):**
 ```bash
 git clone https://github.com/shivaumsharma/FinSight-AI.git
 cd FinSight-AI
@@ -131,35 +196,41 @@ pip install -r requirements.txt
 cp .env.example .env  # fill in FINNHUB_API_KEY and, for the default hosted LLM, LLM_BASE_URL/LLM_API_KEY/LLM_MODEL
 streamlit run streamlit_app.py
 ```
+The LLM defaults to a hosted, OpenAI-compatible chat API (`LLM_PROVIDER=hosted`). Set `LLM_PROVIDER=local` to run entirely on-box with no external LLM API key, via Qwen2.5-1.5B served locally through `llama.cpp`. First run downloads FinBERT and the embedding model (and Qwen2.5-1.5B, if running local) from Hugging Face; subsequent runs reuse the cached weights.
 
-The LLM defaults to a hosted, OpenAI-compatible chat API (`LLM_PROVIDER=hosted`, requires `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL` in `.env`). Set `LLM_PROVIDER=local` instead to run the LLM entirely on-box with no external LLM API key, via Qwen2.5-1.5B served locally through `llama.cpp`. Either way, first run downloads FinBERT and the embedding model (and Qwen2.5-1.5B too, if running local) from Hugging Face — subsequent runs reuse the cached weights.
+**Full platform (FastAPI + Next.js):**
+```bash
+# Backend
+python -m uvicorn app.api.main:app --port 8010 --env-file .env
+
+# Frontend (separate terminal)
+cd web
+npm install
+npm run dev
+```
+See `.env.example` and `web/.env.example` for the full list of required/optional environment variables.
 
 ---
 
 ## Deployment
 
-This app is deployed on **Hugging Face Spaces** rather than Streamlit Community Cloud: the live demo explicitly sets `LLM_PROVIDER=local`, and the local models this loads (Qwen2.5-1.5B as a quantized GGUF via `llama.cpp`, plus FinBERT and the embedding model, which load regardless of LLM provider) exceed Streamlit Cloud's free-tier memory limit. HF Spaces' free CPU tier (16GB RAM) comfortably fits the full model set.
+Production runs the FastAPI service on **Google Cloud Run** and the Next.js frontend on **Vercel**; the research demo runs separately on **Hugging Face Spaces** (the local model set exceeds Streamlit Community Cloud's free-tier memory limit). Railway remains fully supported as an alternative single-service deploy for the API.
 
-To deploy your own copy:
+**Research demo (Hugging Face Spaces):**
 1. Create a Space at [huggingface.co/new-space](https://huggingface.co/new-space) — SDK: **Streamlit**, Hardware: **CPU basic (free)**.
 2. Link it to this GitHub repo (Space Settings → "Link to a GitHub repository"), or push directly: `git remote add space https://huggingface.co/spaces/<you>/<space-name>` then `git push space main`.
 3. The `sdk`/`app_file` front matter at the top of this README configures the Space automatically.
 
-### Deploying the API + frontend: Google Cloud Run + Vercel
-
-Production runs the FastAPI service (`app/api/`, `Dockerfile`) on **Google Cloud Run** and the Next.js frontend (`web/`) on **Vercel** — not Railway (still fully supported, see "Alternative: Railway" below; the same `Dockerfile`/`railway.json` this section used to document work unchanged). Cloud Run was picked for the same Docker-first reasoning Railway originally was; Vercel is the natural fit for `web/`'s Next.js App Router frontend, which didn't exist yet when the Railway instructions below were first written.
-
-**One-time setup (Cloud Run):**
+**Backend (Cloud Run), one-time setup:**
 1. Create a GCP project, enable Cloud Run, Cloud Build, and Artifact Registry.
-2. Cloud Console → Cloud Run → **Create Service → Continuously deploy from a repository** → connect this GitHub repo, branch `main`, build type Dockerfile. This provisions both the Cloud Run service and the Cloud Build trigger that redeploys use (a build trigger ID, referenced below).
-3. Set every var from `.env.example` on the service (Console → your service → **Edit & Deploy New Revision → Variables**, or `gcloud run services update <service> --region=<region> --set-env-vars KEY=value,...`). `API_KEY` is required before this is exposed anywhere public — see `.env.example` and `app/api/main.py`'s `require_api_key` for why.
-4. Note whether your Cloud Run instance's filesystem is ephemeral across revisions (it is, by default) — `jobs.db`/`reports/`/`llm_logs/` need `DATA_DIR` pointed at a real persistent volume (Cloud Storage FUSE or Filestore) if you need them to survive a redeploy, same requirement Railway's volume step below has always had. This repo's own production deploy does not yet have one wired up — see the Roadmap section.
+2. Cloud Console → Cloud Run → **Create Service → Continuously deploy from a repository** → connect this GitHub repo, branch `main`, build type Dockerfile. This provisions the Cloud Run service and a Cloud Build trigger.
+3. Set every var from `.env.example` on the service (Console → **Edit & Deploy New Revision → Variables**, or `gcloud run services update <service> --region=<region> --update-env-vars KEY=value,...`). `API_KEY` is required before this is exposed anywhere public.
+4. Cloud Run's filesystem is ephemeral across revisions by default — point `DATA_DIR` at a real persistent volume (Cloud Storage FUSE or Filestore) if `jobs.db`/`reports/`/`llm_logs/` need to survive a redeploy.
 
-**Redeploy after a change** (what this repo's own commits actually run):
+**Redeploy the backend:**
 ```bash
 gcloud builds triggers run <your-trigger-id> --region=global --branch=main
 ```
-Builds `Dockerfile`, pushes the image to Artifact Registry, and rolls out a new Cloud Run revision — the manually-invoked equivalent of Railway's auto-deploy-on-push (no `cloudbuild.yaml` is committed to this repo, so nothing redeploys automatically on push yet — see the Roadmap section).
 
 **Verify:**
 ```bash
@@ -167,77 +238,38 @@ curl https://<your-cloud-run-url>/health
 curl -X POST https://<your-cloud-run-url>/v1/research \
   -H "X-API-Key: your-api-key" -H "Content-Type: application/json" \
   -d '{"question": "Should I invest in Apple?"}'
-# poll GET /v1/research/{job_id} until status is "done", then:
-curl https://<your-cloud-run-url>/v1/research/{job_id}/pdf -o report.pdf
 ```
 
 **Frontend (Vercel), one-time setup:**
 ```bash
 cd web
-npx vercel@latest link          # links this directory to a Vercel project
+npx vercel@latest link
 ```
-Then set `FINSIGHT_API_URL` (the Cloud Run URL above) and `FINSIGHT_API_KEY` (matching `API_KEY` on the backend) as Environment Variables in the Vercel dashboard — see `web/.env.example`.
+Then set `FINSIGHT_API_URL` (the Cloud Run URL above) and `FINSIGHT_API_KEY` (matching `API_KEY` on the backend) as Environment Variables in the Vercel dashboard.
 
-**Redeploy after a change:**
+**Redeploy the frontend:**
 ```bash
-cd web
-npx vercel@latest --prod
+cd web && npx vercel@latest --prod
 ```
 
-#### Alternative: Railway
+**Alternative: Railway** — the committed `Dockerfile`/`railway.json` support a one-service Railway deploy for the API (`railway login`, `railway init`, attach a persistent volume for `jobs.db`/`reports/`, `railway variables set ...` for each `.env.example` key, `railway up`). Potentially simpler for a from-scratch setup, since Railway auto-provisions its own build trigger instead of the manual Cloud Console wizard above.
 
-Railway remains a fully supported one-service deploy for the API via the committed `Dockerfile`/`railway.json` — potentially simpler for a from-scratch setup, since Railway auto-provisions its build trigger for you instead of the manual Cloud Console wizard above.
+---
 
-**1. Install the CLI and log in** (one-time, interactive browser login):
-```bash
-npm i -g @railway/cli
-railway login
-```
+## Testing & Quality
 
-**2. Create and link a project** (from the repo root):
-```bash
-railway init
-```
-
-**3. Attach a persistent volume** — container filesystems are wiped on every redeploy, so `jobs.db`, rendered PDFs, and LLM call logs all need to live outside the container:
-- Railway dashboard → your service → **Settings → Volumes → New Volume**.
-- Mount path: `/data` (any path works, just match step 4).
-- CLI equivalent: `railway volume add --mount-path /data`.
-
-**4. Set environment variables** — copy every var from `.env.example`, at minimum:
-```bash
-railway variables set FINNHUB_API_KEY=your-finnhub-key
-railway variables set LLM_BASE_URL=https://api.groq.com/openai/v1
-railway variables set LLM_API_KEY=your-groq-key
-railway variables set LLM_MODEL=llama-3.3-70b-versatile
-railway variables set DATA_DIR=/data
-railway variables set API_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-railway variables set ALLOWED_ORIGINS=https://your-frontend.example.com
-```
-`DATA_DIR` must match the volume's mount path from step 3 exactly, or `jobs.db`/`reports/`/`llm_logs/` silently land back on the ephemeral container filesystem. `PORT` is set automatically by Railway; don't set it yourself.
-
-**5. Deploy:**
-```bash
-railway up
-```
-Railway builds `Dockerfile` and deploys automatically on every push once the project is linked to a GitHub repo (Settings → connect the repo) — `railway up` above is for a manual/first deploy without waiting on that.
-
-**6. Get the live URL and verify:**
-```bash
-railway domain            # generates/shows the public URL if one isn't set yet
-curl https://<your-app>.up.railway.app/health
-```
+540+ test functions across 34 files, covering the recommendation engine, valuation pipeline, auth, RAG retrieval, the job queue's concurrency behavior, every external API client (SEC EDGAR, NSE India, Sarvam, Finnhub), and the full HTTP API surface — run via `pytest app/tests/`. CI runs on every push via GitHub Actions, with pytest failures re-emitted as annotations so a break is diagnosable from the Checks API without needing repo sign-in.
 
 ---
 
 ## Roadmap
 
-**Completed:** financial statement normalization, DCF/FCFF/WACC engines, live SEC EDGAR sourcing + ChromaDB retrieval, query intent classification, FinBERT sentiment, agentic LLM+rule-based tool planning, self-evaluation scoring, benchmark framework, institutional consensus scoring, news-grounded risk analysis, a benchmarked LangGraph orchestration alternative, Redis caching.
+**Completed:** financial statement normalization, DCF/FCFF/WACC engines, live SEC EDGAR + NSE India sourcing, ChromaDB retrieval, query intent classification, FinBERT sentiment, agentic LLM+rule-based tool planning, self-evaluation scoring, a benchmarked LangGraph orchestration alternative, Redis caching, full auth + PWA + Web Push, a simulated paper-trading platform, a 31-signal Alpha Factors scorecard, voice input.
 
-**Planned:** hybrid retrieval (vector + BM25), multi-quarter financial reasoning, an automated evaluation dashboard, portfolio-level analysis.
+**Planned:** hybrid retrieval (vector + BM25), multi-quarter financial reasoning, an automated evaluation dashboard, portfolio-level analysis, a trained RLVR checkpoint, voice-driven app navigation ("check my watchlist"), Postgres migration, request-level rate limiting, a committed CD pipeline.
 
 ---
 
 ## Author
 
-**Shivaum Sharma** — Computer Science Engineering (Data Science), Manipal Institute of Technology
+**Shivaum Shekhar Sharma** — Computer Science Engineering (Data Science), Manipal Institute of Technology
