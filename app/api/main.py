@@ -44,13 +44,14 @@ from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from typing import Literal, Optional
 
-from fastapi import Depends, FastAPI, Header, Query, Request
+from fastapi import Depends, FastAPI, File, Header, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, field_validator
 
 from app.api import auth, db, errors, jobs
 from app.core.company_resolver import get_company_name, resolve_companies, suggest_companies
+from app.data import sarvam_client
 from app.data.market_data import TickerNotFoundError, get_corporate_actions, get_quote, get_usd_conversion_rate
 from app.reasoning.backtest_stats import get_backtest_accuracy_summary
 from app.reasoning.market_movers import get_top_movers
@@ -58,6 +59,12 @@ from app.reasoning.model_consensus import compute_consensus, get_model_opinions
 from app.reporting.news_client import fetch_company_news, fetch_market_news
 
 TIMEOUT_SWEEP_INTERVAL_SECONDS = 60
+
+# Generous abuse/mistake guard, not a real constraint -- 25s of
+# webm/opus (VoiceInputButton's own recording ceiling) is well under
+# 1MB; this just stops a malformed/huge upload from being read fully
+# into memory and forwarded to Sarvam.
+MAX_VOICE_AUDIO_BYTES = 25 * 1024 * 1024
 
 # How many research jobs one user may start per rolling 24h window --
 # see db.count_recent_jobs's own docstring for why this needs no new
@@ -506,6 +513,38 @@ def push_unsubscribe(body: PushUnsubscribeRequest, current_user: str = Depends(a
     # belongs to another account isn't a distinction worth making here.
     db.remove_push_subscription(body.endpoint)
     return {"status": "ok"}
+
+
+@app.post("/v1/voice/transcribe")
+async def transcribe_voice(
+    file: UploadFile = File(...),
+    current_user: str = Depends(auth.get_current_user),
+):
+    """
+    Powers the mic button on the home page (VoiceInputButton.tsx) --
+    transcribes a short (<=~25s) voice recording via Sarvam AI and
+    returns the transcript for the frontend to fill into the question
+    box. Deliberately does NOT touch create_job_if_under_limit/
+    DAILY_JOB_LIMIT -- this isn't a research job and never enqueues
+    one; the transcript is only ever a candidate for the user to review
+    and submit themselves via the normal /v1/research path.
+    """
+    audio_bytes = await file.read()
+    if not audio_bytes:
+        raise errors.invalid_audio("No audio data received.")
+    if len(audio_bytes) > MAX_VOICE_AUDIO_BYTES:
+        raise errors.invalid_audio("Recording is too large.")
+
+    try:
+        transcript = sarvam_client.transcribe(
+            audio_bytes,
+            filename=file.filename or "audio.webm",
+            content_type=file.content_type or "audio/webm",
+        )
+    except sarvam_client.SarvamTranscriptionError as e:
+        raise errors.stt_unavailable(str(e))
+
+    return {"transcript": transcript}
 
 
 @app.post("/v1/research")

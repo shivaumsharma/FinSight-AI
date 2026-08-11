@@ -27,6 +27,8 @@ TICKER_NOT_FOUND = "TICKER_NOT_FOUND"
 BACKTEST_ACCURACY_UNAVAILABLE = "BACKTEST_ACCURACY_UNAVAILABLE"
 INSUFFICIENT_SHARES = "INSUFFICIENT_SHARES"
 INTERNAL_ERROR = "INTERNAL_ERROR"
+STT_UNAVAILABLE = "STT_UNAVAILABLE"
+INVALID_AUDIO = "INVALID_AUDIO"
 
 
 class APIError(Exception):
@@ -120,5 +122,26 @@ def insufficient_shares(message: str) -> APIError:
     return APIError(
         INSUFFICIENT_SHARES,
         message,
+        status_code=status.HTTP_400_BAD_REQUEST,
+    )
+
+
+def stt_unavailable(detail: str) -> APIError:
+    # 503, not 500/400 -- this is neither a bug in this app (500) nor
+    # bad user input (400), it's an external dependency (Sarvam) being
+    # unreachable or unconfigured. First use of 503 in this file; see
+    # app/data/sarvam_client.py's SarvamTranscriptionError for the
+    # exact failure modes this wraps.
+    return APIError(
+        STT_UNAVAILABLE,
+        f"Voice transcription is temporarily unavailable ({detail}).",
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
+
+
+def invalid_audio(detail: str) -> APIError:
+    return APIError(
+        INVALID_AUDIO,
+        detail,
         status_code=status.HTTP_400_BAD_REQUEST,
     )
