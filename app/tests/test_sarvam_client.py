@@ -92,6 +92,20 @@ def test_transcribe_does_not_retry_a_non_retryable_4xx(monkeypatch):
     assert fake.calls == 1  # no retry burned on a certain (bad-key) failure
 
 
+def test_transcribe_error_message_includes_sarvams_response_body(monkeypatch):
+    # A bare "400 Client Error: Bad Request" (requests' own default
+    # HTTPError message) throws away exactly the information needed to
+    # tell "malformed audio" apart from every other 4xx -- Sarvam's own
+    # response body is the real diagnostic and must survive into
+    # SarvamTranscriptionError's message.
+    monkeypatch.setenv("SARVAM_API_KEY", "test-key")
+    fake = _FakeSession([_response(400, {"error": "Invalid audio: missing duration metadata"})])
+    monkeypatch.setattr(sarvam, "_get_session", lambda: fake)
+
+    with pytest.raises(sarvam.SarvamTranscriptionError, match="missing duration metadata"):
+        sarvam.transcribe(b"audio-bytes", "recording.webm", "audio/webm")
+
+
 def test_transcribe_raises_before_any_network_call_when_key_missing(monkeypatch):
     monkeypatch.delenv("SARVAM_API_KEY", raising=False)
 
