@@ -19,6 +19,14 @@ The platform combines an LLM tool-planning agent, a real DCF valuation engine, r
 
 ---
 
+## Vision
+
+Most "AI investing" tools are chatbots wrapped around a generic LLM's training data — confident-sounding, ungrounded, and unable to tell you why they said what they said. FinSight's premise is the opposite: every claim in a report should trace back to a live filing, a real quote, or an actual computed valuation, and the system should be honest about its own limitations (small training sets, a DCF's structural blind spots, a benchmark result that didn't come out as hoped) rather than hide them.
+
+The longer-term direction is a full voice-driven research copilot — "Hey FinSight, check my stocks" — with tap-to-talk transcription (shipped, see below) as the first step toward hands-free portfolio review and, eventually, spoken app navigation.
+
+---
+
 ## Features
 
 - LLM planning agent that decides which tools a question actually needs (a valuation question skips RAG; a "what did management say" question skips the DCF)
@@ -209,6 +217,21 @@ npm install
 npm run dev
 ```
 See `.env.example` and `web/.env.example` for the full list of required/optional environment variables.
+
+---
+
+## Screenshots
+
+| | |
+|---|---|
+| **Home Dashboard** — indices, live FX, self-reported portfolio with real weighted-average P&L | **Top Movers & Sentiment** — tracked-universe gainers, a research sentiment gauge across all rated tickers |
+| ![Home Dashboard](screenshots/home-dashboard.jpeg) | ![Top Movers & Sentiment](screenshots/market-movers-sentiment.jpeg) |
+| **Research Agent** — market news feed, ticker/thesis input with voice mic, and the live 8-step pipeline | **Reports** — every past report, ticker, recommendation, and age at a glance |
+| ![Research Agent](screenshots/research-agent.jpeg) | ![Reports](screenshots/reports.jpeg) |
+| **Watchlist** — tracked tickers with live quotes, ratings, corporate-action dates | **Profile** — usage quota, preferences, connected data sources, session management |
+| ![Watchlist](screenshots/watchlist.jpeg) | ![Profile](screenshots/profile.jpeg) |
+| **Login** | |
+| ![Login](screenshots/login.jpeg) | |
 
 ---
 
