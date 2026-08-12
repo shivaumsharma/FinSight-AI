@@ -21,6 +21,9 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List
 
 from app.core.llm_provider import HostedProvider, LLMProviderError
+from app.core.research_context import ResearchContext
+from app.reporting.report_data_builder import derive_recommendation
+from app.tools.valuation_tool import ValuationTool
 
 CONSENSUS_MODELS = [
     {"label": "Llama 3.3 70B", "model": "llama-3.3-70b-versatile"},
@@ -134,3 +137,37 @@ def compute_consensus(opinions: List[dict]) -> dict:
 
     top_rating = max(counts, key=lambda r: counts[r])
     return {"rating": top_rating, "agree_count": counts[top_rating], "total": len(opinions)}
+
+
+def get_stock_model_opinions(ticker: str) -> dict:
+    """Model Compare for the stock-detail-page: same 3-model second
+    opinion as the job-based version above, but there's no completed
+    research job to read report_data from here -- this page never runs
+    one. Uses the same lightweight, LLM/RAG-free ValuationTool-only
+    path as build_stock_insights (stock_score.py) to get a
+    recommendation, then shapes it into the report_data keys
+    _build_prompt already expects. SEC/news sentiment stay "Unavailable"
+    (via _fmt) since no sentiment tool runs in this path -- the 3
+    models just have one less input than the job-based version, not
+    broken input. Raises TickerNotFoundError (via ValuationTool's
+    internal MarketDataTool run) for a bad ticker, same as every other
+    ticker-keyed endpoint in main.py."""
+    context = ResearchContext(ticker=ticker, question=f"Should I invest in {ticker}?")
+    ValuationTool().run(context)
+
+    valuation_results = context.valuation_results or {}
+    currency = (context.company_info or {}).get("currency") or "USD"
+    recommendation = derive_recommendation(valuation_results, None, None, currency=currency)
+
+    report_data = {
+        "recommendation": recommendation,
+        "valuation_analysis": {
+            "Intrinsic Value (per share)": valuation_results.get("intrinsic_value"),
+            "Current Price": valuation_results.get("current_price"),
+            "Upside (%)": valuation_results.get("upside_percent"),
+        },
+        "market_earnings_snapshot": {},
+    }
+
+    opinions = get_model_opinions(report_data, ticker)
+    return {"models": opinions, "consensus": compute_consensus(opinions)}
