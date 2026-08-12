@@ -256,6 +256,317 @@ def test_ticker_not_found_gets_its_own_error_code(client, monkeypatch, auth_head
     assert final["error_code"] == "TICKER_NOT_FOUND"
 
 
+# ---------------------------------------------------------------- stock overview
+
+def test_get_stock_overview_returns_the_full_shape(client, monkeypatch, auth_headers):
+    fake_overview = {
+        "ticker": "AAPL", "price": 227.5, "change_pct": 1.2, "previous_close": 224.8,
+        "currency": "USD", "company_name": "Apple Inc.", "sector": "Technology",
+        "industry": "Consumer Electronics", "market_cap": 3_400_000_000_000,
+        "business_summary": "Apple designs...", "website": "https://apple.com",
+        "employees": 164000, "country": "United States", "exchange": "NMS",
+        "next_earnings_date": None,
+        "price_statistics": {"open": 225.0, "day_high": 228.1, "day_low": 224.9,
+                              "fifty_two_week_high": 260.1, "fifty_two_week_low": 164.1,
+                              "volume": 50_000_000, "average_volume": 55_000_000},
+        "fundamentals": {"trailing_pe": 34.2, "forward_pe": 30.1, "price_to_book": 45.3,
+                          "dividend_yield": 0.5, "book_value": 5.1, "debt_to_equity": 150.2,
+                          "trailing_eps": 6.6, "peg_ratio": 2.1},
+        "analyst": {"target_mean_price": 240.0, "target_high_price": 280.0,
+                    "target_low_price": 200.0, "number_of_analyst_opinions": 42},
+    }
+    monkeypatch.setattr(main, "get_stock_overview", lambda ticker: fake_overview)
+
+    resp = client.get("/v1/stocks/AAPL/overview", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.json() == fake_overview
+
+
+def test_get_stock_overview_requires_auth(client, monkeypatch):
+    monkeypatch.setattr(main, "get_stock_overview", lambda ticker: {})
+    resp = client.get("/v1/stocks/AAPL/overview")
+    assert resp.status_code == 401
+
+
+def test_get_stock_overview_returns_404_shaped_error_for_bad_ticker(client, monkeypatch, auth_headers):
+    def _raise(ticker):
+        raise TickerNotFoundError(f"No price data found for {ticker}")
+
+    monkeypatch.setattr(main, "get_stock_overview", _raise)
+    monkeypatch.setattr(main, "resolve_companies", lambda q: [])
+
+    resp = client.get("/v1/stocks/ZZZZ/overview", headers=auth_headers)
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "TICKER_NOT_FOUND"
+
+
+def test_get_stock_overview_falls_back_to_company_name_resolution(client, monkeypatch, auth_headers):
+    # A hand-typed company name (e.g. from a URL) should retry once
+    # through resolve_companies, same fallback the watchlist/portfolio/
+    # orders POST endpoints already use.
+    calls = []
+
+    def _get_overview(ticker):
+        calls.append(ticker)
+        if ticker == "apple inc":
+            raise TickerNotFoundError("bad")
+        return {"ticker": ticker}
+
+    monkeypatch.setattr(main, "get_stock_overview", _get_overview)
+    monkeypatch.setattr(main, "resolve_companies", lambda q: ["AAPL"])
+
+    resp = client.get("/v1/stocks/apple%20inc/overview", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ticker": "AAPL"}
+    assert calls == ["apple inc", "AAPL"]
+
+
+def test_get_stock_financials_returns_series_and_growth(client, monkeypatch, auth_headers):
+    fake_series = [{"period_end": "2024-12-31", "revenue": 100.0, "net_income": 10.0,
+                     "ebit": 20.0, "net_margin_pct": 10.0, "operating_margin_pct": 20.0}]
+    fake_growth = {"revenue_cagr": {"1y": 10.0, "3y": None, "5y": None},
+                    "eps_cagr": {"1y": None, "3y": None, "5y": None},
+                    "book_value_cagr": {"1y": None, "3y": None, "5y": None},
+                    "fcf_cagr": {"1y": None, "3y": None, "5y": None}}
+    monkeypatch.setattr(main, "build_financial_performance", lambda ticker, period: fake_series)
+    monkeypatch.setattr(main, "build_growth_metrics", lambda ticker: fake_growth)
+
+    resp = client.get("/v1/stocks/AAPL/financials?period=quarterly", headers=auth_headers)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["period"] == "quarterly"
+    assert body["series"] == fake_series
+    assert body["growth"] == fake_growth
+
+
+def test_get_stock_financials_defaults_to_yearly(client, monkeypatch, auth_headers):
+    captured = {}
+
+    def _fake_series(ticker, period):
+        captured["period"] = period
+        return []
+
+    monkeypatch.setattr(main, "build_financial_performance", _fake_series)
+    monkeypatch.setattr(main, "build_growth_metrics", lambda ticker: {})
+
+    resp = client.get("/v1/stocks/AAPL/financials", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert captured["period"] == "yearly"
+
+
+def test_get_stock_financials_requires_auth(client):
+    resp = client.get("/v1/stocks/AAPL/financials")
+    assert resp.status_code == 401
+
+
+def test_get_stock_financials_maps_missing_statements_to_ticker_not_found(client, monkeypatch, auth_headers):
+    def _raise(ticker, period):
+        raise ValueError("Income Statement unavailable")
+
+    monkeypatch.setattr(main, "build_financial_performance", _raise)
+
+    resp = client.get("/v1/stocks/ZZZZ/financials", headers=auth_headers)
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "TICKER_NOT_FOUND"
+
+
+def test_get_stock_financials_degrades_growth_to_empty_on_failure(client, monkeypatch, auth_headers):
+    # A ticker can have a usable income statement (series succeeds) but
+    # a balance-sheet/cash-flow gap that breaks growth CAGR -- the
+    # series result must still be returned rather than the whole
+    # endpoint failing.
+    monkeypatch.setattr(main, "build_financial_performance", lambda ticker, period: [{"period_end": "2024-12-31"}])
+
+    def _raise_growth(ticker):
+        raise ValueError("Balance Sheet unavailable")
+
+    monkeypatch.setattr(main, "build_growth_metrics", _raise_growth)
+
+    resp = client.get("/v1/stocks/AAPL/financials", headers=auth_headers)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["series"] == [{"period_end": "2024-12-31"}]
+    assert body["growth"] == {"revenue_cagr": {}, "eps_cagr": {}, "book_value_cagr": {}, "fcf_cagr": {}}
+
+
+# ---------------------------------------------------------------- stock technicals
+
+def test_get_stock_technicals_returns_the_full_shape(client, monkeypatch, auth_headers):
+    fake = {
+        "price_history": [{"date": "2024-01-01", "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.5, "volume": 1000}],
+        "overlays": {"ema_20": [["2024-01-01", 100.0]], "ema_50": [], "ema_200": [], "bollinger_upper": [], "bollinger_lower": [], "vwap": []},
+        "indicators": {"rsi_14": 55.0, "macd": {"macd": 1.0, "signal": 0.5, "histogram": 0.5}, "adx_14": 20.0,
+                        "vwap": 100.0, "ema_20": 100.0, "ema_50": 99.0, "ema_200": 95.0,
+                        "stochastic": {"k": 60.0, "d": 55.0}, "williams_r": -40.0},
+        "trend": "Bullish",
+        "moving_average_signal": {"buy": 5, "sell": 1, "verdict": "Buy"},
+        "support_resistance": {"support_20d": 95.0, "resistance_20d": 105.0, "support_60d": 90.0, "resistance_60d": 110.0},
+    }
+    monkeypatch.setattr(main, "build_technicals", lambda ticker, range_period: fake)
+
+    resp = client.get("/v1/stocks/AAPL/technicals?range=1y", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.json() == fake
+
+
+def test_get_stock_technicals_defaults_to_1y_range(client, monkeypatch, auth_headers):
+    captured = {}
+
+    def _fake(ticker, range_period):
+        captured["range_period"] = range_period
+        return {}
+
+    monkeypatch.setattr(main, "build_technicals", _fake)
+
+    resp = client.get("/v1/stocks/AAPL/technicals", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert captured["range_period"] == "1y"
+
+
+def test_get_stock_technicals_rejects_an_invalid_range(client, auth_headers):
+    resp = client.get("/v1/stocks/AAPL/technicals?range=10y", headers=auth_headers)
+    assert resp.status_code == 422  # FastAPI's own Literal-validation error, not a hand-rolled one
+
+
+def test_get_stock_technicals_requires_auth(client):
+    resp = client.get("/v1/stocks/AAPL/technicals")
+    assert resp.status_code == 401
+
+
+def test_get_stock_technicals_maps_bad_ticker_to_ticker_not_found(client, monkeypatch, auth_headers):
+    def _raise(ticker, range_period):
+        raise ValueError("No price data found")
+
+    monkeypatch.setattr(main, "build_technicals", _raise)
+
+    resp = client.get("/v1/stocks/ZZZZ/technicals", headers=auth_headers)
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "TICKER_NOT_FOUND"
+
+
+# ---------------------------------------------------------------- stock insights
+
+def test_get_stock_insights_returns_the_full_shape(client, monkeypatch, auth_headers):
+    fake = {
+        "rating": "Buy", "overall_score": 78,
+        "category_scores": {"valuation": 4, "financial_health": 5, "growth": 3, "profitability": 4, "momentum": 5, "risk": 4},
+        "fair_value_estimate": 250.0, "current_price": 200.0, "upside_percent": 25.0,
+        "consensus": {"score": 80, "label": "Strong Agreement"},
+        "flags": ["Strong Financials", "Positive Momentum"],
+    }
+    monkeypatch.setattr(main, "build_stock_insights", lambda ticker: fake)
+
+    resp = client.get("/v1/stocks/AAPL/insights", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.json() == fake
+
+
+def test_get_stock_insights_requires_auth(client):
+    resp = client.get("/v1/stocks/AAPL/insights")
+    assert resp.status_code == 401
+
+
+def test_get_stock_insights_maps_bad_ticker_to_ticker_not_found(client, monkeypatch, auth_headers):
+    def _raise(ticker):
+        raise TickerNotFoundError("bad ticker")
+
+    monkeypatch.setattr(main, "build_stock_insights", _raise)
+
+    resp = client.get("/v1/stocks/ZZZZ/insights", headers=auth_headers)
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "TICKER_NOT_FOUND"
+
+
+# ---------------------------------------------------------------- stock news/events/similar/peer-comparison
+
+def test_get_stock_news_returns_articles(client, monkeypatch, auth_headers):
+    fake_articles = [{"headline": "Apple beats earnings", "source": "Reuters", "date": "2026-08-01",
+                       "url": "https://example.com/a", "summary": "...", "categories": ["other"]}]
+    monkeypatch.setattr(main, "fetch_company_news", lambda ticker: fake_articles)
+
+    resp = client.get("/v1/stocks/AAPL/news", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.json() == {"articles": fake_articles}
+
+
+def test_get_stock_news_requires_auth(client):
+    resp = client.get("/v1/stocks/AAPL/news")
+    assert resp.status_code == 401
+
+
+def test_get_stock_events_returns_corporate_actions_history(client, monkeypatch, auth_headers):
+    fake = {"next_earnings_date": "2026-09-01", "next_ex_dividend_date": None,
+            "dividends": [{"date": "2025-01-01", "amount": 0.24}], "splits": []}
+    monkeypatch.setattr(main, "get_corporate_actions_history", lambda ticker: fake)
+
+    resp = client.get("/v1/stocks/AAPL/events", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.json() == fake
+
+
+def test_get_similar_stocks_returns_sector_and_matches(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "get_stock_overview", lambda ticker: {"sector": "Technology"})
+    monkeypatch.setattr(main, "find_similar_stocks", lambda ticker, sector: [{"ticker": "MSFT"}])
+
+    resp = client.get("/v1/stocks/AAPL/similar", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.json() == {"sector": "Technology", "similar": [{"ticker": "MSFT"}]}
+
+
+def test_get_similar_stocks_maps_bad_ticker_to_ticker_not_found(client, monkeypatch, auth_headers):
+    def _raise(ticker):
+        raise TickerNotFoundError(ticker)
+
+    monkeypatch.setattr(main, "get_stock_overview", _raise)
+
+    resp = client.get("/v1/stocks/ZZZZ/similar", headers=auth_headers)
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "TICKER_NOT_FOUND"
+
+
+def test_get_peer_comparison_returns_primary_and_peer(client, monkeypatch, auth_headers):
+    fake = {"primary": {"ticker": "AAPL"}, "peer": {"ticker": "MSFT"}}
+    monkeypatch.setattr(main, "build_peer_comparison", lambda ticker, peer: fake)
+
+    resp = client.get("/v1/stocks/AAPL/peer-comparison?peer=MSFT", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.json() == fake
+
+
+def test_get_peer_comparison_requires_peer_query_param(client, auth_headers):
+    resp = client.get("/v1/stocks/AAPL/peer-comparison", headers=auth_headers)
+    assert resp.status_code == 422
+
+
+def test_get_peer_comparison_maps_bad_ticker_to_ticker_not_found(client, monkeypatch, auth_headers):
+    def _raise(ticker, peer):
+        raise TickerNotFoundError(ticker)
+
+    monkeypatch.setattr(main, "build_peer_comparison", _raise)
+
+    resp = client.get("/v1/stocks/AAPL/peer-comparison?peer=ZZZZ", headers=auth_headers)
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "TICKER_NOT_FOUND"
+
+
 # ---------------------------------------------------------------- validation
 
 def test_no_company_question_returns_structured_400(client, auth_headers):
