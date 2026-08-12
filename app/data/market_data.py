@@ -178,6 +178,76 @@ def get_corporate_actions(ticker: str) -> dict:
     return result
 
 
+_corporate_actions_history_cache: dict = {}
+_CORPORATE_ACTIONS_HISTORY_CACHE_TTL_SECONDS = 6 * 3600
+
+
+def get_corporate_actions_history(ticker: str) -> dict:
+    """Full dividend/split history (not just the single most-recent
+    each, unlike get_corporate_actions above) plus the same upcoming-
+    earnings/ex-dividend lookahead -- powers the stock-detail page's
+    Events tab. {"next_earnings_date", "next_ex_dividend_date",
+    "dividends": [{"date", "amount"}, ...], "splits": [{"date",
+    "ratio"}, ...]}, oldest first, both possibly empty (never None --
+    a company that's simply never split has an empty list, not a
+    missing field). No bonus/rights/buyback/ESOP history here --
+    yfinance has no such concepts at all (see the approved stock-
+    detail-page plan's "Explicitly out of scope" section); this is
+    real dividend/split data only, not a guess at the missing kinds."""
+    ticker = ticker.upper()
+
+    cached = _corporate_actions_history_cache.get(ticker)
+    if cached is not None and time.time() - cached[0] < _CORPORATE_ACTIONS_HISTORY_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    stock = yf.Ticker(ticker)
+
+    next_earnings_date = None
+    next_ex_dividend_date = None
+    try:
+        calendar = stock.calendar or {}
+        earnings_dates = calendar.get("Earnings Date") or []
+        upcoming_earnings = [d for d in earnings_dates if d >= date.today()]
+        next_earnings_date = min(upcoming_earnings).isoformat() if upcoming_earnings else None
+
+        ex_div = calendar.get("Ex-Dividend Date")
+        if ex_div and ex_div >= date.today():
+            next_ex_dividend_date = ex_div.isoformat()
+    except Exception:
+        pass
+
+    dividends = []
+    try:
+        series = stock.dividends
+        if not series.empty:
+            dividends = [
+                {"date": idx.date().isoformat(), "amount": float(value)}
+                for idx, value in series.items()
+            ]
+    except Exception:
+        pass
+
+    splits = []
+    try:
+        series = stock.splits
+        if not series.empty:
+            splits = [
+                {"date": idx.date().isoformat(), "ratio": float(value)}
+                for idx, value in series.items()
+            ]
+    except Exception:
+        pass
+
+    result = {
+        "next_earnings_date": next_earnings_date,
+        "next_ex_dividend_date": next_ex_dividend_date,
+        "dividends": dividends,
+        "splits": splits,
+    }
+    _corporate_actions_history_cache[ticker] = (time.time(), result)
+    return result
+
+
 # Same lightweight-and-cached spirit as get_quote()/get_corporate_actions()
 # above, for AlphaFactorsEngine's market/risk/macro factors (Relative
 # Strength vs Index, Sector Relative Performance, Interest Rate
@@ -317,6 +387,29 @@ class MarketDataLoader:
   def get_cash_flow(self):
      return self._cached_statement(
         "cash_flow", lambda: self.stock.cashflow, "Cash flow statement unavailable"
+     )
+
+  # Quarterly counterparts -- same caching/error convention as the
+  # annual statements above, just pointed at yfinance's quarterly_*
+  # accessors (never called anywhere in this app before the stock-detail
+  # page's Financial Performance chart/quarterly-yearly toggle needed
+  # them). Kept as separate cache keys ("quarterly_income" etc.), not a
+  # period arg on the existing methods -- yfinance itself exposes these
+  # as distinct properties, and mixing annual/quarterly cache entries
+  # under one key would risk serving the wrong shape.
+  def get_quarterly_income_statement(self):
+     return self._cached_statement(
+        "quarterly_income", lambda: self.stock.quarterly_financials, "Quarterly income statement unavailable"
+     )
+
+  def get_quarterly_balance_sheet(self):
+     return self._cached_statement(
+        "quarterly_balance_sheet", lambda: self.stock.quarterly_balance_sheet, "Quarterly balance sheet unavailable"
+     )
+
+  def get_quarterly_cash_flow(self):
+     return self._cached_statement(
+        "quarterly_cash_flow", lambda: self.stock.quarterly_cashflow, "Quarterly cash flow statement unavailable"
      )
 
 
