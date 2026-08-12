@@ -195,6 +195,57 @@ export interface BacktestAccuracySummary {
   } | null;
 }
 
+// GET /v1/stocks/{ticker}/overview's response shape -- powers
+// web/src/app/stock/[ticker]/page.tsx's header/price-statistics/
+// fundamentals/company-info cards. Every numeric field here is null
+// when yfinance's `.info` didn't have it for this ticker (a wiring gap
+// fixed, not a guarantee every ticker populates every field) -- see
+// app/data/stock_overview.py's own docstring for exactly which paid-
+// vendor-only fields (shareholding pattern, promoter pledge, industry
+// P/E, ...) are deliberately NOT here at all.
+export interface StockOverview {
+  ticker: string;
+  price: number;
+  change_pct: number | null;
+  previous_close: number | null;
+  currency: string;
+  company_name: string | null;
+  sector: string | null;
+  industry: string | null;
+  market_cap: number | null;
+  business_summary: string | null;
+  website: string | null;
+  employees: number | null;
+  country: string | null;
+  exchange: string | null;
+  next_earnings_date: string | null;
+  price_statistics: {
+    open: number | null;
+    day_high: number | null;
+    day_low: number | null;
+    fifty_two_week_high: number | null;
+    fifty_two_week_low: number | null;
+    volume: number | null;
+    average_volume: number | null;
+  };
+  fundamentals: {
+    trailing_pe: number | null;
+    forward_pe: number | null;
+    price_to_book: number | null;
+    dividend_yield: number | null;
+    book_value: number | null;
+    debt_to_equity: number | null;
+    trailing_eps: number | null;
+    peg_ratio: number | null;
+  };
+  analyst: {
+    target_mean_price: number | null;
+    target_high_price: number | null;
+    target_low_price: number | null;
+    number_of_analyst_opinions: number | null;
+  };
+}
+
 export type JobStatus = "queued" | "running" | "done" | "error";
 
 export interface JobResponse {
@@ -326,6 +377,10 @@ export interface NewsArticle {
   // Only present on GET /v1/news/my-stocks' articles -- which tracked
   // ticker this headline came from, so the "On My Stocks" tab can show it.
   ticker?: string;
+  // Only present on GET /v1/stocks/{ticker}/news's articles -- keyword-
+  // matched risk categories (see app/reporting/news_client.py), not an
+  // LLM/ML sentiment score.
+  categories?: string[];
 }
 
 // GET /v1/market/movers' item shape -- a row in the Top Movers
