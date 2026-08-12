@@ -5,11 +5,15 @@ import RatingBadge, { ratingColorClass } from "./RatingBadge";
 import type { ModelConsensus, ModelOpinion } from "@/lib/types";
 
 // On-demand second opinion: 3 independent models re-interpreting the
-// SAME already-computed report evidence (see app/reasoning/
-// model_consensus.py), not a re-run of the pipeline -- triggered by a
-// button rather than run automatically on every report, since it's
-// extra LLM cost/latency a viewer may not want on every single query.
-export default function ModelCompare({ jobId }: { jobId: string }) {
+// SAME already-computed evidence (see app/reasoning/model_consensus.py),
+// not a re-run of the full pipeline -- triggered by a button rather
+// than run automatically, since it's extra LLM cost/latency a viewer
+// may not want on every single query. `endpoint` is the full proxy
+// path to POST to -- the job-based report flow and the ticker-based
+// stock-detail-page flow hit different backend endpoints (no completed
+// job exists on the stock page), so this component stays endpoint-
+// agnostic rather than reconstructing the URL from a jobId/ticker prop.
+export default function ModelCompare({ endpoint }: { endpoint: string }) {
   const [state, setState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [models, setModels] = useState<ModelOpinion[] | null>(null);
   const [consensus, setConsensus] = useState<ModelConsensus | null>(null);
@@ -17,7 +21,7 @@ export default function ModelCompare({ jobId }: { jobId: string }) {
   async function handleCompare() {
     setState("loading");
     try {
-      const resp = await fetch(`/api/research/${jobId}/model-compare`, { method: "POST" });
+      const resp = await fetch(endpoint, { method: "POST" });
       if (!resp.ok) throw new Error("model compare failed");
       const data = await resp.json();
       setModels(data.models);
