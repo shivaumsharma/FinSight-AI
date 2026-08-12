@@ -11,6 +11,7 @@ import EventsTab from "@/components/EventsTab";
 import FinancialPerformanceChart from "@/components/FinancialPerformanceChart";
 import FundamentalsCard from "@/components/FundamentalsCard";
 import GrowthMetrics from "@/components/GrowthMetrics";
+import ModelCompare from "@/components/ModelCompare";
 import NewsTab from "@/components/NewsTab";
 import PeerComparisonTable from "@/components/PeerComparisonTable";
 import PerformanceDashboard from "@/components/PerformanceDashboard";
@@ -107,6 +108,10 @@ function StockDetailContent({ ticker }: { ticker: string }) {
                 content: (
                   <div>
                     <AIInsightsCard ticker={overview.ticker} currency={overview.currency} />
+                    <div className="mt-4 rounded-lg border border-border bg-card px-3.5 py-3">
+                      <p className="text-xs text-muted">Get a second opinion: 3 independent AI models each give their own Buy/Hold/Sell call on this stock.</p>
+                      <ModelCompare endpoint={`/api/stock/${encodeURIComponent(overview.ticker)}/model-compare`} />
+                    </div>
                     <PriceStatistics overview={overview} />
                     <FundamentalsCard overview={overview} />
                     <FinancialPerformanceChart ticker={overview.ticker} currency={overview.currency} />
