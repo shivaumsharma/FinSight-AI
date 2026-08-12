@@ -6,10 +6,13 @@ prompt-building/parsing/tallying logic, not HostedProvider's HTTP
 behavior (already covered by test_llm_provider.py).
 """
 
+import pandas as pd
 import pytest
 
 from app.core.llm_provider import LLMProviderError
+from app.core.research_context import ResearchContext
 from app.reasoning import model_consensus as mc
+from app.tools.valuation_tool import ValuationTool
 
 
 def _report_data(**overrides):
@@ -145,3 +148,59 @@ def test_compute_consensus_ignores_insufficient_data_when_tallying():
     assert result["rating"] == "Buy"
     assert result["agree_count"] == 2
     assert result["total"] == 3
+
+
+# ---------------------------------------------------------------- get_stock_model_opinions
+
+def _valid_financial_df():
+    years = pd.to_datetime(["2021-12-31", "2022-12-31", "2023-12-31", "2024-12-31"])
+    return pd.DataFrame({
+        "revenue": [100, 115, 132, 152], "ebit": [20, 24, 28, 33], "net_income": [15, 18, 21, 25],
+        "cash_from_operations": [18, 21, 24, 28], "capex": [5, 5, 6, 6], "total_debt": [50, 52, 53, 54],
+        "tax_expense": [3, 3, 4, 4], "pretax_income": [18, 21, 25, 29], "depreciation": [4, 4, 5, 5],
+        "current_assets": [30, 34, 38, 43], "current_liabilities": [20, 21, 22, 23], "cash": [40, 44, 48, 53],
+        "shares_outstanding": [1000, 1000, 1000, 1000], "interest_expense": [-2, -2, -2, -2],
+        "total_equity": [80, 92, 106, 122], "total_assets": [200, 220, 245, 275], "retained_earnings": [60, 70, 82, 96],
+    }, index=years)
+
+
+def _valid_historical_prices(n=260, start=100.0):
+    index = pd.date_range("2024-01-01", periods=n, freq="D")
+    closes = pd.Series([start + i * 0.2 for i in range(n)], index=index)
+    return pd.DataFrame({
+        "Open": closes, "High": closes + 1, "Low": closes - 1, "Close": closes,
+        "Volume": pd.Series([1_000_000] * n, index=index),
+    })
+
+
+def _valid_context(ticker="TEST.NS"):
+    ctx = ResearchContext(ticker=ticker, question=f"Should I invest in {ticker}?")
+    ctx.normalized_financials = _valid_financial_df()
+    ctx.market_cap = 200_000
+    ctx.beta = 1.1
+    ctx.historical_prices = _valid_historical_prices()
+    ctx.company_info = {"current_price": 200.0, "market_cap": 200_000, "beta": 1.1, "currency": "INR", "sector": "Technology"}
+    return ctx
+
+
+def test_get_stock_model_opinions_returns_models_and_consensus(monkeypatch):
+    ctx = _valid_context()
+    monkeypatch.setattr(mc, "ResearchContext", lambda ticker, question: ctx)
+    monkeypatch.setattr(mc, "HostedProvider", _FakeProvider)
+
+    result = mc.get_stock_model_opinions("TEST.NS")
+
+    assert len(result["models"]) == len(mc.CONSENSUS_MODELS)
+    assert result["consensus"]["rating"] == "Buy"
+
+
+def test_get_stock_model_opinions_propagates_ticker_not_found(monkeypatch):
+    from app.data.market_data import TickerNotFoundError
+
+    def _raise_run(self, context):
+        raise TickerNotFoundError("bad ticker")
+
+    monkeypatch.setattr(ValuationTool, "run", _raise_run)
+
+    with pytest.raises(TickerNotFoundError):
+        mc.get_stock_model_opinions("ZZZZ")
