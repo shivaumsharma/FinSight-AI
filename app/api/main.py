@@ -63,7 +63,7 @@ from app.reasoning.stock_score import build_stock_insights
 from app.data.stock_overview import get_stock_overview
 from app.reasoning.backtest_stats import get_backtest_accuracy_summary
 from app.reasoning.market_movers import get_top_movers
-from app.reasoning.model_consensus import compute_consensus, get_model_opinions
+from app.reasoning.model_consensus import compute_consensus, get_model_opinions, get_stock_model_opinions
 from app.reporting.news_client import fetch_company_news, fetch_market_news
 
 TIMEOUT_SWEEP_INTERVAL_SECONDS = 60
@@ -944,6 +944,18 @@ def get_stock_insights(ticker: str, current_user: str = Depends(auth.get_current
     # resolved.
     try:
         return build_stock_insights(ticker)
+    except TickerNotFoundError:
+        raise errors.ticker_not_found(ticker)
+
+
+@app.post("/v1/stocks/{ticker}/model-compare")
+def stock_model_compare(ticker: str, current_user: str = Depends(auth.get_current_user)):
+    """Model Compare for the stock-detail-page -- see
+    get_stock_model_opinions' docstring for why this can't just reuse
+    the job-based /v1/research/{job_id}/model-compare above (no
+    completed job exists here)."""
+    try:
+        return get_stock_model_opinions(ticker)
     except TickerNotFoundError:
         raise errors.ticker_not_found(ticker)
 
