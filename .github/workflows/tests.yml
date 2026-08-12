@@ -43,8 +43,18 @@ jobs:
       # until caught here. Verified against a truly isolated venv with
       # only this list installed, not just the (much more populated)
       # main dev venv -- that's what caught this exact gap.
+      #
+      # python-multipart (app.api.main's POST /v1/voice/transcribe,
+      # FastAPI's own UploadFile/File(...) form parsing) and pypdf
+      # (app.data.nse_filings_client's PDF text extraction) are the
+      # same recurring gap -- both real requirements.txt dependencies
+      # that this hand-curated list simply hadn't caught up with yet,
+      # caught the same way as the pywebpush/joblib/scikit-learn gap
+      # above: a collection-time ModuleNotFoundError/RuntimeError on
+      # every test module importing app.api.main or
+      # test_nse_filings_client.py.
       - name: Install test dependencies
-        run: pip install pandas numpy langgraph==1.2.9 redis fastapi httpx yfinance rapidfuzz python-dotenv pywebpush joblib scikit-learn -r requirements-dev.txt
+        run: pip install pandas numpy langgraph==1.2.9 redis fastapi httpx yfinance rapidfuzz python-dotenv pywebpush joblib scikit-learn python-multipart pypdf -r requirements-dev.txt
 
       # test_finbert.py and test_rag.py are manual smoke tests (see
       # their own docstrings) -- they need the full model stack and
