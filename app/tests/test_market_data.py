@@ -198,6 +198,57 @@ def test_get_corporate_actions_is_cached_within_the_ttl(monkeypatch):
     assert len(calls) == 1
 
 
+# ---------------------------------------------------------------- get_corporate_actions_history
+
+@pytest.fixture(autouse=True)
+def _clear_corporate_actions_history_cache(monkeypatch):
+    monkeypatch.setattr(md, "_corporate_actions_history_cache", {})
+
+
+def test_get_corporate_actions_history_returns_full_dividend_and_split_lists(monkeypatch):
+    dividends = pd.Series([0.22, 0.24, 0.27], index=pd.to_datetime(["2025-01-01", "2025-04-01", "2025-07-01"]))
+    splits = pd.Series([7.0, 4.0], index=pd.to_datetime(["2014-06-09", "2020-08-31"]))
+    stock = _FakeCorporateActionsStock(dividends=dividends, splits=splits)
+    monkeypatch.setattr(md.yf, "Ticker", lambda ticker: stock)
+
+    result = md.get_corporate_actions_history("AAPL")
+
+    assert result["dividends"] == [
+        {"date": "2025-01-01", "amount": 0.22},
+        {"date": "2025-04-01", "amount": 0.24},
+        {"date": "2025-07-01", "amount": 0.27},
+    ]
+    assert result["splits"] == [
+        {"date": "2014-06-09", "ratio": 7.0},
+        {"date": "2020-08-31", "ratio": 4.0},
+    ]
+
+
+def test_get_corporate_actions_history_returns_empty_lists_for_no_history(monkeypatch):
+    stock = _FakeCorporateActionsStock()
+    monkeypatch.setattr(md.yf, "Ticker", lambda ticker: stock)
+
+    result = md.get_corporate_actions_history("NEWCO")
+
+    assert result["dividends"] == []
+    assert result["splits"] == []
+    assert result["next_earnings_date"] is None
+
+
+def test_get_corporate_actions_history_is_cached_within_the_ttl(monkeypatch):
+    calls = []
+
+    def make_stock(ticker):
+        calls.append(ticker)
+        return _FakeCorporateActionsStock()
+
+    monkeypatch.setattr(md.yf, "Ticker", make_stock)
+
+    md.get_corporate_actions_history("MSFT")
+    md.get_corporate_actions_history("MSFT")
+    assert len(calls) == 1
+
+
 # ---------------------------------------------------------------- get_benchmark_history / SECTOR_ETF_PROXIES
 
 class _FakeBenchmarkStock:
@@ -269,3 +320,50 @@ def test_sector_etf_proxies_cover_every_yfinance_sector_confirmed_live():
         "Real Estate", "Industrials", "Communication Services", "Basic Materials",
     }
     assert set(md.SECTOR_ETF_PROXIES.keys()) == expected_sectors
+
+
+# ---------------------------------------------------------------- quarterly statements
+
+class _FakeQuarterlyStock:
+    def __init__(self, quarterly_financials=None, quarterly_balance_sheet=None, quarterly_cashflow=None):
+        self.quarterly_financials = quarterly_financials if quarterly_financials is not None else pd.DataFrame()
+        self.quarterly_balance_sheet = quarterly_balance_sheet if quarterly_balance_sheet is not None else pd.DataFrame()
+        self.quarterly_cashflow = quarterly_cashflow if quarterly_cashflow is not None else pd.DataFrame()
+
+
+def _loader_with_quarterly(**kwargs):
+    loader = MarketDataLoader("MSFT")
+    loader.stock = _FakeQuarterlyStock(**kwargs)
+    return loader
+
+
+def test_get_quarterly_income_statement_returns_the_raw_dataframe():
+    df = pd.DataFrame({"2024-09-30": [100]}, index=["Total Revenue"])
+    loader = _loader_with_quarterly(quarterly_financials=df)
+    result = loader.get_quarterly_income_statement()
+    assert list(result.loc["Total Revenue"]) == [100]
+
+
+def test_get_quarterly_balance_sheet_returns_the_raw_dataframe():
+    df = pd.DataFrame({"2024-09-30": [500]}, index=["Stockholders Equity"])
+    loader = _loader_with_quarterly(quarterly_balance_sheet=df)
+    result = loader.get_quarterly_balance_sheet()
+    assert list(result.loc["Stockholders Equity"]) == [500]
+
+
+def test_get_quarterly_cash_flow_returns_the_raw_dataframe():
+    df = pd.DataFrame({"2024-09-30": [20]}, index=["Operating Cash Flow"])
+    loader = _loader_with_quarterly(quarterly_cashflow=df)
+    result = loader.get_quarterly_cash_flow()
+    assert list(result.loc["Operating Cash Flow"]) == [20]
+
+
+def test_quarterly_statement_methods_raise_on_empty_dataframe():
+    # Same "empty DataFrame -> ValueError" contract as the annual
+    # statement methods (_cached_statement's shared error path).
+    loader = _loader_with_quarterly()
+    try:
+        loader.get_quarterly_income_statement()
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
