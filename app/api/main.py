@@ -52,7 +52,15 @@ from pydantic import BaseModel, field_validator
 from app.api import auth, db, errors, jobs
 from app.core.company_resolver import get_company_name, resolve_companies, suggest_companies
 from app.data import sarvam_client
-from app.data.market_data import TickerNotFoundError, get_corporate_actions, get_quote, get_usd_conversion_rate
+from app.data.market_data import (
+    TickerNotFoundError, get_corporate_actions, get_corporate_actions_history, get_quote, get_usd_conversion_rate,
+)
+from app.analysis.growth_metrics import build_financial_performance, build_growth_metrics
+from app.analysis.technical_indicators import build_technicals
+from app.reasoning.peer_comparison import build_peer_comparison
+from app.reasoning.similar_stocks import find_similar_stocks
+from app.reasoning.stock_score import build_stock_insights
+from app.data.stock_overview import get_stock_overview
 from app.reasoning.backtest_stats import get_backtest_accuracy_summary
 from app.reasoning.market_movers import get_top_movers
 from app.reasoning.model_consensus import compute_consensus, get_model_opinions
@@ -872,6 +880,105 @@ def get_market_sentiment(current_user: str = Depends(auth.get_current_user)):
         "sell_count": sell,
         "total_rated": buy + hold + sell,
     }
+
+
+@app.get("/v1/stocks/{ticker}/overview")
+def get_stock_overview_endpoint(ticker: str, current_user: str = Depends(auth.get_current_user)):
+    # Same fuzzy-input fallback as the watchlist/portfolio/orders POST
+    # endpoints below (resolve_companies retry on a bad symbol) -- the
+    # stock detail page's own nav links always pass a real ticker, but a
+    # user can still hand-type a company name into the URL/search.
+    try:
+        return get_stock_overview(ticker)
+    except TickerNotFoundError:
+        resolved = resolve_companies(ticker)
+        if not resolved:
+            raise errors.ticker_not_found(ticker)
+        try:
+            return get_stock_overview(resolved[0])
+        except TickerNotFoundError:
+            raise errors.ticker_not_found(ticker)
+
+
+@app.get("/v1/stocks/{ticker}/financials")
+def get_stock_financials(
+    ticker: str,
+    period: Literal["yearly", "quarterly"] = Query(default="yearly"),
+    current_user: str = Depends(auth.get_current_user),
+):
+    # No fuzzy-name fallback here (unlike the overview endpoint) --
+    # this is only ever called with a ticker the overview call already
+    # resolved successfully, from the same page.
+    try:
+        series = build_financial_performance(ticker, period=period)
+    except (ValueError, TickerNotFoundError):
+        raise errors.ticker_not_found(ticker)
+    # Growth CAGR is always computed from annual statements regardless
+    # of `period` (see growth_metrics.py's own docstring) -- cheap to
+    # include on every call rather than a second round trip.
+    try:
+        growth = build_growth_metrics(ticker)
+    except (ValueError, TickerNotFoundError):
+        growth = {"revenue_cagr": {}, "eps_cagr": {}, "book_value_cagr": {}, "fcf_cagr": {}}
+    return {"period": period, "series": series, "growth": growth}
+
+
+@app.get("/v1/stocks/{ticker}/technicals")
+def get_stock_technicals(
+    ticker: str,
+    range: Literal["1mo", "3mo", "6mo", "1y", "2y", "5y", "max"] = Query(default="1y"),
+    current_user: str = Depends(auth.get_current_user),
+):
+    # Daily-bar ranges only -- see technical_indicators.py's own
+    # docstring for why 1D/1W intraday isn't built this pass.
+    try:
+        return build_technicals(ticker, range_period=range)
+    except (ValueError, TickerNotFoundError):
+        raise errors.ticker_not_found(ticker)
+
+
+@app.get("/v1/stocks/{ticker}/insights")
+def get_stock_insights(ticker: str, current_user: str = Depends(auth.get_current_user)):
+    # Deliberately no fuzzy-name fallback (same as /technicals) -- this
+    # page only ever calls it with a ticker the overview call already
+    # resolved.
+    try:
+        return build_stock_insights(ticker)
+    except TickerNotFoundError:
+        raise errors.ticker_not_found(ticker)
+
+
+@app.get("/v1/stocks/{ticker}/news")
+def get_stock_news(ticker: str, current_user: str = Depends(auth.get_current_user)):
+    # fetch_company_news never raises (see news_client.py's own
+    # docstring) -- degrades to [] on a missing API key/no coverage,
+    # same "no news found" reading for a bad ticker as for a real one
+    # with no recent articles. No ticker-not-found check needed here.
+    return {"articles": fetch_company_news(ticker)}
+
+
+@app.get("/v1/stocks/{ticker}/events")
+def get_stock_events(ticker: str, current_user: str = Depends(auth.get_current_user)):
+    return get_corporate_actions_history(ticker)
+
+
+@app.get("/v1/stocks/{ticker}/similar")
+def get_similar_stocks_endpoint(ticker: str, current_user: str = Depends(auth.get_current_user)):
+    try:
+        overview = get_stock_overview(ticker)
+    except TickerNotFoundError:
+        raise errors.ticker_not_found(ticker)
+    return {"sector": overview["sector"], "similar": find_similar_stocks(ticker, overview["sector"])}
+
+
+@app.get("/v1/stocks/{ticker}/peer-comparison")
+def get_peer_comparison_endpoint(
+    ticker: str, peer: str = Query(...), current_user: str = Depends(auth.get_current_user)
+):
+    try:
+        return build_peer_comparison(ticker, peer)
+    except TickerNotFoundError:
+        raise errors.ticker_not_found(f"{ticker} or {peer}")
 
 
 @app.get("/v1/watchlist")
