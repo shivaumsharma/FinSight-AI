@@ -275,7 +275,9 @@ export default function Portfolio() {
             >
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-sm font-bold text-text">{h.ticker}</span>
+                  <Link href={`/stock/${h.ticker}`} className="font-mono text-sm font-bold text-text hover:text-accent">
+                    {h.ticker}
+                  </Link>
                   {h.rating ? (
                     <RatingBadge rating={h.rating} size="sm" />
                   ) : (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import SectionSkeleton from "./SectionSkeleton";
 import { currencySymbol } from "@/lib/currency";
 import type { MarketMoversData, MoverItem } from "@/lib/types";
@@ -48,11 +49,11 @@ function AddToWatchlistButton({ ticker }: { ticker: string }) {
 function MoverRow({ item }: { item: MoverItem }) {
   return (
     <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3.5 py-2.5">
-      <div className="min-w-0">
-        <div className="font-mono text-sm font-bold text-text">{item.ticker}</div>
-        <div className="truncate font-mono text-[10px] text-dim">{item.name}</div>
-      </div>
-      <div className="flex items-center gap-3">
+      <Link href={`/stock/${item.ticker}`} className="flex min-w-0 flex-1 items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="font-mono text-sm font-bold text-text hover:text-accent">{item.ticker}</div>
+          <div className="truncate font-mono text-[10px] text-dim">{item.name}</div>
+        </div>
         <div className="text-right">
           <div className="font-mono text-sm text-text">
             {currencySymbol(item.currency)}
@@ -63,6 +64,8 @@ function MoverRow({ item }: { item: MoverItem }) {
             {item.change_pct.toFixed(2)}%
           </div>
         </div>
+      </Link>
+      <div className="ml-3">
         <AddToWatchlistButton ticker={item.ticker} />
       </div>
     </div>
