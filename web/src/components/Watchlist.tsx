@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import RatingBadge from "./RatingBadge";
 import { formatShortDate } from "@/lib/format";
 import { currencySymbol } from "@/lib/currency";
@@ -104,15 +105,15 @@ export default function Watchlist() {
             return (
               <div key={item.ticker} className="rounded-lg border border-border bg-card px-3.5 py-2.5">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <span className="font-mono text-sm font-bold text-text">{item.ticker}</span>
-                    {item.rating ? (
-                      <RatingBadge rating={item.rating} size="sm" />
-                    ) : (
-                      <span className="font-mono text-[10px] text-dim">not yet researched</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3">
+                  <Link href={`/stock/${item.ticker}`} className="flex flex-1 items-center justify-between gap-2 min-w-0">
+                    <div className="flex items-center gap-2.5">
+                      <span className="font-mono text-sm font-bold text-text hover:text-accent">{item.ticker}</span>
+                      {item.rating ? (
+                        <RatingBadge rating={item.rating} size="sm" />
+                      ) : (
+                        <span className="font-mono text-[10px] text-dim">not yet researched</span>
+                      )}
+                    </div>
                     {item.price !== null && (
                       <div className="text-right">
                         <div className="font-mono text-sm text-text">
@@ -127,15 +128,15 @@ export default function Watchlist() {
                         )}
                       </div>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => handleRemove(item.ticker)}
-                      title="Remove from watchlist"
-                      className="font-mono text-xs text-dim hover:text-danger"
-                    >
-                      &times;
-                    </button>
-                  </div>
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => handleRemove(item.ticker)}
+                    title="Remove from watchlist"
+                    className="ml-3 font-mono text-xs text-dim hover:text-danger"
+                  >
+                    &times;
+                  </button>
                 </div>
                 {corporateActions.length > 0 && (
                   <p className="mt-1.5 font-mono text-[10px] text-dim">{corporateActions.join(" · ")}</p>

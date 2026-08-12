@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import AuthGate from "@/components/AuthGate";
 import BottomNav from "@/components/BottomNav";
@@ -56,21 +57,24 @@ function ReportsList() {
   return (
     <div className="mt-4 flex flex-col gap-2">
       {reports.map((r) => (
-        <button
+        <div
           key={r.job_id}
-          type="button"
-          onClick={() => router.push(`/?job=${r.job_id}`)}
-          className="flex items-center justify-between rounded-lg border border-border bg-card px-3.5 py-2.5 text-left hover:border-accent"
+          className="flex items-center justify-between rounded-lg border border-border bg-card px-3.5 py-2.5 hover:border-accent"
         >
-          <div className="min-w-0">
-            <div className="font-mono text-sm font-bold text-text">{r.ticker}</div>
+          <Link href={`/stock/${r.ticker}`} className="min-w-0">
+            <div className="font-mono text-sm font-bold text-text hover:text-accent">{r.ticker}</div>
             {r.company_name && <div className="truncate font-mono text-[10px] text-dim">{r.company_name}</div>}
-          </div>
-          <div className="flex items-center gap-3">
+          </Link>
+          <button
+            type="button"
+            onClick={() => router.push(`/?job=${r.job_id}`)}
+            title="Open this report"
+            className="flex items-center gap-3"
+          >
             <span className="font-mono text-[10px] text-dim">{relativeTime(r.started_at)}</span>
             <RatingBadge rating={r.rating} size="sm" />
-          </div>
-        </button>
+          </button>
+        </div>
       ))}
     </div>
   );
