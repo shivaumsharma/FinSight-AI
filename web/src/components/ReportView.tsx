@@ -575,7 +575,7 @@ export default function ReportView({
       </a>
       <ShareButton jobId={jobId} />
       <WatchlistButton ticker={result.ticker} />
-      <ModelCompare jobId={jobId} />
+      <ModelCompare endpoint={`/api/research/${jobId}/model-compare`} />
     </div>
   );
 }
