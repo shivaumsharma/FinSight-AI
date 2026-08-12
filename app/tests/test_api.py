@@ -489,6 +489,36 @@ def test_get_stock_insights_maps_bad_ticker_to_ticker_not_found(client, monkeypa
     assert resp.json()["code"] == "TICKER_NOT_FOUND"
 
 
+def test_stock_model_compare_returns_models_and_consensus(client, monkeypatch, auth_headers):
+    fake = {
+        "models": [{"label": "Llama 3.3 70B", "model": "llama-3.3-70b-versatile", "rating": "Buy", "confidence": 70, "reasoning": "..."}],
+        "consensus": {"rating": "Buy", "agree_count": 1, "total": 1},
+    }
+    monkeypatch.setattr(main, "get_stock_model_opinions", lambda ticker: fake)
+
+    resp = client.post("/v1/stocks/AAPL/model-compare", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.json() == fake
+
+
+def test_stock_model_compare_requires_auth(client):
+    resp = client.post("/v1/stocks/AAPL/model-compare")
+    assert resp.status_code == 401
+
+
+def test_stock_model_compare_maps_bad_ticker_to_ticker_not_found(client, monkeypatch, auth_headers):
+    def _raise(ticker):
+        raise TickerNotFoundError("bad ticker")
+
+    monkeypatch.setattr(main, "get_stock_model_opinions", _raise)
+
+    resp = client.post("/v1/stocks/ZZZZ/model-compare", headers=auth_headers)
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "TICKER_NOT_FOUND"
+
+
 # ---------------------------------------------------------------- stock news/events/similar/peer-comparison
 
 def test_get_stock_news_returns_articles(client, monkeypatch, auth_headers):
