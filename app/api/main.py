@@ -864,15 +864,25 @@ def get_my_stocks_news(limit: int = Query(default=15, le=30), current_user: str 
     portfolio_tickers = {h["ticker"] for h in db.get_portfolio_holdings(current_user)}
     tickers = watchlist_tickers | portfolio_tickers
 
+    # Cap per ticker before merging: Finnhub's free news coverage is
+    # heavily US-skewed (near-zero for .NS-suffixed NSE tickers), so
+    # without a cap a single well-covered ticker (e.g. a US stock sitting
+    # on the watchlist) can silently fill the entire aggregated list even
+    # though it's a minority of the underlying tickers.
+    MAX_ARTICLES_PER_TICKER = 3
     cutoff = (date.today() - timedelta(days=7)).isoformat()
     seen_urls = set()
     articles = []
     for ticker in tickers:
+        kept_for_ticker = 0
         for article in fetch_company_news(ticker):
+            if kept_for_ticker >= MAX_ARTICLES_PER_TICKER:
+                break
             if article["date"] < cutoff or article["url"] in seen_urls:
                 continue
             seen_urls.add(article["url"])
             articles.append({**article, "ticker": ticker})
+            kept_for_ticker += 1
 
     articles.sort(key=lambda a: a["date"], reverse=True)
     return {"articles": articles[:limit]}
