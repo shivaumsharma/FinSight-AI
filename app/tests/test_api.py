@@ -504,6 +504,43 @@ def test_stock_portfolio_fit_requires_auth(client):
     assert resp.status_code == 401
 
 
+def test_post_chat_message_returns_the_reply_and_persists_both_turns(client, monkeypatch, auth_headers):
+    fake_result = {"reply": "You have no holdings yet.", "intent": "portfolio_status", "ticker": None}
+    monkeypatch.setattr(main, "handle_chat_message", lambda user_id, message: fake_result)
+
+    resp = client.post("/v1/chat", json={"message": "hows my portfolio"}, headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.json() == fake_result
+
+    history = client.get("/v1/chat/history", headers=auth_headers).json()["messages"]
+    assert [m["role"] for m in history] == ["user", "assistant"]
+    assert history[0]["content"] == "hows my portfolio"
+    assert history[1]["content"] == "You have no holdings yet."
+    assert history[1]["intent"] == "portfolio_status"
+
+
+def test_post_chat_message_rejects_a_blank_message(client, auth_headers):
+    resp = client.post("/v1/chat", json={"message": "   "}, headers=auth_headers)
+    assert resp.status_code == 422
+
+
+def test_post_chat_message_requires_auth(client):
+    resp = client.post("/v1/chat", json={"message": "hi"})
+    assert resp.status_code == 401
+
+
+def test_chat_history_is_empty_for_a_fresh_user(client, auth_headers):
+    resp = client.get("/v1/chat/history", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"messages": []}
+
+
+def test_chat_history_requires_auth(client):
+    resp = client.get("/v1/chat/history")
+    assert resp.status_code == 401
+
+
 def test_stock_model_compare_returns_models_and_consensus(client, monkeypatch, auth_headers):
     fake = {
         "models": [{"label": "Llama 3.3 70B", "model": "llama-3.3-70b-versatile", "rating": "Buy", "confidence": 70, "reasoning": "..."}],
