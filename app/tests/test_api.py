@@ -756,6 +756,55 @@ def test_risk_tolerance_rejects_an_invalid_level(client, auth_headers):
     assert resp.status_code == 422
 
 
+def _onboarding_body(**overrides):
+    body = {
+        "risk_tolerance": "Aggressive",
+        "investment_goal": "Wealth Growth",
+        "investment_horizon": "Long-term (7y+)",
+        "interested_in_crypto": True,
+        "interested_in_real_estate": False,
+    }
+    body.update(overrides)
+    return body
+
+
+def test_onboarding_defaults_to_not_completed(client, auth_headers):
+    resp = client.get("/v1/auth/me", headers=auth_headers)
+    data = resp.json()
+    assert data["onboarding_completed"] is False
+    assert data["investment_goal"] is None
+    assert data["interested_in_crypto"] is False
+
+
+def test_onboarding_persists_all_fields_and_flips_completed(client, auth_headers):
+    resp = client.patch("/v1/auth/onboarding", json=_onboarding_body(), headers=auth_headers)
+    assert resp.status_code == 200
+
+    resp = client.get("/v1/auth/me", headers=auth_headers)
+    data = resp.json()
+    assert data["onboarding_completed"] is True
+    assert data["risk_tolerance"] == "Aggressive"
+    assert data["investment_goal"] == "Wealth Growth"
+    assert data["investment_horizon"] == "Long-term (7y+)"
+    assert data["interested_in_crypto"] is True
+    assert data["interested_in_real_estate"] is False
+
+
+def test_onboarding_rejects_an_invalid_goal(client, auth_headers):
+    resp = client.patch("/v1/auth/onboarding", json=_onboarding_body(investment_goal="Get Rich Quick"), headers=auth_headers)
+    assert resp.status_code == 422
+
+
+def test_onboarding_rejects_an_invalid_horizon(client, auth_headers):
+    resp = client.patch("/v1/auth/onboarding", json=_onboarding_body(investment_horizon="Forever"), headers=auth_headers)
+    assert resp.status_code == 422
+
+
+def test_onboarding_requires_auth(client):
+    resp = client.patch("/v1/auth/onboarding", json=_onboarding_body())
+    assert resp.status_code == 401
+
+
 def test_display_name_defaults_to_none_and_is_persisted(client, auth_headers):
     resp = client.get("/v1/auth/me", headers=auth_headers)
     assert resp.json()["display_name"] is None
