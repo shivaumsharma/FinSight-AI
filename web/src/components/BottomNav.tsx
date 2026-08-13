@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 const ITEMS = [
   { href: "/", label: "Home", icon: HomeIcon },
+  { href: "/chat", label: "Chat", icon: ChatIcon },
   { href: "/watchlist", label: "Watchlist", icon: WatchlistIcon },
   { href: "/reports", label: "Reports", icon: ReportsIcon },
   { href: "/profile", label: "Profile", icon: ProfileIcon },
@@ -14,6 +15,13 @@ function HomeIcon({ active }: { active: boolean }) {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2 : 1.5}>
       <path d="M4 11.5L12 4l8 7.5M6 10v9a1 1 0 001 1h4v-6h2v6h4a1 1 0 001-1v-9" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function ChatIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2 : 1.5}>
+      <path d="M4 5h16a1 1 0 011 1v10a1 1 0 01-1 1H9l-4 4v-4H4a1 1 0 01-1-1V6a1 1 0 011-1z" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -45,8 +53,8 @@ function ProfileIcon({ active }: { active: boolean }) {
   );
 }
 
-// Persistent across every authenticated route -- Home/Watchlist/Reports/
-// Profile match the four real pages this app actually has (no
+// Persistent across every authenticated route -- Home/Chat/Watchlist/
+// Reports/Profile match the real pages this app actually has (no
 // Portfolio/Orders/Account tabs the way a brokerage app's bottom nav
 // would, since this isn't one -- see the Home dashboard scope
 // discussion). Fixed to the viewport bottom; each page's content
