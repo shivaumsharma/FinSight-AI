@@ -489,6 +489,21 @@ def test_get_stock_insights_maps_bad_ticker_to_ticker_not_found(client, monkeypa
     assert resp.json()["code"] == "TICKER_NOT_FOUND"
 
 
+def test_stock_portfolio_fit_returns_the_fit_summary(client, monkeypatch, auth_headers):
+    fake = {"sector": "Technology", "current_allocation_pct": 42.0, "summary": "You're already 42% in Technology."}
+    monkeypatch.setattr(main, "get_portfolio_fit_for_ticker", lambda ticker, holdings: fake)
+
+    resp = client.get("/v1/stocks/AAPL/portfolio-fit", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.json() == fake
+
+
+def test_stock_portfolio_fit_requires_auth(client):
+    resp = client.get("/v1/stocks/AAPL/portfolio-fit")
+    assert resp.status_code == 401
+
+
 def test_stock_model_compare_returns_models_and_consensus(client, monkeypatch, auth_headers):
     fake = {
         "models": [{"label": "Llama 3.3 70B", "model": "llama-3.3-70b-versatile", "rating": "Buy", "confidence": 70, "reasoning": "..."}],
