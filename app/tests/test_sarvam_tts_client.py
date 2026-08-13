@@ -157,10 +157,10 @@ def test_synthesize_passes_speaker_and_pace_through(monkeypatch):
 
     monkeypatch.setattr(tts, "_get_session", lambda: _CapturingSession())
 
-    tts.synthesize("Hello there", language_code="hi-IN", speaker="Priya", pace=1.5)
+    tts.synthesize("Hello there", language_code="hi-IN", speaker="priya", pace=1.5)
 
     assert captured["json"]["language_code"] == "hi-IN"
-    assert captured["json"]["speaker"] == "Priya"
+    assert captured["json"]["speaker"] == "priya"
     assert captured["json"]["pace"] == 1.5
     assert captured["json"]["model"] == "bulbul:v3"
     assert captured["headers"]["api-subscription-key"] == "test-key"
