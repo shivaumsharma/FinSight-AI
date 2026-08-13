@@ -62,6 +62,7 @@ from app.reasoning.similar_stocks import find_similar_stocks
 from app.reasoning.stock_score import build_stock_insights
 from app.data.stock_overview import get_stock_overview
 from app.reasoning.backtest_stats import get_backtest_accuracy_summary
+from app.reasoning.call_tracker import check_matured_checkpoints, get_scoreboard
 from app.reasoning.market_movers import get_top_movers
 from app.reasoning.model_consensus import compute_consensus, get_model_opinions, get_stock_model_opinions
 from app.reasoning.chat_router import handle_chat_message
@@ -71,6 +72,7 @@ from app.reporting.news_client import fetch_company_news, fetch_market_news
 from app.reporting.portfolio_summary import build_portfolio_view
 
 TIMEOUT_SWEEP_INTERVAL_SECONDS = 60
+CALL_OUTCOME_SWEEP_INTERVAL_SECONDS = 6 * 3600
 
 # Generous abuse/mistake guard, not a real constraint -- 25s of
 # webm/opus (VoiceInputButton's own recording ceiling) is well under
@@ -153,6 +155,25 @@ def _timeout_sweep_loop():
             pass
 
 
+def _call_outcome_sweep_loop():
+    # Checkpoints are 7+ days out, so this doesn't need the job-timeout
+    # sweep's minute-level polling -- 6h keeps a matured checkpoint
+    # from sitting unscored for more than a few hours without adding
+    # meaningful load (each iteration is a handful of yfinance calls
+    # at most, not a hot loop).
+    while True:
+        time.sleep(CALL_OUTCOME_SWEEP_INTERVAL_SECONDS)
+        try:
+            scored = check_matured_checkpoints()
+            if scored:
+                logger.info(f"[call-outcome sweep] scored {scored} matured checkpoint(s)")
+        except Exception:
+            # Same convention as _timeout_sweep_loop -- one bad
+            # iteration (a flaky price fetch, etc.) must not kill the
+            # thread; the next iteration gets another chance.
+            pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
@@ -162,6 +183,9 @@ async def lifespan(app: FastAPI):
 
     sweep_thread = threading.Thread(target=_timeout_sweep_loop, daemon=True)
     sweep_thread.start()
+
+    call_outcome_thread = threading.Thread(target=_call_outcome_sweep_loop, daemon=True)
+    call_outcome_thread.start()
 
     yield
 
@@ -679,6 +703,17 @@ def get_backtest_accuracy(current_user: str = Depends(auth.get_current_user)):
     if summary is None:
         raise errors.backtest_accuracy_unavailable()
     return summary
+
+
+@app.get("/v1/scoreboard")
+def get_call_scoreboard(current_user: str = Depends(auth.get_current_user)):
+    # Live counterpart to backtest-accuracy above -- this app's real,
+    # ongoing Buy/Hold/Sell calls scored against naive Always-Buy/
+    # Always-Hold baselines, not a one-off historical number. Never
+    # 404s: zero tracked calls yet is a normal, honest state (every
+    # window's stats come back null, not a fabricated 0%), not an
+    # error condition the way missing backtest result files would be.
+    return get_scoreboard()
 
 
 @app.get("/v1/research/{job_id}")
