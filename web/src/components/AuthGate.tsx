@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import OnboardingForm from "@/components/OnboardingForm";
 import { useAuth } from "@/lib/useAuth";
 
 // Gates children behind a real logged-in session -- unauthenticated
@@ -30,7 +31,8 @@ interface AuthedProps {
 export default function AuthGate({ children }: { children: (auth: AuthedProps) => React.ReactNode }) {
   const {
     status, userId, email: authedEmail, createdAt, jobsUsedToday, dailyLimit,
-    totalReports, sessionExpiresAt, riskTolerance, resetAt, waitlistFeatures, displayName, error,
+    totalReports, sessionExpiresAt, riskTolerance, resetAt, waitlistFeatures, displayName,
+    onboardingCompleted, completeOnboarding, error,
     signup, login, logout, deleteAccount, setRiskTolerance, joinWaitlist, setDisplayName,
   } = useAuth();
   const [mode, setMode] = useState<"login" | "signup">("login");
@@ -44,6 +46,10 @@ export default function AuthGate({ children }: { children: (auth: AuthedProps) =
         <span className="font-mono text-xs text-muted">loading...</span>
       </div>
     );
+  }
+
+  if (status === "authenticated" && userId && !onboardingCompleted) {
+    return <OnboardingForm onComplete={completeOnboarding} error={error} />;
   }
 
   if (status === "authenticated" && userId) {
