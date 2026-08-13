@@ -29,6 +29,7 @@ INSUFFICIENT_SHARES = "INSUFFICIENT_SHARES"
 INTERNAL_ERROR = "INTERNAL_ERROR"
 STT_UNAVAILABLE = "STT_UNAVAILABLE"
 INVALID_AUDIO = "INVALID_AUDIO"
+TTS_UNAVAILABLE = "TTS_UNAVAILABLE"
 
 
 class APIError(Exception):
@@ -144,4 +145,15 @@ def invalid_audio(detail: str) -> APIError:
         INVALID_AUDIO,
         detail,
         status_code=status.HTTP_400_BAD_REQUEST,
+    )
+
+
+def tts_unavailable(detail: str) -> APIError:
+    # Same 503 reasoning as stt_unavailable above -- an external
+    # dependency (Sarvam) being unreachable/unconfigured/rejecting the
+    # request, not a bug in this app or malformed input.
+    return APIError(
+        TTS_UNAVAILABLE,
+        f"Voice reply is temporarily unavailable ({detail}).",
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
     )

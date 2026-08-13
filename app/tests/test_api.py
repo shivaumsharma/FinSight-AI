@@ -23,7 +23,7 @@ from app.api.main import app
 from app.api.serialization import context_to_api_dict, financial_df_from_json
 from app.core import llm_provider as lp
 from app.core.research_context import ResearchContext
-from app.data import sarvam_client
+from app.data import sarvam_client, sarvam_tts_client
 from app.data.market_data import TickerNotFoundError
 
 
@@ -1599,3 +1599,46 @@ def test_transcribe_voice_rejects_oversized_file(client, monkeypatch, auth_heade
 
     assert resp.status_code == 400
     assert resp.json()["code"] == "INVALID_AUDIO"
+
+
+# ---------------------------------------------------------- POST /v1/voice/synthesize
+
+def test_synthesize_voice_success(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(sarvam_tts_client, "synthesize", lambda *a, **k: b"fake-wav-bytes")
+
+    resp = client.post("/v1/voice/synthesize", json={"text": "Your portfolio is up 4%."}, headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.content == b"fake-wav-bytes"
+    assert resp.headers["content-type"] == "audio/wav"
+
+
+def test_synthesize_voice_requires_auth(client):
+    resp = client.post("/v1/voice/synthesize", json={"text": "hello"})
+    assert resp.status_code == 401
+
+
+def test_synthesize_voice_maps_sarvam_failure_to_503(client, monkeypatch, auth_headers):
+    def _boom(*a, **k):
+        raise sarvam_tts_client.SarvamSynthesisError("Sarvam TTS request failed: synthetic")
+
+    monkeypatch.setattr(sarvam_tts_client, "synthesize", _boom)
+
+    resp = client.post("/v1/voice/synthesize", json={"text": "hello"}, headers=auth_headers)
+
+    assert resp.status_code == 503
+    assert resp.json()["code"] == "TTS_UNAVAILABLE"
+
+
+def test_synthesize_voice_rejects_blank_text(client, auth_headers):
+    resp = client.post("/v1/voice/synthesize", json={"text": "   "}, headers=auth_headers)
+    assert resp.status_code == 422
+
+
+def test_synthesize_voice_rejects_text_over_the_character_limit(client, auth_headers):
+    resp = client.post(
+        "/v1/voice/synthesize",
+        json={"text": "x" * (sarvam_tts_client.MAX_TEXT_CHARS + 1)},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
