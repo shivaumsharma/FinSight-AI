@@ -94,7 +94,7 @@ def test_classify_intent_falls_back_to_general_on_llm_outage(monkeypatch):
 
 def test_handle_portfolio_status_with_no_holdings(monkeypatch):
     monkeypatch.setattr(cr, "build_portfolio_view", lambda user_id: {"holdings": [], "summary": {}})
-    assert "don't have any holdings" in cr._handle_portfolio_status("u1", "hows my portfolio")
+    assert "don't have any holdings" in cr._handle_portfolio_status("u1", "hows my portfolio", [])
 
 
 def test_handle_portfolio_status_grounds_the_llm_in_real_holdings_and_the_actual_question(monkeypatch):
@@ -120,7 +120,8 @@ def test_handle_portfolio_status_grounds_the_llm_in_real_holdings_and_the_actual
 
     monkeypatch.setattr(cr, "HostedProvider", _StatusProvider)
 
-    result = cr._handle_portfolio_status("u1", "are they diversified enough")
+    history = [{"role": "user", "content": "what about my Apple shares"}]
+    result = cr._handle_portfolio_status("u1", "are they diversified enough", history)
 
     assert "not diversified" in result
     assert "AAPL" in captured["prompt"]
@@ -128,6 +129,7 @@ def test_handle_portfolio_status_grounds_the_llm_in_real_holdings_and_the_actual
     assert "800.00" in captured["prompt"]
     assert "Technology 100" in captured["prompt"]
     assert "are they diversified enough" in captured["prompt"]
+    assert "what about my Apple shares" in captured["prompt"]
 
 
 def test_handle_portfolio_status_falls_back_to_the_raw_summary_on_llm_outage(monkeypatch):
@@ -142,7 +144,7 @@ def test_handle_portfolio_status_falls_back_to_the_raw_summary_on_llm_outage(mon
     monkeypatch.setattr(cr, "get_portfolio_sector_allocation", lambda holdings: {})
     monkeypatch.setattr(cr, "HostedProvider", _RaisingProvider)
 
-    result = cr._handle_portfolio_status("u1", "hows my portfolio")
+    result = cr._handle_portfolio_status("u1", "hows my portfolio", [])
 
     assert "1 holding" in result
     assert "AAPL" in result
@@ -246,12 +248,14 @@ def test_handle_advice_request_includes_onboarding_and_portfolio_context(monkeyp
 
     monkeypatch.setattr(cr, "HostedProvider", _AdviceProvider)
 
-    result = cr._handle_advice_request("u1", "where should I invest")
+    history = [{"role": "user", "content": "i just got 40000 as a student"}]
+    result = cr._handle_advice_request("u1", "where should I invest", history)
 
     assert "aggressive" in result.lower()
     assert "Aggressive" in captured["prompt"]
     assert "Technology 100" in captured["prompt"]
     assert "500.00" in captured["prompt"]
+    assert "i just got 40000 as a student" in captured["prompt"]
 
 
 def test_handle_advice_request_with_no_onboarding_or_holdings(monkeypatch):
@@ -270,7 +274,7 @@ def test_handle_advice_request_with_no_onboarding_or_holdings(monkeypatch):
 
     monkeypatch.setattr(cr, "HostedProvider", _AdviceProvider)
 
-    result = cr._handle_advice_request("u1", "how should I spend $40k")
+    result = cr._handle_advice_request("u1", "how should I spend $40k", [])
 
     assert "index funds" in result.lower()
     assert "hasn't completed the onboarding" in captured["prompt"]
@@ -282,7 +286,7 @@ def test_handle_advice_request_falls_back_on_llm_outage(monkeypatch):
     monkeypatch.setattr(cr.db, "get_portfolio_holdings", lambda user_id: [])
     monkeypatch.setattr(cr, "HostedProvider", _RaisingProvider)
 
-    result = cr._handle_advice_request("u1", "where should I invest")
+    result = cr._handle_advice_request("u1", "where should I invest", [])
 
     assert "allocation-level guidance" in result
 
@@ -299,12 +303,31 @@ def test_handle_general_returns_the_llm_reply(monkeypatch):
 
     monkeypatch.setattr(cr, "HostedProvider", _GeneralProvider)
 
-    assert cr._handle_general("hello") == "I can help with that."
+    assert cr._handle_general("hello", []) == "I can help with that."
+
+
+def test_handle_general_includes_recent_conversation_in_the_prompt(monkeypatch):
+    captured = {}
+
+    class _GeneralProvider:
+        def __init__(self, model=None, **kwargs):
+            pass
+
+        def generate(self, prompt, max_new_tokens=150):
+            captured["prompt"] = prompt
+            return "reply"
+
+    monkeypatch.setattr(cr, "HostedProvider", _GeneralProvider)
+
+    history = [{"role": "assistant", "content": "Consider allocating $40k across index funds."}]
+    cr._handle_general("what about that $40k thing", history)
+
+    assert "Consider allocating $40k across index funds." in captured["prompt"]
 
 
 def test_handle_general_falls_back_on_llm_outage(monkeypatch):
     monkeypatch.setattr(cr, "HostedProvider", _RaisingProvider)
-    result = cr._handle_general("hello")
+    result = cr._handle_general("hello", [])
     assert "portfolio or a specific ticker" in result
 
 
@@ -320,3 +343,77 @@ def test_handle_chat_message_dispatches_to_the_right_handler(monkeypatch):
     assert result["intent"] == "portfolio_status"
     assert result["ticker"] is None
     assert "don't have any holdings" in result["reply"]
+
+
+def test_handle_chat_message_defaults_history_to_empty(monkeypatch):
+    # No history argument at all -- must not blow up, same as every
+    # other optional-arg default in this module.
+    monkeypatch.setattr(cr, "resolve_companies", lambda q: [])
+    monkeypatch.setattr(cr, "HostedProvider", _FakeProvider)
+    monkeypatch.setattr(cr, "build_portfolio_view", lambda user_id: {"holdings": [], "summary": {}})
+
+    result = cr.handle_chat_message("u1", "hows my portfolio")
+
+    assert result["reply"]
+
+
+# ---------------------------------------------------------------- _most_recent_ticker
+
+def test_most_recent_ticker_finds_the_latest_ticker_walking_backward():
+    history = [
+        {"role": "user", "content": "what about Bajaj Finance"},
+        {"role": "assistant", "content": "...", "ticker": "BAJFINANCE.NS"},
+        {"role": "user", "content": "and Apple?"},
+        {"role": "assistant", "content": "...", "ticker": "AAPL"},
+    ]
+    assert cr._most_recent_ticker(history) == "AAPL"
+
+
+def test_most_recent_ticker_none_when_no_message_carries_one():
+    history = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "hi", "ticker": None}]
+    assert cr._most_recent_ticker(history) is None
+
+
+def test_most_recent_ticker_empty_history():
+    assert cr._most_recent_ticker([]) is None
+
+
+# ---------------------------------------------------------------- classify_intent (history-aware)
+
+def test_classify_intent_carries_over_a_ticker_from_history_when_none_in_the_message(monkeypatch):
+    class _FitProvider:
+        def __init__(self, model=None, **kwargs):
+            pass
+
+        def generate(self, prompt, max_new_tokens=150):
+            return "INTENT: portfolio_fit"
+
+    monkeypatch.setattr(cr, "resolve_companies", lambda q: [])  # nothing in THIS message
+    monkeypatch.setattr(cr, "HostedProvider", _FitProvider)
+
+    history = [
+        {"role": "user", "content": "what about Bajaj Finance"},
+        {"role": "assistant", "content": "...", "ticker": "BAJFINANCE.NS"},
+    ]
+    result = cr.classify_intent("does it fit my portfolio", history)
+
+    assert result == {"intent": "portfolio_fit", "ticker": "BAJFINANCE.NS"}
+
+
+def test_classify_intent_prefers_a_ticker_in_the_current_message_over_history(monkeypatch):
+    monkeypatch.setattr(cr, "resolve_companies", lambda q: ["MSFT"])
+    monkeypatch.setattr(cr, "HostedProvider", _FakeProvider)
+
+    history = [{"role": "assistant", "content": "...", "ticker": "AAPL"}]
+    result = cr.classify_intent("what about Microsoft", history)
+
+    assert result["ticker"] == "MSFT"
+
+
+def test_classify_intent_history_defaults_to_empty(monkeypatch):
+    monkeypatch.setattr(cr, "resolve_companies", lambda q: [])
+    monkeypatch.setattr(cr, "HostedProvider", _FakeProvider)
+
+    result = cr.classify_intent("hows my portfolio")
+
+    assert result["ticker"] is None

@@ -17,13 +17,16 @@ has to spell a ticker out of free text itself -- same reasoning
 company_resolver.py's own module docstring gives for deterministic
 ticker resolution over an LLM guess.
 
-Scope note: each message is classified independently, with no prior-
-turn context fed into the classification prompt (so "what about
-Bajaj Finance" then "does it fit my portfolio" won't resolve "it" to
-the earlier ticker). GET /v1/chat/history already persists and
-returns the full thread, so adding that context later is a prompt
-change, not an architecture change -- not worth the added complexity
-for this pass.
+Multi-turn context: handle_chat_message() takes an optional `history`
+(the same list shape GET /v1/chat/history already returns/persists via
+db.list_chat_messages -- oldest first). Both classify_intent() and the
+handlers that synthesize an LLM answer (portfolio_status, advice_request,
+general) fold the last few turns into their prompts, so "what about
+Bajaj Finance" then "does it fit my portfolio" resolves "it" correctly.
+Ticker carry-over is still deterministic, not an LLM guess: it reuses
+the `ticker` a PRIOR assistant turn already resolved (stored by
+add_chat_message's own `ticker` column), the same "never let the LLM
+spell a ticker" reasoning company_resolver.py's docstring gives.
 """
 
 import re
@@ -62,11 +65,44 @@ _INTENT_RE = re.compile(r"INTENT:\s*(\w+)", re.IGNORECASE)
 # available one.
 _CHAT_MODEL = "llama-3.3-70b-versatile"
 
+# How many recent messages (not turns -- individual user+assistant rows)
+# to fold into a prompt as conversation memory. Small on purpose: this
+# is a fast/cheap classification+synthesis call, not the full research
+# pipeline, and a short window is enough to resolve "it"/"that" without
+# growing the prompt (and the per-call cost/latency) unboundedly as a
+# thread gets long.
+MAX_HISTORY_MESSAGES = 6
 
-def _build_classify_prompt(message: str, has_ticker: bool) -> str:
+
+def _format_history(history: list) -> str:
+    if not history:
+        return "(no prior messages in this conversation)"
+    lines = []
+    for msg in history[-MAX_HISTORY_MESSAGES:]:
+        speaker = "User" if msg["role"] == "user" else "Assistant"
+        lines.append(f"{speaker}: {msg['content']}")
+    return "\n".join(lines)
+
+
+def _most_recent_ticker(history: list) -> "str | None":
+    """Ticker carry-over for a follow-up with no ticker of its own
+    (e.g. "does it fit my portfolio" after "what about Bajaj Finance").
+    Walks backward through history for the most recent message that
+    already carries a resolved `ticker` (only assistant turns do --
+    see add_chat_message's `ticker` column) -- reuses a PRIOR
+    deterministic resolve_companies() result rather than asking the
+    LLM to guess a ticker out of old free text."""
+    for msg in reversed(history[-MAX_HISTORY_MESSAGES:]):
+        if msg.get("ticker"):
+            return msg["ticker"]
+    return None
+
+
+def _build_classify_prompt(message: str, has_ticker: bool, history: list) -> str:
     ticker_note = (
-        "A ticker was already detected in this message by a separate, reliable lookup."
-        if has_ticker else "No ticker was detected in this message."
+        "A ticker is available for this message (detected directly, or carried over from recent "
+        "conversation context below)."
+        if has_ticker else "No ticker is available for this message."
     )
     return f"""Classify this message from a user of a stock research app into EXACTLY ONE of these categories:
 
@@ -79,7 +115,10 @@ general - anything else, including generic finance chit-chat
 
 {ticker_note}
 
-MESSAGE: {message}
+RECENT CONVERSATION (oldest first, context only -- classify the LATEST message, not this history):
+{_format_history(history)}
+
+LATEST MESSAGE: {message}
 
 Respond in EXACTLY this format, nothing else:
 INTENT: <one of the categories above>"""
@@ -91,18 +130,20 @@ def _parse_intent(raw_text: str) -> str:
     return label if label in _VALID_INTENTS else INTENT_GENERAL
 
 
-def classify_intent(message: str) -> dict:
-    """{"intent": str, "ticker": str | None} -- ticker always comes
-    from resolve_companies() (deterministic), never from the LLM.
-    Falls back to INTENT_GENERAL on any classification failure -- a
-    reply that's a bit too generic is a much smaller failure than a
-    broken turn."""
+def classify_intent(message: str, history: list = None) -> dict:
+    """{"intent": str, "ticker": str | None} -- ticker comes from
+    resolve_companies() on the CURRENT message first, falling back to
+    _most_recent_ticker(history) for a ticker-less follow-up; never
+    from the LLM. Falls back to INTENT_GENERAL on any classification
+    failure -- a reply that's a bit too generic is a much smaller
+    failure than a broken turn."""
+    history = history or []
     tickers = resolve_companies(message)
-    ticker = tickers[0] if tickers else None
+    ticker = tickers[0] if tickers else _most_recent_ticker(history)
 
     try:
         provider = HostedProvider(model=_CHAT_MODEL)
-        raw = provider.generate(_build_classify_prompt(message, ticker is not None), max_new_tokens=20)
+        raw = provider.generate(_build_classify_prompt(message, ticker is not None, history), max_new_tokens=20)
         intent = _parse_intent(raw)
     except LLMProviderError:
         intent = INTENT_GENERAL
@@ -113,7 +154,7 @@ def classify_intent(message: str) -> dict:
     return {"intent": intent, "ticker": ticker}
 
 
-def _handle_portfolio_status(user_id: str, message: str) -> str:
+def _handle_portfolio_status(user_id: str, message: str, history: list) -> str:
     """Unlike the other handlers, this one's raw data assembly (lines,
     below) doubles as both the LLM's grounding context AND the
     LLM-outage fallback -- so a generic "how's my portfolio doing"
@@ -154,9 +195,11 @@ def _handle_portfolio_status(user_id: str, message: str) -> str:
         "portfolio. Use ONLY the real data below -- never invent numbers. Answer the user's actual question in "
         "2-4 sentences: if they ask about diversification, reference the sector mix; if they ask what's going "
         "well/badly, reference the per-holding ratings and overall P&L; if the question is generic, summarize "
-        "total value and P&L. Never give a buy/sell recommendation beyond restating existing ratings; never "
-        "claim to be a licensed advisor.\n\n"
-        f"PORTFOLIO DATA:\n{portfolio_data}\n\nMESSAGE: {message}"
+        "total value and P&L. If the message references something from earlier in the conversation (e.g. "
+        "'that', 'it'), use the recent conversation below to understand what they mean. Never give a buy/sell "
+        "recommendation beyond restating existing ratings; never claim to be a licensed advisor.\n\n"
+        f"PORTFOLIO DATA:\n{portfolio_data}\n\n"
+        f"RECENT CONVERSATION:\n{_format_history(history)}\n\nMESSAGE: {message}"
     )
     try:
         provider = HostedProvider(model=_CHAT_MODEL)
@@ -206,7 +249,7 @@ def _handle_full_report_request(ticker: str) -> str:
     )
 
 
-def _handle_advice_request(user_id: str, message: str) -> str:
+def _handle_advice_request(user_id: str, message: str, history: list) -> str:
     """Grounded, portfolio-aware guidance -- pulls real holdings, sector
     allocation, and onboarding preferences (risk tolerance/goal/horizon)
     into the prompt so the answer isn't a blanket "I have no access"
@@ -256,9 +299,11 @@ def _handle_advice_request(user_id: str, message: str) -> str:
         "guidance. Use ONLY the real context below -- never invent numbers. Answer in 2-4 sentences, at the "
         "level of asset classes/sectors/allocation percentages, not a specific buy/sell call on an individual "
         "stock. If onboarding preferences are unset, give general starter guidance (e.g. diversified index "
-        "funds first) but mention completing onboarding for guidance tailored to their risk tolerance. Never "
-        "claim to be a licensed advisor.\n\n"
-        "CONTEXT:\n" + "\n".join(context_lines) + f"\n\nMESSAGE: {message}"
+        "funds first) but mention completing onboarding for guidance tailored to their risk tolerance. If the "
+        "message references something from earlier in the conversation (e.g. 'that', 'the $40k thing'), use "
+        "the recent conversation below to understand what they mean. Never claim to be a licensed advisor.\n\n"
+        "CONTEXT:\n" + "\n".join(context_lines)
+        + f"\n\nRECENT CONVERSATION:\n{_format_history(history)}\n\nMESSAGE: {message}"
     )
     try:
         provider = HostedProvider(model=_CHAT_MODEL)
@@ -267,16 +312,20 @@ def _handle_advice_request(user_id: str, message: str) -> str:
         return "I can give allocation-level guidance using your real portfolio and preferences, but couldn't generate a response just now -- try again in a moment."
 
 
-def _handle_general(message: str) -> str:
+def _handle_general(message: str, history: list) -> str:
     """Short, caveated LLM answer with no specific data context -- no
     portfolio/ticker to key off for this message, so this deliberately
-    stays generic rather than fabricating specifics."""
+    stays generic rather than fabricating specifics. Still gets the
+    recent conversation, purely so a reference to an earlier turn reads
+    as understood rather than ignored -- it has no new data to answer
+    with regardless."""
     prompt = (
         "You are a terse assistant inside a stock research app. Answer the user's message in 1-3 sentences. "
         "You have no access to their portfolio or any specific stock data for this message -- if the question "
-        "needs that, say so and suggest asking about a specific ticker or their portfolio instead. Never give "
+        "needs that, say so and suggest asking about a specific ticker or their portfolio instead. Use the "
+        "recent conversation below only to understand references like 'that' or 'it' -- never give "
         "personalized investment advice; you are not a licensed advisor.\n\n"
-        f"MESSAGE: {message}"
+        f"RECENT CONVERSATION:\n{_format_history(history)}\n\nMESSAGE: {message}"
     )
     try:
         provider = HostedProvider(model=_CHAT_MODEL)
@@ -286,23 +335,29 @@ def _handle_general(message: str) -> str:
 
 
 _HANDLERS = {
-    INTENT_PORTFOLIO_STATUS: lambda user_id, ticker, message: _handle_portfolio_status(user_id, message),
-    INTENT_TICKER_QUESTION: lambda user_id, ticker, message: _handle_ticker_question(ticker),
-    INTENT_PORTFOLIO_FIT: lambda user_id, ticker, message: _handle_portfolio_fit(user_id, ticker),
-    INTENT_FULL_REPORT_REQUEST: lambda user_id, ticker, message: _handle_full_report_request(ticker),
-    INTENT_ADVICE_REQUEST: lambda user_id, ticker, message: _handle_advice_request(user_id, message),
-    INTENT_GENERAL: lambda user_id, ticker, message: _handle_general(message),
+    INTENT_PORTFOLIO_STATUS: lambda user_id, ticker, message, history: _handle_portfolio_status(user_id, message, history),
+    INTENT_TICKER_QUESTION: lambda user_id, ticker, message, history: _handle_ticker_question(ticker),
+    INTENT_PORTFOLIO_FIT: lambda user_id, ticker, message, history: _handle_portfolio_fit(user_id, ticker),
+    INTENT_FULL_REPORT_REQUEST: lambda user_id, ticker, message, history: _handle_full_report_request(ticker),
+    INTENT_ADVICE_REQUEST: lambda user_id, ticker, message, history: _handle_advice_request(user_id, message, history),
+    INTENT_GENERAL: lambda user_id, ticker, message, history: _handle_general(message, history),
 }
 
 
-def handle_chat_message(user_id: str, message: str) -> dict:
+def handle_chat_message(user_id: str, message: str, history: list = None) -> dict:
     """{"reply": str, "intent": str, "ticker": str | None} -- never
     raises; every handler already degrades gracefully on its own, and
-    classify_intent() itself falls back to INTENT_GENERAL on failure."""
-    classification = classify_intent(message)
+    classify_intent() itself falls back to INTENT_GENERAL on failure.
+
+    `history` is GET /v1/chat/history's own list shape (oldest first,
+    from db.list_chat_messages) -- the caller's job to fetch it BEFORE
+    persisting the current message, so it never includes the message
+    being classified right now."""
+    history = history or []
+    classification = classify_intent(message, history)
     intent = classification["intent"]
     ticker = classification["ticker"]
 
-    reply = _HANDLERS[intent](user_id, ticker, message)
+    reply = _HANDLERS[intent](user_id, ticker, message, history)
 
     return {"reply": reply, "intent": intent, "ticker": ticker}
