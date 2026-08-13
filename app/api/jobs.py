@@ -35,6 +35,7 @@ from app.api.serialization import context_to_api_dict
 from app.core.llm_provider import LLMProviderError, get_llm_provider, is_local_provider
 from app.core.logger import ResearchLogger
 from app.core.paths import REPORTS_DIR, RESEARCH_LOG_DIR  # noqa: F401 -- re-exported; see app/core/paths.py
+from app.reasoning.call_tracker import log_tracked_call
 from concurrent.futures import ThreadPoolExecutor
 
 # Uses the root logger's handler/level/format configured once by
@@ -245,6 +246,14 @@ def _run_job(job_id: str, question: str, orchestrator_name: str,
             if usage:
                 logger.info(f"[job {job_id}] {context.ticker}: llm_usage={usage}")
             db.mark_done(job_id, result, pdf_path)
+
+            try:
+                log_tracked_call(job_id, result)
+            except Exception as e:
+                # Same non-fatal convention as ResearchLogger.save above
+                # -- the scoreboard is a secondary feature; it must
+                # never be able to take down report completion.
+                logger.warning(f"[job {job_id}] log_tracked_call failed (non-fatal): {e}")
 
         except TickerNotFoundError as e:
             db.mark_error(job_id, "TICKER_NOT_FOUND", str(e))
