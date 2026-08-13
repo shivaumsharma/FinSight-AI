@@ -17,6 +17,7 @@ import Portfolio from "@/components/Portfolio";
 import OrderTicket from "@/components/OrderTicket";
 import MarketNews from "@/components/MarketNews";
 import MarketMovers from "@/components/MarketMovers";
+import ScoreboardHomeCard from "@/components/ScoreboardHomeCard";
 import SentimentGauge from "@/components/SentimentGauge";
 import VoiceInputButton from "@/components/VoiceInputButton";
 
@@ -165,6 +166,8 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
         <h1 className="mt-3 font-mono text-xl font-bold text-text">
           {greetingForHour(hour)}, {greetingName(email, displayName)}
         </h1>
+
+        <ScoreboardHomeCard />
 
         <IndicesCarousel />
 
