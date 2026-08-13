@@ -21,6 +21,7 @@ Reuses get_quote() for the live, cached price/change/currency (the same
 fast_info.
 """
 
+from app.data.crypto_resolver import is_crypto_ticker
 from app.data.market_data import MarketDataLoader, get_quote
 
 
@@ -46,6 +47,11 @@ def get_stock_overview(ticker: str) -> dict:
 
     return {
         "ticker": ticker,
+        # Lets the frontend hide valuation-dependent sections (Performance
+        # Dashboard, AI Insights fair value) instead of showing a wall of
+        # "N/A" -- every field below already degrades to null on its own,
+        # this is purely a display hint, not a second source of truth.
+        "is_crypto": is_crypto_ticker(ticker),
         "price": quote["price"],
         "change_pct": quote["change_pct"],
         "previous_close": quote["previous_close"],
