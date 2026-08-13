@@ -15,6 +15,7 @@ from app.api import db, jobs
 from app.api import main
 from app.api.main import app
 from app.core import llm_provider as lp
+from app.reporting import portfolio_summary
 
 
 @pytest.fixture
@@ -125,6 +126,7 @@ def test_list_orders_isolated_per_user(temp_db):
 
 def test_place_buy_order_returns_the_fill_and_updates_portfolio(client, monkeypatch, auth_headers):
     monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote(price=150.0))
+    monkeypatch.setattr(portfolio_summary, "get_quote", lambda ticker: _fake_quote(price=150.0))
 
     resp = client.post("/v1/orders", json={"ticker": "aapl", "side": "BUY", "quantity": 4}, headers=auth_headers)
     assert resp.status_code == 200
@@ -142,9 +144,11 @@ def test_place_buy_order_returns_the_fill_and_updates_portfolio(client, monkeypa
 
 def test_place_sell_order_reduces_the_holding(client, monkeypatch, auth_headers):
     monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote(price=100.0))
+    monkeypatch.setattr(portfolio_summary, "get_quote", lambda ticker: _fake_quote(price=100.0))
     client.post("/v1/orders", json={"ticker": "AAPL", "side": "BUY", "quantity": 10}, headers=auth_headers)
 
     monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote(price=120.0))
+    monkeypatch.setattr(portfolio_summary, "get_quote", lambda ticker: _fake_quote(price=120.0))
     resp = client.post("/v1/orders", json={"ticker": "AAPL", "side": "SELL", "quantity": 3}, headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json()["new_holding_quantity"] == 7
@@ -156,6 +160,7 @@ def test_place_sell_order_reduces_the_holding(client, monkeypatch, auth_headers)
 
 def test_selling_more_than_held_returns_insufficient_shares_error(client, monkeypatch, auth_headers):
     monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
+    monkeypatch.setattr(portfolio_summary, "get_quote", lambda ticker: _fake_quote())
     client.post("/v1/orders", json={"ticker": "AAPL", "side": "BUY", "quantity": 2}, headers=auth_headers)
 
     resp = client.post("/v1/orders", json={"ticker": "AAPL", "side": "SELL", "quantity": 5}, headers=auth_headers)
@@ -169,6 +174,7 @@ def test_place_order_with_an_invalid_ticker_returns_ticker_not_found(client, mon
         raise TickerNotFoundError(ticker)
 
     monkeypatch.setattr(main, "get_quote", raise_not_found)
+    monkeypatch.setattr(portfolio_summary, "get_quote", raise_not_found)
     monkeypatch.setattr(main, "resolve_companies", lambda q: [])
 
     resp = client.post("/v1/orders", json={"ticker": "ZZZZZZ", "side": "BUY", "quantity": 1}, headers=auth_headers)
@@ -193,6 +199,7 @@ def test_place_order_requires_a_session(client):
 
 def test_place_order_captures_a_non_usd_currency(client, monkeypatch, auth_headers):
     monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote(price=1000.0, currency="INR"))
+    monkeypatch.setattr(portfolio_summary, "get_quote", lambda ticker: _fake_quote(price=1000.0, currency="INR"))
     resp = client.post("/v1/orders", json={"ticker": "BAJFINANCE.NS", "side": "BUY", "quantity": 2}, headers=auth_headers)
     assert resp.json()["currency"] == "INR"
 
@@ -201,6 +208,7 @@ def test_place_order_captures_a_non_usd_currency(client, monkeypatch, auth_heade
 
 def test_get_orders_returns_order_history(client, monkeypatch, auth_headers):
     monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote(price=100.0))
+    monkeypatch.setattr(portfolio_summary, "get_quote", lambda ticker: _fake_quote(price=100.0))
     client.post("/v1/orders", json={"ticker": "AAPL", "side": "BUY", "quantity": 5}, headers=auth_headers)
     client.post("/v1/orders", json={"ticker": "MSFT", "side": "BUY", "quantity": 2}, headers=auth_headers)
 
