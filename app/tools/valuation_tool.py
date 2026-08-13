@@ -15,6 +15,7 @@ market_data_tool for some reason).
 """
 
 from app.core.research_context import ResearchContext
+from app.data.crypto_resolver import is_crypto_ticker
 from app.valuation.valuation_pipeline import ValuationPipeline
 from app.valuation.valuation_summary import ValuationSummaryBuilder
 from app.valuation.relative_valuation import RelativeValuationEngine
@@ -24,6 +25,16 @@ from app.valuation.ml_valuation_classifier import predict_verdict
 from app.analysis.alpha_factors import AlphaFactorsEngine
 from app.data.market_data import get_benchmark_history, SECTOR_ETF_PROXIES
 from .base_tool import BaseTool
+
+# Shared shape with ValuationPipeline._unavailable_result -- every
+# numeric field explicitly None, dcf_available False, so every caller
+# already built around "DCF unavailable" (report_data_builder.py's
+# derive_recommendation, stock_score.py's star scoring) handles a
+# crypto ticker the exact same way it already handles a real equity
+# with structurally missing financials. Not fabricated: no financial
+# statements exist for crypto (see market_data_tool.py's guard), so
+# there is genuinely nothing to compute here.
+_CRYPTO_UNAVAILABLE_REASON = "No financial statements exist for cryptocurrencies -- DCF valuation is not applicable."
 
 
 class ValuationTool(BaseTool):
@@ -41,6 +52,27 @@ class ValuationTool(BaseTool):
         if context.normalized_financials is None:
             from .market_data_tool import MarketDataTool
             MarketDataTool().run(context)
+
+        if is_crypto_ticker(context.ticker):
+            current_price = (context.company_info or {}).get("current_price")
+            results = {
+                "dcf_available": False,
+                "dcf_unavailable_reason": _CRYPTO_UNAVAILABLE_REASON,
+                "enterprise_value": None, "equity_value": None, "intrinsic_value": None,
+                "fcff_forecasts": None, "wacc": None, "raw_wacc": None, "wacc_floored": False,
+                "wacc_floor_note": None, "terminal_growth_rate": None, "sensitivity_analysis": None,
+                "current_price": current_price, "upside_percent": None,
+                "relative_valuation": None, "monte_carlo": None, "ml_classifier": None,
+                "alpha_factors": {},
+                "is_crypto": True,
+            }
+            context.valuation_results = results
+            context.enterprise_value = None
+            context.equity_value = None
+            context.intrinsic_value = None
+            context.valuation_summary = ValuationSummaryBuilder().build(results)
+            context.record_tool(self.name)
+            return context
 
         pipeline = ValuationPipeline(
             financial_df=context.normalized_financials,

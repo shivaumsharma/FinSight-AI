@@ -19,7 +19,10 @@ ComparisonTool, ReportTool) reads from the context instead of
 re-fetching.
 """
 
+import pandas as pd
+
 from app.core.research_context import ResearchContext
+from app.data.crypto_resolver import is_crypto_ticker
 from app.data.market_data import MarketDataLoader, TickerNotFoundError
 from app.data.financial_normalizer import FinancialStatementNormaliser
 from app.analysis.financial_analysis import FinancialAnalysisBuilder
@@ -51,6 +54,32 @@ class MarketDataTool(BaseTool):
         # get_cash_flow happens to hit an empty DataFrame first.
         if not context.company_info.get("company_name") and not context.company_info.get("current_price"):
             raise TickerNotFoundError(context.ticker)
+
+        # Crypto has no income statement/balance sheet/cash flow --
+        # yfinance's own .financials/.balance_sheet/.cashflow return
+        # empty DataFrames for a "{SYMBOL}-USD" ticker, which
+        # _cached_statement below raises ValueError on (confirmed
+        # empirically against a live BTC-USD fetch, not assumed).
+        # Skipping the fetch entirely for a known-crypto ticker avoids
+        # that raise outright, rather than catching it after the fact.
+        if is_crypto_ticker(context.ticker):
+            context.income_statement = None
+            context.balance_sheet = None
+            context.cash_flow = None
+            try:
+                context.historical_prices = loader.get_historical_prices()
+            except Exception:
+                context.historical_prices = None
+            context.market_cap = context.company_info.get("market_cap")
+            context.beta = context.company_info.get("beta") or 1.2
+            # Empty, not None -- ValuationTool's own "has MarketDataTool
+            # already run" check is `normalized_financials is None`; an
+            # empty DataFrame correctly signals "ran, nothing to show"
+            # instead of triggering a redundant re-run.
+            context.normalized_financials = pd.DataFrame()
+            context.financial_summary = {}
+            context.record_tool(self.name)
+            return context
 
         context.income_statement = loader.get_income_statement()
         context.balance_sheet = loader.get_balance_sheet()
