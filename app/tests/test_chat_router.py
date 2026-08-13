@@ -94,10 +94,10 @@ def test_classify_intent_falls_back_to_general_on_llm_outage(monkeypatch):
 
 def test_handle_portfolio_status_with_no_holdings(monkeypatch):
     monkeypatch.setattr(cr, "build_portfolio_view", lambda user_id: {"holdings": [], "summary": {}})
-    assert "don't have any holdings" in cr._handle_portfolio_status("u1")
+    assert "don't have any holdings" in cr._handle_portfolio_status("u1", "hows my portfolio")
 
 
-def test_handle_portfolio_status_summarizes_holdings(monkeypatch):
+def test_handle_portfolio_status_grounds_the_llm_in_real_holdings_and_the_actual_question(monkeypatch):
     view = {
         "holdings": [
             {"ticker": "AAPL", "quantity": 4, "price": 200.0, "currency": "USD", "rating": "Buy"},
@@ -105,8 +105,44 @@ def test_handle_portfolio_status_summarizes_holdings(monkeypatch):
         "summary": {"total_market_value": 800.0, "total_unrealized_pnl": 50.0, "total_unrealized_pnl_pct": 6.67},
     }
     monkeypatch.setattr(cr, "build_portfolio_view", lambda user_id: view)
+    monkeypatch.setattr(cr.db, "get_portfolio_holdings", lambda user_id: [{"ticker": "AAPL", "quantity": 4}])
+    monkeypatch.setattr(cr, "get_portfolio_sector_allocation", lambda holdings: {"Technology": 100.0})
 
-    result = cr._handle_portfolio_status("u1")
+    captured = {}
+
+    class _StatusProvider:
+        def __init__(self, model=None, **kwargs):
+            pass
+
+        def generate(self, prompt, max_new_tokens=150):
+            captured["prompt"] = prompt
+            return "You're 100% in Technology, so no, not diversified."
+
+    monkeypatch.setattr(cr, "HostedProvider", _StatusProvider)
+
+    result = cr._handle_portfolio_status("u1", "are they diversified enough")
+
+    assert "not diversified" in result
+    assert "AAPL" in captured["prompt"]
+    assert "rated Buy" in captured["prompt"]
+    assert "800.00" in captured["prompt"]
+    assert "Technology 100" in captured["prompt"]
+    assert "are they diversified enough" in captured["prompt"]
+
+
+def test_handle_portfolio_status_falls_back_to_the_raw_summary_on_llm_outage(monkeypatch):
+    view = {
+        "holdings": [
+            {"ticker": "AAPL", "quantity": 4, "price": 200.0, "currency": "USD", "rating": "Buy"},
+        ],
+        "summary": {"total_market_value": 800.0, "total_unrealized_pnl": 50.0, "total_unrealized_pnl_pct": 6.67},
+    }
+    monkeypatch.setattr(cr, "build_portfolio_view", lambda user_id: view)
+    monkeypatch.setattr(cr.db, "get_portfolio_holdings", lambda user_id: [{"ticker": "AAPL", "quantity": 4}])
+    monkeypatch.setattr(cr, "get_portfolio_sector_allocation", lambda holdings: {})
+    monkeypatch.setattr(cr, "HostedProvider", _RaisingProvider)
+
+    result = cr._handle_portfolio_status("u1", "hows my portfolio")
 
     assert "1 holding" in result
     assert "AAPL" in result
