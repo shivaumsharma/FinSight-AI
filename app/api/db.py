@@ -285,6 +285,25 @@ def init_db() -> None:
             )
             """
         )
+        # One flat per-user log, not a separate conversations/threading
+        # table -- see chat_router.py's own docstring for why a single
+        # continuous history is enough for this feature's scope.
+        # ticker is nullable (a portfolio_status/general-intent turn
+        # has none); intent is nullable too (a user-authored row has no
+        # intent of its own -- only an assistant reply carries one).
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                intent TEXT,
+                ticker TEXT,
+                created_at REAL NOT NULL
+            )
+            """
+        )
 
 
 # ---------------------------------------------------------------- users/sessions
@@ -935,6 +954,43 @@ def list_orders(user_id: str, limit: int = 20) -> list:
             (user_id, limit),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------- chat (fast conversational assistant)
+
+def add_chat_message(
+    user_id: str, role: str, content: str, intent: str = None, ticker: str = None
+) -> dict:
+    """role is "user" or "assistant" -- intent/ticker are only ever set
+    on an assistant row (see app/reasoning/chat_router.py), None on a
+    user-authored one."""
+    message_id = str(uuid.uuid4())
+    now = time.time()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO chat_messages (id, user_id, role, content, intent, ticker, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (message_id, user_id, role, content, intent, ticker, now),
+        )
+    return {"id": message_id, "role": role, "content": content, "intent": intent, "ticker": ticker, "created_at": now}
+
+
+def list_chat_messages(user_id: str, limit: int = 50) -> list:
+    """Oldest-first (chronological reading order for a chat thread) --
+    the SQL query itself fetches most-recent-first (LIMIT needs that to
+    cap correctly) and this reverses just before returning."""
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT id, role, content, intent, ticker, created_at
+            FROM chat_messages WHERE user_id=? ORDER BY created_at DESC LIMIT ?
+            """,
+            (user_id, limit),
+        ).fetchall()
+    return [dict(r) for r in reversed(rows)]
 
 
 def reconcile_interrupted_jobs() -> int:
