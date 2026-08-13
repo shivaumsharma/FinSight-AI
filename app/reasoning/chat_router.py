@@ -113,7 +113,13 @@ def classify_intent(message: str) -> dict:
     return {"intent": intent, "ticker": ticker}
 
 
-def _handle_portfolio_status(user_id: str) -> str:
+def _handle_portfolio_status(user_id: str, message: str) -> str:
+    """Unlike the other handlers, this one's raw data assembly (lines,
+    below) doubles as both the LLM's grounding context AND the
+    LLM-outage fallback -- so a generic "how's my portfolio doing"
+    still gets a real answer, but so does a specific "is this
+    diversified enough" or "what's going well/badly", instead of the
+    same fixed holdings dump regardless of what was actually asked."""
     view = build_portfolio_view(user_id)
     holdings = view["holdings"]
     if not holdings:
@@ -136,7 +142,27 @@ def _handle_portfolio_status(user_id: str) -> str:
         rating_bit = f", rated {h['rating']}" if h.get("rating") else ""
         lines.append(f"- {h['ticker']}: {h['quantity']:g} sh @ {price_bit}{rating_bit}")
 
-    return "\n".join(lines)
+    allocation = get_portfolio_sector_allocation(db.get_portfolio_holdings(user_id))
+    if allocation:
+        top_sectors = sorted(allocation.items(), key=lambda kv: -kv[1])
+        lines.append("Sector mix: " + ", ".join(f"{s} {p:g}%" for s, p in top_sectors) + ".")
+
+    portfolio_data = "\n".join(lines)
+
+    prompt = (
+        "You are a terse assistant inside a stock research app, answering a question about the user's own "
+        "portfolio. Use ONLY the real data below -- never invent numbers. Answer the user's actual question in "
+        "2-4 sentences: if they ask about diversification, reference the sector mix; if they ask what's going "
+        "well/badly, reference the per-holding ratings and overall P&L; if the question is generic, summarize "
+        "total value and P&L. Never give a buy/sell recommendation beyond restating existing ratings; never "
+        "claim to be a licensed advisor.\n\n"
+        f"PORTFOLIO DATA:\n{portfolio_data}\n\nMESSAGE: {message}"
+    )
+    try:
+        provider = HostedProvider(model=_CHAT_MODEL)
+        return provider.generate(prompt, max_new_tokens=200).strip()
+    except LLMProviderError:
+        return portfolio_data
 
 
 def _handle_ticker_question(ticker: str) -> str:
@@ -260,7 +286,7 @@ def _handle_general(message: str) -> str:
 
 
 _HANDLERS = {
-    INTENT_PORTFOLIO_STATUS: lambda user_id, ticker, message: _handle_portfolio_status(user_id),
+    INTENT_PORTFOLIO_STATUS: lambda user_id, ticker, message: _handle_portfolio_status(user_id, message),
     INTENT_TICKER_QUESTION: lambda user_id, ticker, message: _handle_ticker_question(ticker),
     INTENT_PORTFOLIO_FIT: lambda user_id, ticker, message: _handle_portfolio_fit(user_id, ticker),
     INTENT_FULL_REPORT_REQUEST: lambda user_id, ticker, message: _handle_full_report_request(ticker),
