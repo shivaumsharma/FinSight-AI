@@ -205,6 +205,7 @@ export interface BacktestAccuracySummary {
 // P/E, ...) are deliberately NOT here at all.
 export interface StockOverview {
   ticker: string;
+  is_crypto: boolean;
   price: number;
   change_pct: number | null;
   previous_close: number | null;

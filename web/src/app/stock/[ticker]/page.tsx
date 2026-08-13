@@ -98,7 +98,7 @@ function StockDetailContent({ ticker }: { ticker: string }) {
           making investment decisions.
         </div>
 
-        <PerformanceDashboard ticker={overview.ticker} />
+        {!overview.is_crypto && <PerformanceDashboard ticker={overview.ticker} />}
 
         <div className="mt-6">
           <Tabs
@@ -107,19 +107,27 @@ function StockDetailContent({ ticker }: { ticker: string }) {
                 label: "Overview",
                 content: (
                   <div>
-                    <AIInsightsCard ticker={overview.ticker} currency={overview.currency} />
+                    {!overview.is_crypto && <AIInsightsCard ticker={overview.ticker} currency={overview.currency} />}
                     <div className="mt-4 rounded-lg border border-border bg-card px-3.5 py-3">
                       <p className="text-xs text-muted">Get a second opinion: 3 independent AI models each give their own Buy/Hold/Sell call on this stock.</p>
                       <ModelCompare endpoint={`/api/stock/${encodeURIComponent(overview.ticker)}/model-compare`} />
                     </div>
                     <PriceStatistics overview={overview} />
-                    <FundamentalsCard overview={overview} />
-                    <FinancialPerformanceChart ticker={overview.ticker} currency={overview.currency} />
-                    <GrowthMetrics ticker={overview.ticker} />
+                    {!overview.is_crypto && (
+                      <>
+                        <FundamentalsCard overview={overview} />
+                        <FinancialPerformanceChart ticker={overview.ticker} currency={overview.currency} />
+                        <GrowthMetrics ticker={overview.ticker} />
+                      </>
+                    )}
                     <CompanyOverviewCard overview={overview} />
                     <CompanyInfoCard overview={overview} />
-                    <PeerComparisonTable ticker={overview.ticker} />
-                    <SimilarStocks ticker={overview.ticker} />
+                    {!overview.is_crypto && (
+                      <>
+                        <PeerComparisonTable ticker={overview.ticker} />
+                        <SimilarStocks ticker={overview.ticker} />
+                      </>
+                    )}
                     <RecentlyViewed ticker={overview.ticker} companyName={overview.company_name} />
                     <div className="mt-4 rounded-lg border border-border bg-card px-3.5 py-3 text-center">
                       <Link
