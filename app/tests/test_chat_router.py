@@ -184,6 +184,73 @@ def test_handle_full_report_request_mentions_the_ticker_and_the_cta():
     assert "Run Full Research Report" in result
 
 
+# ---------------------------------------------------------------- _handle_advice_request
+
+def test_handle_advice_request_includes_onboarding_and_portfolio_context(monkeypatch):
+    monkeypatch.setattr(cr.db, "get_user_by_id", lambda user_id: {
+        "onboarding_completed": 1, "risk_tolerance": "Aggressive",
+        "investment_goal": "Wealth Growth", "investment_horizon": "Long-term (7y+)",
+        "interested_in_real_estate": 0,
+    })
+    monkeypatch.setattr(cr.db, "get_portfolio_holdings", lambda user_id: [{"ticker": "AAPL", "quantity": 1}])
+    monkeypatch.setattr(cr, "build_portfolio_view", lambda user_id: {
+        "holdings": [{"ticker": "AAPL"}], "summary": {"total_market_value": 500.0},
+    })
+    monkeypatch.setattr(cr, "get_portfolio_sector_allocation", lambda holdings: {"Technology": 100.0})
+
+    captured = {}
+
+    class _AdviceProvider:
+        def __init__(self, model=None, **kwargs):
+            pass
+
+        def generate(self, prompt, max_new_tokens=150):
+            captured["prompt"] = prompt
+            return "Given your aggressive, long-term goal, consider..."
+
+    monkeypatch.setattr(cr, "HostedProvider", _AdviceProvider)
+
+    result = cr._handle_advice_request("u1", "where should I invest")
+
+    assert "aggressive" in result.lower()
+    assert "Aggressive" in captured["prompt"]
+    assert "Technology 100" in captured["prompt"]
+    assert "500.00" in captured["prompt"]
+
+
+def test_handle_advice_request_with_no_onboarding_or_holdings(monkeypatch):
+    monkeypatch.setattr(cr.db, "get_user_by_id", lambda user_id: {"onboarding_completed": 0})
+    monkeypatch.setattr(cr.db, "get_portfolio_holdings", lambda user_id: [])
+
+    captured = {}
+
+    class _AdviceProvider:
+        def __init__(self, model=None, **kwargs):
+            pass
+
+        def generate(self, prompt, max_new_tokens=150):
+            captured["prompt"] = prompt
+            return "Start with diversified index funds..."
+
+    monkeypatch.setattr(cr, "HostedProvider", _AdviceProvider)
+
+    result = cr._handle_advice_request("u1", "how should I spend $40k")
+
+    assert "index funds" in result.lower()
+    assert "hasn't completed the onboarding" in captured["prompt"]
+    assert "No existing portfolio holdings" in captured["prompt"]
+
+
+def test_handle_advice_request_falls_back_on_llm_outage(monkeypatch):
+    monkeypatch.setattr(cr.db, "get_user_by_id", lambda user_id: None)
+    monkeypatch.setattr(cr.db, "get_portfolio_holdings", lambda user_id: [])
+    monkeypatch.setattr(cr, "HostedProvider", _RaisingProvider)
+
+    result = cr._handle_advice_request("u1", "where should I invest")
+
+    assert "allocation-level guidance" in result
+
+
 # ---------------------------------------------------------------- _handle_general
 
 def test_handle_general_returns_the_llm_reply(monkeypatch):
