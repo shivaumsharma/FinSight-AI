@@ -44,14 +44,14 @@ from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from typing import Literal, Optional
 
-from fastapi import Depends, FastAPI, File, Header, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Header, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, field_validator
 
 from app.api import auth, db, errors, jobs
 from app.core.company_resolver import get_company_name, resolve_companies, suggest_companies
-from app.data import sarvam_client
+from app.data import sarvam_client, sarvam_tts_client
 from app.data.market_data import (
     TickerNotFoundError, get_corporate_actions, get_corporate_actions_history, get_quote, get_usd_conversion_rate,
 )
@@ -644,6 +644,38 @@ async def transcribe_voice(
         raise errors.stt_unavailable(str(e))
 
     return {"transcript": transcript}
+
+
+class VoiceSynthesizeRequest(BaseModel):
+    text: str
+
+    @field_validator("text")
+    @classmethod
+    def _valid_text(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("text must not be blank")
+        if len(v) > sarvam_tts_client.MAX_TEXT_CHARS:
+            raise ValueError(f"text must be under {sarvam_tts_client.MAX_TEXT_CHARS} characters")
+        return v
+
+
+@app.post("/v1/voice/synthesize")
+def synthesize_voice(body: VoiceSynthesizeRequest, current_user: str = Depends(auth.get_current_user)):
+    """
+    Text-to-speech for spoken chat replies (voice-conversation feature,
+    Phase 1) -- returns raw WAV audio bytes directly, not JSON, so the
+    frontend can play it as a Blob without a second base64-decode round
+    trip on top of the one sarvam_tts_client.synthesize() already does
+    against Sarvam's own base64 response. Session-gated like voice
+    transcription above -- TTS calls cost real money against Sarvam's
+    rate-limited tiers.
+    """
+    try:
+        audio_bytes = sarvam_tts_client.synthesize(body.text)
+    except sarvam_tts_client.SarvamSynthesisError as e:
+        raise errors.tts_unavailable(str(e))
+
+    return Response(content=audio_bytes, media_type="audio/wav")
 
 
 @app.post("/v1/research")
