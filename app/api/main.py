@@ -65,6 +65,7 @@ from app.reasoning.backtest_stats import get_backtest_accuracy_summary
 from app.reasoning.market_movers import get_top_movers
 from app.reasoning.model_consensus import compute_consensus, get_model_opinions, get_stock_model_opinions
 from app.reasoning.portfolio_fit import get_portfolio_fit_for_ticker
+from app.reasoning.real_estate_guidance import get_real_estate_guidance
 from app.reporting.news_client import fetch_company_news, fetch_market_news
 
 TIMEOUT_SWEEP_INTERVAL_SECONDS = 60
@@ -495,6 +496,15 @@ def update_onboarding(body: OnboardingRequest, current_user: str = Depends(auth.
         body.interested_in_crypto, body.interested_in_real_estate,
     )
     return {"status": "ok"}
+
+
+@app.get("/v1/auth/real-estate-guidance")
+def get_real_estate_guidance_for_user(current_user: str = Depends(auth.get_current_user)):
+    # {} (not null) when the user hasn't opted in -- lets the frontend
+    # branch on a plain truthiness check without a separate "not
+    # opted in" vs "not logged in" distinction to handle.
+    guidance = get_real_estate_guidance(db.get_user_by_id(current_user))
+    return guidance or {}
 
 
 class DisplayNameRequest(BaseModel):
