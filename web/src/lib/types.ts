@@ -162,6 +162,15 @@ export interface ResearchResult {
 // rating is "Insufficient Data" (RatingBadge already supports this)
 // when a model's response couldn't be parsed or the model was
 // unreachable, same degrade-gracefully convention as everywhere else.
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  intent: string | null;
+  ticker: string | null;
+  created_at: number;
+}
+
 export interface PortfolioFit {
   sector: string | null;
   current_allocation_pct: number | null;
