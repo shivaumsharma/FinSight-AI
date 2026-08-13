@@ -162,6 +162,12 @@ export interface ResearchResult {
 // rating is "Insufficient Data" (RatingBadge already supports this)
 // when a model's response couldn't be parsed or the model was
 // unreachable, same degrade-gracefully convention as everywhere else.
+export interface PortfolioFit {
+  sector: string | null;
+  current_allocation_pct: number | null;
+  summary: string;
+}
+
 export interface ModelOpinion {
   label: string;
   model: string;
