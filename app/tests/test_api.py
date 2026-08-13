@@ -927,6 +927,57 @@ def test_onboarding_requires_auth(client):
     assert resp.status_code == 401
 
 
+# ---------------------------------------------------------- POST /v1/onboarding/classify-answer
+
+def test_classify_onboarding_answer_returns_the_mapped_value(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "classify_onboarding_answer", lambda field, answer: "Moderate")
+
+    resp = client.post(
+        "/v1/onboarding/classify-answer",
+        json={"field": "risk_tolerance", "answer": "somewhere in the middle"},
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"value": "Moderate"}
+
+
+def test_classify_onboarding_answer_returns_null_when_ambiguous(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "classify_onboarding_answer", lambda field, answer: None)
+
+    resp = client.post(
+        "/v1/onboarding/classify-answer",
+        json={"field": "risk_tolerance", "answer": "what's the weather like"},
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"value": None}
+
+
+def test_classify_onboarding_answer_rejects_an_unknown_field(client, auth_headers):
+    resp = client.post(
+        "/v1/onboarding/classify-answer",
+        json={"field": "favorite_color", "answer": "blue"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
+
+
+def test_classify_onboarding_answer_rejects_a_blank_answer(client, auth_headers):
+    resp = client.post(
+        "/v1/onboarding/classify-answer",
+        json={"field": "risk_tolerance", "answer": "   "},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
+
+
+def test_classify_onboarding_answer_requires_auth(client):
+    resp = client.post("/v1/onboarding/classify-answer", json={"field": "risk_tolerance", "answer": "moderate"})
+    assert resp.status_code == 401
+
+
 def test_real_estate_guidance_is_empty_when_not_opted_in(client, auth_headers):
     resp = client.get("/v1/auth/real-estate-guidance", headers=auth_headers)
     assert resp.status_code == 200

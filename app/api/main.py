@@ -67,6 +67,7 @@ from app.reasoning.market_movers import get_top_movers
 from app.reasoning.model_consensus import compute_consensus, get_model_opinions, get_stock_model_opinions
 from app.reasoning.chat_router import MAX_HISTORY_MESSAGES, handle_chat_message
 from app.reasoning.portfolio_fit import get_portfolio_fit_for_ticker
+from app.reasoning.onboarding_voice import classify_onboarding_answer
 from app.reasoning.real_estate_guidance import get_real_estate_guidance
 from app.reporting.news_client import fetch_company_news, fetch_market_news
 from app.reporting.portfolio_summary import build_portfolio_view
@@ -522,6 +523,32 @@ def update_onboarding(body: OnboardingRequest, current_user: str = Depends(auth.
         body.interested_in_crypto, body.interested_in_real_estate,
     )
     return {"status": "ok"}
+
+
+class OnboardingAnswerRequest(BaseModel):
+    field: Literal[
+        "risk_tolerance", "investment_goal", "investment_horizon",
+        "interested_in_crypto", "interested_in_real_estate",
+    ]
+    answer: str
+
+    @field_validator("answer")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("answer must not be blank")
+        return v
+
+
+@app.post("/v1/onboarding/classify-answer")
+def classify_onboarding_answer_endpoint(body: OnboardingAnswerRequest, current_user: str = Depends(auth.get_current_user)):
+    """Powers voice-driven onboarding -- maps a spoken free-text answer
+    onto one of that field's fixed options (or null if ambiguous).
+    Never writes anything itself; the caller still submits the final
+    answers through the existing PATCH /v1/auth/onboarding above, which
+    stays the actual (and only) write path/validation gate."""
+    value = classify_onboarding_answer(body.field, body.answer)
+    return {"value": value}
 
 
 @app.get("/v1/auth/real-estate-guidance")
