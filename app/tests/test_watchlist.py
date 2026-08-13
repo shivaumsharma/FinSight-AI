@@ -441,6 +441,31 @@ def test_my_stocks_news_caps_the_limit_at_30(client, auth_headers):
     assert resp.status_code == 422
 
 
+def test_my_stocks_news_caps_articles_per_ticker(client, monkeypatch, auth_headers):
+    # A well-covered ticker (e.g. a US stock) must not be allowed to
+    # fill the entire aggregated list just because a poorly-covered
+    # ticker (e.g. an NSE stock Finnhub has no data for) returns
+    # nothing -- regression test for the "On My Stocks" tab silently
+    # becoming 100% one ticker.
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
+    client.post("/v1/watchlist", json={"ticker": "AAPL"}, headers=auth_headers)
+    client.post("/v1/watchlist", json={"ticker": "KPITTECH.NS"}, headers=auth_headers)
+
+    import datetime
+    today = datetime.date.today().isoformat()
+
+    def fake_company_news(ticker, days=60):
+        if ticker == "AAPL":
+            return [_article(f"https://x.com/aapl{i}", today) for i in range(10)]
+        return []
+
+    monkeypatch.setattr(main, "fetch_company_news", fake_company_news)
+
+    resp = client.get("/v1/news/my-stocks", headers=auth_headers)
+    aapl_articles = [a for a in resp.json()["articles"] if a["ticker"] == "AAPL"]
+    assert len(aapl_articles) == 3
+
+
 # ---------------------------------------------------------------- market indices
 
 def test_market_indices_returns_the_curated_list(client, monkeypatch, auth_headers):
