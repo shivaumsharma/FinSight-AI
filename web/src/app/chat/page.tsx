@@ -7,6 +7,17 @@ import BottomNav from "@/components/BottomNav";
 import VoiceInputButton from "@/components/VoiceInputButton";
 import type { ChatMessage } from "@/lib/types";
 
+const VOICE_MODE_STORAGE_KEY = "finsight-voice-mode";
+
+function SpeakerIcon({ speaking }: { speaking: boolean }) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+      <path d="M4 9v6h4l5 5V4L8 9H4z" strokeLinejoin="round" />
+      {speaking && <path d="M17 8a6 6 0 0 1 0 8M20 5a10 10 0 0 1 0 14" strokeLinecap="round" />}
+    </svg>
+  );
+}
+
 // The fast conversational assistant -- deliberately separate from the
 // existing one-shot "Run Full Research Report" flow on the home page,
 // which stays untouched (see app/reasoning/chat_router.py's own
@@ -29,7 +40,14 @@ function ChatContent() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // Not React state -- swapped/torn down imperatively by
+  // synthesizeAndSpeak/stopSpeaking below, a render on every play/pause
+  // would be wasted work here.
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     fetch("/api/chat/history")
@@ -37,11 +55,63 @@ function ChatContent() {
       .then((data) => setMessages(data.messages ?? []))
       .catch(() => {})
       .finally(() => setHistoryLoaded(true));
+    // Voice mode is a standing preference, not per-message -- read once
+    // on mount (deliberately after the initial render, not via
+    // useState's initializer, so server-rendered and first-client-
+    // rendered markup match; localStorage doesn't exist during SSR).
+    setVoiceMode(localStorage.getItem(VOICE_MODE_STORAGE_KEY) === "1");
+    return () => stopSpeaking();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
+
+  function stopSpeaking() {
+    audioRef.current?.pause();
+    audioRef.current = null;
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+    setSpeaking(false);
+  }
+
+  function toggleVoiceMode() {
+    const next = !voiceMode;
+    setVoiceMode(next);
+    localStorage.setItem(VOICE_MODE_STORAGE_KEY, next ? "1" : "0");
+    if (!next) stopSpeaking();
+  }
+
+  async function synthesizeAndSpeak(text: string) {
+    stopSpeaking();
+    try {
+      const resp = await fetch("/api/voice/synthesize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      // Silent no-op on failure -- the text reply is already on screen
+      // and fully usable; a broken TTS call should never block or
+      // visibly disrupt the actual conversation, same non-blocking
+      // convention as every other best-effort feature in this app
+      // (news fetch, sector lookup, etc).
+      if (!resp.ok) return;
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      audioUrlRef.current = url;
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onended = stopSpeaking;
+      audio.onerror = stopSpeaking;
+      setSpeaking(true);
+      await audio.play();
+    } catch {
+      stopSpeaking();
+    }
+  }
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
@@ -72,6 +142,7 @@ function ChatContent() {
         intent: data.intent, ticker: data.ticker, created_at: Date.now() / 1000,
       };
       setMessages((prev) => [...prev, assistantMessage]);
+      if (voiceMode) void synthesizeAndSpeak(data.reply);
     } catch {
       setError("Couldn't reach the assistant. Try again.");
     } finally {
@@ -82,7 +153,21 @@ function ChatContent() {
   return (
     <div className="min-h-screen bg-bg pb-36">
       <div className="mx-auto max-w-2xl px-5 py-8">
-        <h1 className="font-mono text-lg font-bold text-text">Chat</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="font-mono text-lg font-bold text-text">Chat</h1>
+          <button
+            type="button"
+            onClick={toggleVoiceMode}
+            aria-label={voiceMode ? "Turn off spoken replies" : "Turn on spoken replies"}
+            title={voiceMode ? "Spoken replies on -- tap to turn off" : "Spoken replies off -- tap to turn on"}
+            className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 font-mono text-[10px] font-bold transition-colors ${
+              voiceMode ? "border-accent text-accent" : "border-border text-dim hover:text-muted"
+            }`}
+          >
+            <SpeakerIcon speaking={speaking} />
+            {speaking ? "SPEAKING" : voiceMode ? "VOICE ON" : "VOICE OFF"}
+          </button>
+        </div>
         <p className="mt-1 font-mono text-[10px] text-dim">
           Ask about your portfolio or a specific ticker. Informational only, not personalized investment advice.
         </p>
@@ -117,7 +202,7 @@ function ChatContent() {
             autoComplete="off"
             className="min-w-0 flex-1 rounded-lg border border-border bg-card px-3.5 py-2.5 font-mono text-sm text-text placeholder:text-muted focus:outline-none focus:border-accent disabled:opacity-60"
           />
-          <VoiceInputButton onTranscript={setInput} disabled={sending} />
+          <VoiceInputButton onTranscript={setInput} disabled={sending} onRecordingStart={stopSpeaking} />
           <button
             type="submit"
             disabled={sending || !input.trim()}
