@@ -27,6 +27,7 @@ from typing import Optional
 
 import pandas as pd
 
+from app.data.crypto_resolver import is_crypto_ticker
 from app.data.financial_normalizer import FinancialStatementNormaliser
 from app.data.market_data import MarketDataLoader
 
@@ -64,6 +65,15 @@ def build_growth_metrics(ticker: str) -> dict:
     """{"revenue_cagr": {"1y": .., "3y": .., "5y": ..}, "eps_cagr": {...},
     "book_value_cagr": {...}, "fcf_cagr": {...}} -- every leaf is a
     percent (float) or None. Always computed from annual statements."""
+    if is_crypto_ticker(ticker):
+        # No income/balance/cash-flow statements exist for crypto --
+        # MarketDataLoader's own statement fetch raises on an empty
+        # DataFrame (see market_data_tool.py's crypto guard for the
+        # same finding), so this returns the same all-None shape
+        # up front rather than letting that raise reach the endpoint.
+        empty = {f"{y}y": None for y in CAGR_YEAR_BUCKETS}
+        return {"revenue_cagr": dict(empty), "eps_cagr": dict(empty), "book_value_cagr": dict(empty), "fcf_cagr": dict(empty)}
+
     loader = MarketDataLoader(ticker)
     normalizer = FinancialStatementNormaliser(
         loader.get_income_statement(), loader.get_balance_sheet(), loader.get_cash_flow()
@@ -94,6 +104,9 @@ def build_financial_performance(ticker: str, period: str = "yearly") -> list:
     `period` is "yearly" (default) or "quarterly". Margin fields are
     None wherever revenue is zero/missing for that period (never a
     divide-by-zero crash, never a fabricated 0%)."""
+    if is_crypto_ticker(ticker):
+        return []
+
     loader = MarketDataLoader(ticker)
     if period == "quarterly":
         income, balance, cash_flow = (
