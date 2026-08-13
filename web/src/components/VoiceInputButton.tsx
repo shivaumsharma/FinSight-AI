@@ -118,9 +118,17 @@ function SpinnerIcon() {
 export default function VoiceInputButton({
   onTranscript,
   disabled,
+  onRecordingStart,
 }: {
   onTranscript: (text: string) => void;
   disabled?: boolean;
+  // Fired the instant recording actually starts (mic permission
+  // granted, MediaRecorder live) -- lets a caller with its own audio
+  // playback (e.g. spoken chat replies) implement barge-in: opening
+  // the mic cuts off whatever's currently speaking. Optional so every
+  // existing caller (page.tsx, chat/page.tsx's text-fill usage) is
+  // unaffected.
+  onRecordingStart?: () => void;
 }) {
   const [state, setState] = useState<VoiceState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -234,6 +242,7 @@ export default function VoiceInputButton({
       recorder.start();
       mediaRecorderRef.current = recorder;
       setState("recording");
+      onRecordingStart?.();
       stopTimerRef.current = setTimeout(() => stopRecording(), MAX_RECORDING_MS);
       watchForSilence();
     } catch {
