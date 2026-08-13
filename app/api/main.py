@@ -64,6 +64,7 @@ from app.data.stock_overview import get_stock_overview
 from app.reasoning.backtest_stats import get_backtest_accuracy_summary
 from app.reasoning.market_movers import get_top_movers
 from app.reasoning.model_consensus import compute_consensus, get_model_opinions, get_stock_model_opinions
+from app.reasoning.portfolio_fit import get_portfolio_fit_for_ticker
 from app.reporting.news_client import fetch_company_news, fetch_market_news
 
 TIMEOUT_SWEEP_INTERVAL_SECONDS = 60
@@ -1000,6 +1001,18 @@ def get_stock_insights(ticker: str, current_user: str = Depends(auth.get_current
         return build_stock_insights(ticker)
     except TickerNotFoundError:
         raise errors.ticker_not_found(ticker)
+
+
+@app.get("/v1/stocks/{ticker}/portfolio-fit")
+def stock_portfolio_fit(ticker: str, current_user: str = Depends(auth.get_current_user)):
+    # Deliberately no TickerNotFoundError guard here (unlike every
+    # other stock-keyed endpoint) -- get_portfolio_fit_for_ticker never
+    # raises, it degrades to "sector unknown" for a bad ticker the same
+    # way it does for any ticker with no sector data, since a portfolio-
+    # fit card breaking the whole page over a sector lookup failure
+    # would be worse than just reading "sector unavailable".
+    holdings = db.get_portfolio_holdings(current_user)
+    return get_portfolio_fit_for_ticker(ticker.upper(), holdings)
 
 
 @app.post("/v1/stocks/{ticker}/model-compare")
