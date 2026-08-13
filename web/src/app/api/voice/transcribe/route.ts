@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
 
   const sessionToken = await getSessionToken();
   const outgoing = new FormData();
-  outgoing.set("file", file, "recording.webm");
+  outgoing.set("file", file, "recording.wav");
 
   const resp = await fetch(`${FINSIGHT_API_URL}/v1/voice/transcribe`, {
     method: "POST",
