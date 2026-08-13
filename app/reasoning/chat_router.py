@@ -32,7 +32,8 @@ from app.api import db
 from app.core.company_resolver import resolve_companies
 from app.core.llm_provider import HostedProvider, LLMProviderError
 from app.data.market_data import TickerNotFoundError
-from app.reasoning.portfolio_fit import get_portfolio_fit_for_ticker
+from app.reasoning.portfolio_fit import get_portfolio_fit_for_ticker, get_portfolio_sector_allocation
+from app.reasoning.real_estate_guidance import get_real_estate_guidance
 from app.reasoning.stock_score import build_stock_insights
 from app.reporting.news_client import fetch_company_news
 from app.reporting.portfolio_summary import build_portfolio_view
@@ -41,11 +42,12 @@ INTENT_PORTFOLIO_STATUS = "portfolio_status"
 INTENT_TICKER_QUESTION = "ticker_question"
 INTENT_PORTFOLIO_FIT = "portfolio_fit"
 INTENT_FULL_REPORT_REQUEST = "full_report_request"
+INTENT_ADVICE_REQUEST = "advice_request"
 INTENT_GENERAL = "general"
 
 _VALID_INTENTS = {
     INTENT_PORTFOLIO_STATUS, INTENT_TICKER_QUESTION, INTENT_PORTFOLIO_FIT,
-    INTENT_FULL_REPORT_REQUEST, INTENT_GENERAL,
+    INTENT_FULL_REPORT_REQUEST, INTENT_ADVICE_REQUEST, INTENT_GENERAL,
 }
 # Intents that need a ticker to mean anything -- a message classified
 # into one of these with no ticker detected degrades to INTENT_GENERAL
@@ -72,6 +74,7 @@ portfolio_status - asking about their overall portfolio, holdings, or how it's d
 ticker_question - asking what's going on with, or for information about, a specific stock/company (not asking for a deep valuation report)
 portfolio_fit - asking whether/how a specific stock fits, overlaps with, or diversifies their existing portfolio
 full_report_request - explicitly asking for a full/deep/detailed research report, DCF, or valuation
+advice_request - asking where/how to invest, allocate, or spend money based on their own goals or situation (e.g. "where should I invest", "how should I spend $40k", "what should a beginner do") -- NOT asking about an existing holding's status
 general - anything else, including generic finance chit-chat
 
 {ticker_note}
@@ -177,6 +180,67 @@ def _handle_full_report_request(ticker: str) -> str:
     )
 
 
+def _handle_advice_request(user_id: str, message: str) -> str:
+    """Grounded, portfolio-aware guidance -- pulls real holdings, sector
+    allocation, and onboarding preferences (risk tolerance/goal/horizon)
+    into the prompt so the answer isn't a blanket "I have no access"
+    disclaimer. Stays at the same allocation-level, non-stock-picking
+    register as real_estate_guidance.py/portfolio_fit.py rather than
+    naming a specific buy/sell call -- informational, not licensed
+    advice (same boundary _handle_general already states, just backed
+    by real numbers here instead of nothing)."""
+    user = db.get_user_by_id(user_id)
+    holdings = db.get_portfolio_holdings(user_id)
+
+    context_lines = []
+    if user and user.get("onboarding_completed"):
+        context_lines.append(
+            f"Risk tolerance: {user.get('risk_tolerance') or 'unset'}. "
+            f"Goal: {user.get('investment_goal') or 'unset'}. "
+            f"Horizon: {user.get('investment_horizon') or 'unset'}."
+        )
+    else:
+        context_lines.append("This user hasn't completed the onboarding preferences questionnaire yet.")
+
+    if holdings:
+        view = build_portfolio_view(user_id)
+        total_value = view["summary"].get("total_market_value")
+        allocation = get_portfolio_sector_allocation(holdings)
+        top_sectors = sorted(allocation.items(), key=lambda kv: -kv[1])[:5]
+        sector_bit = ", ".join(f"{s} {p:g}%" for s, p in top_sectors)
+        value_bit = f", ${total_value:,.2f} total (USD equiv.)" if total_value is not None else ""
+        context_lines.append(
+            f"Current portfolio: {len(holdings)} holding(s){value_bit}."
+            + (f" Sector mix: {sector_bit}." if sector_bit else "")
+        )
+    else:
+        context_lines.append("No existing portfolio holdings.")
+
+    if user and user.get("interested_in_real_estate"):
+        re_guidance = get_real_estate_guidance(user)
+        if re_guidance:
+            context_lines.append(
+                f"Opted into real estate interest -- target allocation "
+                f"{re_guidance['target_allocation_low_pct']:g}-{re_guidance['target_allocation_high_pct']:g}% "
+                f"per their risk tolerance."
+            )
+
+    prompt = (
+        "You are a terse assistant inside a stock research app, answering a request for investing/allocation "
+        "guidance. Use ONLY the real context below -- never invent numbers. Answer in 2-4 sentences, at the "
+        "level of asset classes/sectors/allocation percentages, not a specific buy/sell call on an individual "
+        "stock. If onboarding preferences are unset, give general starter guidance (e.g. diversified index "
+        "funds first) but mention completing onboarding for guidance tailored to their risk tolerance. Never "
+        "claim to be a licensed advisor.\n\n"
+        "CONTEXT:\n" + "\n".join(context_lines) + f"\n\nMESSAGE: {message}"
+    )
+    try:
+        provider = HostedProvider(model=_CHAT_MODEL)
+        return provider.generate(prompt, max_new_tokens=200).strip()
+    except LLMProviderError:
+        return "I can give allocation-level guidance using your real portfolio and preferences, but couldn't generate a response just now -- try again in a moment."
+
+
 def _handle_general(message: str) -> str:
     """Short, caveated LLM answer with no specific data context -- no
     portfolio/ticker to key off for this message, so this deliberately
@@ -200,6 +264,7 @@ _HANDLERS = {
     INTENT_TICKER_QUESTION: lambda user_id, ticker, message: _handle_ticker_question(ticker),
     INTENT_PORTFOLIO_FIT: lambda user_id, ticker, message: _handle_portfolio_fit(user_id, ticker),
     INTENT_FULL_REPORT_REQUEST: lambda user_id, ticker, message: _handle_full_report_request(ticker),
+    INTENT_ADVICE_REQUEST: lambda user_id, ticker, message: _handle_advice_request(user_id, message),
     INTENT_GENERAL: lambda user_id, ticker, message: _handle_general(message),
 }
 
