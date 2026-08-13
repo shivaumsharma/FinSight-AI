@@ -820,6 +820,28 @@ def test_onboarding_requires_auth(client):
     assert resp.status_code == 401
 
 
+def test_real_estate_guidance_is_empty_when_not_opted_in(client, auth_headers):
+    resp = client.get("/v1/auth/real-estate-guidance", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json() == {}
+
+
+def test_real_estate_guidance_reflects_onboarding_answers(client, auth_headers):
+    client.patch("/v1/auth/onboarding", json=_onboarding_body(interested_in_real_estate=True, risk_tolerance="Conservative"), headers=auth_headers)
+
+    resp = client.get("/v1/auth/real-estate-guidance", headers=auth_headers)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["target_allocation_low_pct"] == 15.0
+    assert data["example_reit_tickers"] == ["VNQ", "O", "PLD"]
+
+
+def test_real_estate_guidance_requires_auth(client):
+    resp = client.get("/v1/auth/real-estate-guidance")
+    assert resp.status_code == 401
+
+
 def test_display_name_defaults_to_none_and_is_persisted(client, auth_headers):
     resp = client.get("/v1/auth/me", headers=auth_headers)
     assert resp.json()["display_name"] is None
