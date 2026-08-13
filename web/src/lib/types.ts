@@ -210,6 +210,39 @@ export interface BacktestAccuracySummary {
   } | null;
 }
 
+// GET /v1/scoreboard's response shape -- the live "does the model beat
+// doing nothing" scoreboard (see app/reasoning/call_tracker.py). Every
+// percentage/sample_size is null, not 0, when a window has zero scored
+// checkpoints yet -- that distinction is what lets the frontend show
+// "not enough data" instead of a misleading 0%.
+export interface ScoreboardPrecision {
+  correct: number;
+  total: number;
+  precision_pct: number | null;
+}
+
+export interface ScoreboardWindow {
+  model_accuracy_pct: number | null;
+  sample_size: number;
+  pending_count: number;
+  always_buy_accuracy_pct: number | null;
+  always_hold_accuracy_pct: number | null;
+  breakdown: {
+    buy: ScoreboardPrecision;
+    sell: ScoreboardPrecision;
+    hold: ScoreboardPrecision;
+  };
+}
+
+export interface ScoreboardResponse {
+  windows: {
+    "7": ScoreboardWindow;
+    "30": ScoreboardWindow;
+    "90": ScoreboardWindow;
+  };
+  generated_at: number;
+}
+
 // GET /v1/stocks/{ticker}/overview's response shape -- powers
 // web/src/app/stock/[ticker]/page.tsx's header/price-statistics/
 // fundamentals/company-info cards. Every numeric field here is null
