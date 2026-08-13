@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import fixWebmDuration from "fix-webm-duration";
 
 // Hard recording ceiling, not a substitute for silence detection below --
 // margin under Sarvam's synchronous STT endpoint's own 30s cap (see
@@ -22,6 +21,74 @@ const SILENCE_RMS_THRESHOLD = 0.02;
 const SILENCE_HOLD_MS = 1600;
 
 type VoiceState = "idle" | "recording" | "transcribing" | "error";
+
+// Sarvam's /speech-to-text endpoint rejects webm/opus outright (only
+// wav/mp3/aac/... are accepted) -- but MediaRecorder can't record
+// directly to any of those, webm/opus is the only format every browser
+// actually supports recording to. So: decode the recorded blob via the
+// Web Audio API and re-encode it as a plain 16-bit PCM WAV file before
+// upload. This also sidesteps the webm-duration-header problem
+// (fixWebmDuration existed only to patch that) since a WAV header
+// always carries its own correct length.
+async function blobToWavBlob(blob: Blob): Promise<Blob> {
+  const arrayBuffer = await blob.arrayBuffer();
+  const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  const audioContext = new AudioContextCtor();
+  try {
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    return encodeWav(audioBuffer);
+  } finally {
+    void audioContext.close();
+  }
+}
+
+// Minimal RIFF/PCM encoder -- mono/stereo 16-bit little-endian samples,
+// downmixed to mono (Sarvam's STT has no use for stereo and it halves
+// upload size). Standard 44-byte WAV header, no compression, no
+// external library needed for this well-known format.
+function encodeWav(audioBuffer: AudioBuffer): Blob {
+  const numFrames = audioBuffer.length;
+  const sampleRate = audioBuffer.sampleRate;
+  const numChannels = audioBuffer.numberOfChannels;
+
+  const mono = new Float32Array(numFrames);
+  for (let ch = 0; ch < numChannels; ch++) {
+    const channelData = audioBuffer.getChannelData(ch);
+    for (let i = 0; i < numFrames; i++) mono[i] += channelData[i] / numChannels;
+  }
+
+  const bytesPerSample = 2;
+  const dataSize = numFrames * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  function writeString(offset: number, s: string) {
+    for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i));
+  }
+
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, "WAVE");
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true); // fmt chunk size
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * bytesPerSample, true); // byte rate
+  view.setUint16(32, bytesPerSample, true); // block align
+  view.setUint16(34, 16, true); // bits per sample
+  writeString(36, "data");
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+  for (let i = 0; i < numFrames; i++) {
+    const sample = Math.max(-1, Math.min(1, mono[i]));
+    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+    offset += bytesPerSample;
+  }
+
+  return new Blob([buffer], { type: "audio/wav" });
+}
 
 function MicIcon({ active }: { active: boolean }) {
   return (
@@ -62,7 +129,6 @@ export default function VoiceInputButton({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const recordingStartRef = useRef(0);
 
   // Silence-detection plumbing -- torn down in stopSilenceWatch, called
   // from both the normal onstop path and the error path, so a denied
@@ -155,20 +221,18 @@ export default function VoiceInputButton({
           stopTimerRef.current = null;
         }
         const rawBlob = new Blob(chunksRef.current, { type: mimeType });
-        const durationMs = performance.now() - recordingStartRef.current;
-        // MediaRecorder's webm output has no duration in its header
-        // (browsers write it incrementally and never know the final
-        // length) -- Sarvam's API rejects that with a 400 indistinguishable
-        // from genuinely malformed audio. fixWebmDuration patches the
-        // real elapsed time into the blob's EBML header before upload.
-        void fixWebmDuration(rawBlob, durationMs, { logger: false })
-          .then((fixedBlob) => transcribe(fixedBlob))
-          .catch(() => transcribe(rawBlob)); // fall back to the unfixed blob rather than losing the recording entirely
+        // Sarvam's STT endpoint rejects webm/opus outright -- decode
+        // and re-encode as WAV (see blobToWavBlob above) before upload.
+        void blobToWavBlob(rawBlob)
+          .then((wavBlob) => transcribe(wavBlob))
+          .catch(() => {
+            setState("error");
+            setErrorMessage("Couldn't process the recording. Please try again or type your question.");
+          });
       };
 
       recorder.start();
       mediaRecorderRef.current = recorder;
-      recordingStartRef.current = performance.now();
       setState("recording");
       stopTimerRef.current = setTimeout(() => stopRecording(), MAX_RECORDING_MS);
       watchForSilence();
@@ -187,7 +251,7 @@ export default function VoiceInputButton({
     setState("transcribing");
     try {
       const formData = new FormData();
-      formData.set("file", blob, "recording.webm");
+      formData.set("file", blob, "recording.wav");
       const resp = await fetch("/api/voice/transcribe", { method: "POST", body: formData });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.message || "Voice transcription failed. Please try again or type your question.");
