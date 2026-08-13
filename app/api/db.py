@@ -151,6 +151,23 @@ def init_db() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN display_name TEXT")
         except sqlite3.OperationalError:
             pass  # column already exists
+        # Onboarding preferences -- same nullable-with-no-backfill
+        # pattern as risk_tolerance above. onboarding_completed is
+        # INTEGER 0/1 (SQLite has no native BOOLEAN); NULL/0 both read
+        # as "not completed" at the API layer (see main.py), so an
+        # existing pre-migration row (NULL) correctly gates through
+        # onboarding once, same as a brand-new signup.
+        for column, ddl_type in (
+            ("onboarding_completed", "INTEGER"),
+            ("investment_goal", "TEXT"),
+            ("investment_horizon", "TEXT"),
+            ("interested_in_crypto", "INTEGER"),
+            ("interested_in_real_estate", "INTEGER"),
+        ):
+            try:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {column} {ddl_type}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
         # session_token is the primary key, not user_id -- a user can
         # hold multiple valid sessions at once (e.g. two browser tabs
         # each logging in independently), and logout must invalidate
@@ -310,6 +327,32 @@ def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
 def set_risk_tolerance(user_id: str, risk_tolerance: str) -> None:
     with _connect() as conn:
         conn.execute("UPDATE users SET risk_tolerance=? WHERE user_id=?", (risk_tolerance, user_id))
+
+
+def set_onboarding_preferences(
+    user_id: str,
+    risk_tolerance: str,
+    investment_goal: str,
+    investment_horizon: str,
+    interested_in_crypto: bool,
+    interested_in_real_estate: bool,
+) -> None:
+    """One-shot write for the onboarding questionnaire -- sets
+    risk_tolerance (reusing the same column update_risk_tolerance's
+    endpoint writes to, so a later profile-page edit still just calls
+    set_risk_tolerance independently) plus the new preference columns,
+    and flips onboarding_completed so AuthGate stops gating this user."""
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE users
+            SET risk_tolerance=?, investment_goal=?, investment_horizon=?,
+                interested_in_crypto=?, interested_in_real_estate=?, onboarding_completed=1
+            WHERE user_id=?
+            """,
+            (risk_tolerance, investment_goal, investment_horizon,
+             int(interested_in_crypto), int(interested_in_real_estate), user_id),
+        )
 
 
 def set_display_name(user_id: str, display_name: str | None) -> None:
