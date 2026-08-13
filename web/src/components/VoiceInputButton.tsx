@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 // Hard recording ceiling, not a substitute for silence detection below --
 // margin under Sarvam's synchronous STT endpoint's own 30s cap (see
@@ -20,7 +20,17 @@ const MAX_RECORDING_MS = 25_000;
 const SILENCE_RMS_THRESHOLD = 0.02;
 const SILENCE_HOLD_MS = 1600;
 
-type VoiceState = "idle" | "recording" | "transcribing" | "error";
+export type VoiceState = "idle" | "recording" | "transcribing" | "error";
+
+export interface VoiceInputHandle {
+  // Imperative start, for a caller that needs to arm the mic without a
+  // click -- the voice-session loop (chat/page.tsx) re-arms it itself
+  // right after a spoken reply finishes, which is never a click event.
+  start: () => void;
+  // Imperative stop, for a caller ending a session mid-recording (the
+  // user hit "end session" while the mic was still listening).
+  stop: () => void;
+}
 
 // Sarvam's /speech-to-text endpoint rejects webm/opus outright (only
 // wav/mp3/aac/... are accepted) -- but MediaRecorder can't record
@@ -90,7 +100,7 @@ function encodeWav(audioBuffer: AudioBuffer): Blob {
   return new Blob([buffer], { type: "audio/wav" });
 }
 
-function MicIcon({ active }: { active: boolean }) {
+export function MicIcon({ active }: { active: boolean }) {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
       <rect x="9" y="2" width="6" height="12" rx="3" />
@@ -110,16 +120,15 @@ function SpinnerIcon() {
   );
 }
 
-// Peer of the question <input> in page.tsx -- only ever calls
-// onTranscript (page.tsx's setQuery), never submits/runs anything
-// itself. A misheard word should cost nothing more than the Sarvam
-// call; the user reviews/edits the filled-in text before hitting the
-// existing submit button themselves.
-export default function VoiceInputButton({
-  onTranscript,
-  disabled,
-  onRecordingStart,
-}: {
+// Peer of the question <input> in page.tsx -- by default only ever
+// calls onTranscript (page.tsx's setQuery), never submits/runs
+// anything itself, so a misheard word costs nothing more than the
+// Sarvam call and the user reviews/edits before hitting submit
+// themselves. The voice-session loop (chat/page.tsx) is the one
+// caller that treats onTranscript as an auto-submit signal instead --
+// that's a decision the caller makes, this component's own contract
+// doesn't change.
+const VoiceInputButton = forwardRef<VoiceInputHandle, {
   onTranscript: (text: string) => void;
   disabled?: boolean;
   // Fired the instant recording actually starts (mic permission
@@ -129,7 +138,13 @@ export default function VoiceInputButton({
   // existing caller (page.tsx, chat/page.tsx's text-fill usage) is
   // unaffected.
   onRecordingStart?: () => void;
-}) {
+  // Fired whenever the internal idle/recording/transcribing/error
+  // state changes -- lets a caller (the voice-session loop) render one
+  // unified status indicator that spans both this component's own
+  // recording state and its own TTS-playback state, without
+  // duplicating this component's state machine.
+  onStateChange?: (state: VoiceState) => void;
+}>(function VoiceInputButton({ onTranscript, disabled, onRecordingStart, onStateChange }, ref) {
   const [state, setState] = useState<VoiceState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [supported, setSupported] = useState(true);
@@ -147,6 +162,13 @@ export default function VoiceInputButton({
   const rafRef = useRef<number | null>(null);
   const hasSpokenRef = useRef(false);
   const lastLoudAtRef = useRef(0);
+
+  useImperativeHandle(ref, () => ({ start: () => void startRecording(), stop: stopRecording }), []);
+
+  useEffect(() => {
+    onStateChange?.(state);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
 
   useEffect(() => {
     setSupported(
@@ -312,4 +334,6 @@ export default function VoiceInputButton({
       )}
     </div>
   );
-}
+});
+
+export default VoiceInputButton;
