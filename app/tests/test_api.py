@@ -731,6 +731,55 @@ def test_backtest_accuracy_is_registered_before_the_job_id_route(client, auth_he
     assert resp.json().get("code") != "JOB_NOT_FOUND"
 
 
+# ---------------------------------------------------------------- live scoreboard
+
+def test_scoreboard_returns_the_real_computed_summary(client, monkeypatch, auth_headers):
+    fake_board = {
+        "windows": {
+            "7": {"model_accuracy_pct": 41.2, "sample_size": 34, "pending_count": 12,
+                  "always_buy_accuracy_pct": 58.8, "always_hold_accuracy_pct": 47.1,
+                  "breakdown": {"buy": {"correct": 9, "total": 15, "precision_pct": 60.0},
+                                "sell": {"correct": 2, "total": 8, "precision_pct": 25.0},
+                                "hold": {"correct": 6, "total": 11, "precision_pct": 54.5}}},
+            "30": {"model_accuracy_pct": None, "sample_size": 0, "pending_count": 5,
+                   "always_buy_accuracy_pct": None, "always_hold_accuracy_pct": None,
+                   "breakdown": {"buy": {"correct": 0, "total": 0, "precision_pct": None},
+                                 "sell": {"correct": 0, "total": 0, "precision_pct": None},
+                                 "hold": {"correct": 0, "total": 0, "precision_pct": None}}},
+            "90": {"model_accuracy_pct": None, "sample_size": 0, "pending_count": 5,
+                   "always_buy_accuracy_pct": None, "always_hold_accuracy_pct": None,
+                   "breakdown": {"buy": {"correct": 0, "total": 0, "precision_pct": None},
+                                 "sell": {"correct": 0, "total": 0, "precision_pct": None},
+                                 "hold": {"correct": 0, "total": 0, "precision_pct": None}}},
+        },
+        "generated_at": 1755000000.0,
+    }
+    monkeypatch.setattr(main, "get_scoreboard", lambda: fake_board)
+
+    resp = client.get("/v1/scoreboard", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.json() == fake_board
+
+
+def test_scoreboard_requires_a_session(client):
+    resp = client.get("/v1/scoreboard")
+    assert resp.status_code == 401
+
+
+def test_scoreboard_never_404s_with_zero_tracked_calls(client, auth_headers):
+    # No monkeypatching -- exercises the real get_scoreboard() against
+    # this test's own empty temp DB, confirming the "no tracked calls
+    # yet" state is a normal 200 with null stats, never an error.
+    resp = client.get("/v1/scoreboard", headers=auth_headers)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body["windows"].keys()) == {"7", "30", "90"}
+    assert body["windows"]["7"]["model_accuracy_pct"] is None
+    assert body["windows"]["7"]["sample_size"] == 0
+
+
 # ---------------------------------------------------------------- per-user auth
 
 def test_signup_then_login_both_work(client):
