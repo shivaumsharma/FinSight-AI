@@ -181,3 +181,29 @@ def test_build_stock_insights_propagates_ticker_not_found(monkeypatch):
     except Exception as e:
         from app.data.market_data import TickerNotFoundError
         assert isinstance(e, TickerNotFoundError)
+
+
+# ---------------------------------------------------------------- crypto degrades cleanly, no crash
+
+def test_build_stock_insights_degrades_cleanly_for_a_crypto_ticker(monkeypatch):
+    """Crypto has no financial statements -- ValuationTool's own crypto
+    guard (see valuation_tool.py) returns a DCF-unavailable-shaped
+    result instead of letting MarketDataTool's statement fetch raise.
+    This context mirrors exactly what MarketDataTool.run() sets for a
+    crypto ticker: empty (not None) normalized_financials, company_info
+    with only a current_price -- no financial fields at all."""
+    import pandas as pd
+
+    ctx = ResearchContext(ticker="BTC-USD", question="Should I invest in BTC-USD?")
+    ctx.normalized_financials = pd.DataFrame()
+    ctx.company_info = {"current_price": 63749.01, "currency": "USD"}
+    monkeypatch.setattr(ss, "ResearchContext", lambda ticker, question: ctx)
+    monkeypatch.setattr(ir_module, "fetch_institutional_ratings", lambda ticker: [])
+
+    result = ss.build_stock_insights("BTC-USD")
+
+    assert result["rating"] == "Insufficient Data"
+    assert result["current_price"] == 63749.01
+    assert result["fair_value_estimate"] is None
+    assert result["overall_score"] is None
+    assert all(v is None for v in result["category_scores"].values())

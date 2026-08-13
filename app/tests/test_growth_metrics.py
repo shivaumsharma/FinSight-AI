@@ -148,3 +148,17 @@ def test_build_financial_performance_uses_quarterly_statements_when_requested(mo
 
     assert len(rows) == 2
     assert rows[-1]["revenue"] == 45.0
+
+
+def test_build_growth_metrics_degrades_cleanly_for_a_crypto_ticker():
+    result = growth_metrics.build_growth_metrics("BTC-USD")
+    assert result == {
+        "revenue_cagr": {"1y": None, "3y": None, "5y": None},
+        "eps_cagr": {"1y": None, "3y": None, "5y": None},
+        "book_value_cagr": {"1y": None, "3y": None, "5y": None},
+        "fcf_cagr": {"1y": None, "3y": None, "5y": None},
+    }
+
+
+def test_build_financial_performance_degrades_cleanly_for_a_crypto_ticker():
+    assert growth_metrics.build_financial_performance("ETH-USD") == []
