@@ -112,3 +112,21 @@ def test_get_stock_overview_includes_next_earnings_date(monkeypatch):
     result = stock_overview.get_stock_overview("ABC")
 
     assert result["next_earnings_date"] == tomorrow.isoformat()
+
+
+def test_get_stock_overview_flags_a_crypto_ticker(monkeypatch):
+    _patch_quote(monkeypatch, {"price": 63749.01, "change_pct": 0.5, "previous_close": 63400.0, "currency": "USD"})
+    _patch_loader(monkeypatch, {"longName": "Bitcoin USD"})
+
+    result = stock_overview.get_stock_overview("BTC-USD")
+
+    assert result["is_crypto"] is True
+
+
+def test_get_stock_overview_does_not_flag_a_regular_equity(monkeypatch):
+    _patch_quote(monkeypatch, {"price": 227.5, "change_pct": 1.2, "previous_close": 224.8, "currency": "USD"})
+    _patch_loader(monkeypatch, {"longName": "Apple Inc."})
+
+    result = stock_overview.get_stock_overview("AAPL")
+
+    assert result["is_crypto"] is False
