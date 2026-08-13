@@ -33,6 +33,7 @@ import requests
 from rapidfuzz import fuzz, process
 from rapidfuzz.utils import default_process
 
+from app.data.crypto_resolver import resolve_crypto_mentions
 from app.data.sec_edgar_client import HEADERS
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -452,6 +453,15 @@ def resolve_companies(question: str) -> List[str]:
         upper_token = token.upper()
         if upper_token in nse_index["tickers"] and upper_token not in found:
             found.append(upper_token)
+
+    # Crypto is a third, independent lookup (see crypto_resolver.py) --
+    # deliberately not merged into `index`/`nse_index` above, since
+    # crypto tickers have no financial-statement/DCF-eligible company
+    # behind them and downstream code (ValuationTool, etc.) needs to
+    # tell them apart from an equity ticker, not just resolve a symbol.
+    for ticker in resolve_crypto_mentions(question):
+        if ticker not in found:
+            found.append(ticker)
 
     lowered = question.lower()
     for alias, ticker in ALIASES.items():
