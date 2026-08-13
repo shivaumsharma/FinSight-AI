@@ -35,7 +35,10 @@ from app.core.retry import retry_on_transient_error
 
 SARVAM_TTS_URL = "https://api.sarvam.ai/text-to-speech"
 DEFAULT_MODEL = "bulbul:v3"
-DEFAULT_SPEAKER = "Shubh"
+# Lowercase, confirmed against a live 400 response -- Sarvam's own docs
+# display speaker names capitalized (e.g. "Shubh"), but the real API
+# rejects that and only accepts the lowercase form.
+DEFAULT_SPEAKER = "shubh"
 DEFAULT_LANGUAGE_CODE = "en-IN"
 MAX_TEXT_CHARS = 2500
 
