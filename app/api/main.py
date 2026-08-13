@@ -416,6 +416,14 @@ def me(authorization: str = Header(default=None), current_user: str = Depends(au
         # None when unset -- the frontend's own displayNameFromEmail
         # heuristic is the fallback (see page.tsx), not duplicated here.
         "display_name": user["display_name"] if user else None,
+        # Gates AuthGate.tsx -- False for both a fresh signup (NULL) and
+        # any pre-existing account from before this column existed, so
+        # everyone hits the one-time questionnaire exactly once.
+        "onboarding_completed": bool(user["onboarding_completed"]) if user else False,
+        "investment_goal": user["investment_goal"] if user else None,
+        "investment_horizon": user["investment_horizon"] if user else None,
+        "interested_in_crypto": bool(user["interested_in_crypto"]) if user else False,
+        "interested_in_real_estate": bool(user["interested_in_real_estate"]) if user else False,
     }
 
 
@@ -440,6 +448,52 @@ def update_risk_tolerance(body: RiskToleranceRequest, current_user: str = Depend
     # (a separate, larger feature). Real and saved, not decorative.
     db.set_risk_tolerance(current_user, body.risk_tolerance)
     return {"status": "ok", "risk_tolerance": body.risk_tolerance}
+
+
+_INVESTMENT_GOAL_LEVELS = ("Wealth Growth", "Retirement", "Income", "Capital Preservation")
+_INVESTMENT_HORIZON_LEVELS = ("Short-term (<3y)", "Medium (3-7y)", "Long-term (7y+)")
+
+
+class OnboardingRequest(BaseModel):
+    risk_tolerance: str
+    investment_goal: str
+    investment_horizon: str
+    interested_in_crypto: bool
+    interested_in_real_estate: bool
+
+    @field_validator("risk_tolerance")
+    @classmethod
+    def _valid_risk(cls, v: str) -> str:
+        if v not in _RISK_TOLERANCE_LEVELS:
+            raise ValueError(f"risk_tolerance must be one of {_RISK_TOLERANCE_LEVELS}")
+        return v
+
+    @field_validator("investment_goal")
+    @classmethod
+    def _valid_goal(cls, v: str) -> str:
+        if v not in _INVESTMENT_GOAL_LEVELS:
+            raise ValueError(f"investment_goal must be one of {_INVESTMENT_GOAL_LEVELS}")
+        return v
+
+    @field_validator("investment_horizon")
+    @classmethod
+    def _valid_horizon(cls, v: str) -> str:
+        if v not in _INVESTMENT_HORIZON_LEVELS:
+            raise ValueError(f"investment_horizon must be one of {_INVESTMENT_HORIZON_LEVELS}")
+        return v
+
+
+@app.patch("/v1/auth/onboarding")
+def update_onboarding(body: OnboardingRequest, current_user: str = Depends(auth.get_current_user)):
+    """One-time questionnaire, gated client-side by AuthGate.tsx on
+    GET /v1/auth/me's onboarding_completed flag -- this endpoint itself
+    stays callable any time (same as risk-tolerance), so a user who
+    wants to redo it later from the profile page isn't blocked."""
+    db.set_onboarding_preferences(
+        current_user, body.risk_tolerance, body.investment_goal, body.investment_horizon,
+        body.interested_in_crypto, body.interested_in_real_estate,
+    )
+    return {"status": "ok"}
 
 
 class DisplayNameRequest(BaseModel):
