@@ -65,7 +65,7 @@ from app.reasoning.backtest_stats import get_backtest_accuracy_summary
 from app.reasoning.call_tracker import check_matured_checkpoints, get_scoreboard
 from app.reasoning.market_movers import get_top_movers
 from app.reasoning.model_consensus import compute_consensus, get_model_opinions, get_stock_model_opinions
-from app.reasoning.chat_router import handle_chat_message
+from app.reasoning.chat_router import MAX_HISTORY_MESSAGES, handle_chat_message
 from app.reasoning.portfolio_fit import get_portfolio_fit_for_ticker
 from app.reasoning.real_estate_guidance import get_real_estate_guidance
 from app.reporting.news_client import fetch_company_news, fetch_market_news
@@ -1123,8 +1123,13 @@ def post_chat_message(body: ChatMessageRequest, current_user: str = Depends(auth
     # this endpoint's bottleneck too. Both turns are persisted
     # regardless of how the assistant's turn was produced, so
     # GET /v1/chat/history always reflects the real conversation.
+    #
+    # History is fetched BEFORE persisting this message -- handle_chat_
+    # message needs "everything before now", not a list that already
+    # includes the message it's about to classify.
+    history = db.list_chat_messages(current_user, limit=MAX_HISTORY_MESSAGES)
     db.add_chat_message(current_user, "user", body.message)
-    result = handle_chat_message(current_user, body.message)
+    result = handle_chat_message(current_user, body.message, history)
     db.add_chat_message(current_user, "assistant", result["reply"], intent=result["intent"], ticker=result["ticker"])
     return result
 

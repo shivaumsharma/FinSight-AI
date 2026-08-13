@@ -506,7 +506,7 @@ def test_stock_portfolio_fit_requires_auth(client):
 
 def test_post_chat_message_returns_the_reply_and_persists_both_turns(client, monkeypatch, auth_headers):
     fake_result = {"reply": "You have no holdings yet.", "intent": "portfolio_status", "ticker": None}
-    monkeypatch.setattr(main, "handle_chat_message", lambda user_id, message: fake_result)
+    monkeypatch.setattr(main, "handle_chat_message", lambda user_id, message, history: fake_result)
 
     resp = client.post("/v1/chat", json={"message": "hows my portfolio"}, headers=auth_headers)
 
@@ -518,6 +518,27 @@ def test_post_chat_message_returns_the_reply_and_persists_both_turns(client, mon
     assert history[0]["content"] == "hows my portfolio"
     assert history[1]["content"] == "You have no holdings yet."
     assert history[1]["intent"] == "portfolio_status"
+
+
+def test_post_chat_message_passes_prior_history_not_including_the_current_message(client, monkeypatch, auth_headers):
+    # The message being classified right now must never appear inside
+    # its own "history" argument -- history is everything BEFORE it.
+    monkeypatch.setattr(
+        main, "handle_chat_message",
+        lambda user_id, message, history: {"reply": "first reply", "intent": "general", "ticker": None},
+    )
+    client.post("/v1/chat", json={"message": "first message"}, headers=auth_headers)
+
+    captured = {}
+
+    def _fake_handle_second(user_id, message, history):
+        captured["history"] = history
+        return {"reply": "second reply", "intent": "general", "ticker": None}
+
+    monkeypatch.setattr(main, "handle_chat_message", _fake_handle_second)
+    client.post("/v1/chat", json={"message": "second message"}, headers=auth_headers)
+
+    assert [m["content"] for m in captured["history"]] == ["first message", "first reply"]
 
 
 def test_post_chat_message_rejects_a_blank_message(client, auth_headers):
