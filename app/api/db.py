@@ -304,6 +304,48 @@ def init_db() -> None:
             )
             """
         )
+        # Live "does the model beat doing nothing" scoreboard -- see
+        # app/reasoning/call_tracker.py. job_id is informational only
+        # (traceability back to the report), not a foreign key -- same
+        # no-FK-enforcement convention every other table here uses.
+        # "Insufficient Data" calls are never inserted at all (see
+        # call_tracker.log_tracked_call), so rating is NOT NULL here.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tracked_calls (
+                call_id TEXT PRIMARY KEY,
+                job_id TEXT,
+                ticker TEXT NOT NULL,
+                rating TEXT NOT NULL,
+                confidence REAL,
+                currency TEXT NOT NULL,
+                price_at_call REAL NOT NULL,
+                called_at REAL NOT NULL
+            )
+            """
+        )
+        # One row per (call, window) -- not one wide tracked_calls row
+        # per window -- so adding a 4th tracked window later is a new
+        # row shape, not a schema migration. model_correct/
+        # always_buy_correct/always_hold_correct are NULL until
+        # scored_at is set: that NULL is the "hasn't matured yet" flag
+        # the scoreboard API needs, not a missing/broken value.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tracked_call_checkpoints (
+                call_id TEXT NOT NULL,
+                window_days INTEGER NOT NULL,
+                checkpoint_date REAL NOT NULL,
+                price_at_checkpoint REAL,
+                realized_return_pct REAL,
+                model_correct INTEGER,
+                always_buy_correct INTEGER,
+                always_hold_correct INTEGER,
+                scored_at REAL,
+                PRIMARY KEY (call_id, window_days)
+            )
+            """
+        )
 
 
 # ---------------------------------------------------------------- users/sessions
@@ -991,6 +1033,116 @@ def list_chat_messages(user_id: str, limit: int = 50) -> list:
             (user_id, limit),
         ).fetchall()
     return [dict(r) for r in reversed(rows)]
+
+
+# ---------------------------------------------------------------- scoreboard (live call-outcome tracking)
+
+TRACKED_WINDOWS_DAYS = (7, 30, 90)
+
+
+def insert_tracked_call(
+    job_id: Optional[str], ticker: str, rating: str, confidence: Optional[float],
+    currency: str, price_at_call: float, called_at: float,
+) -> str:
+    """Writes one tracked_calls row plus one tracked_call_checkpoints
+    row per TRACKED_WINDOWS_DAYS entry, each with checkpoint_date
+    precomputed from called_at -- the checkpoint's own due date never
+    needs recomputing later, just compared against "now"."""
+    call_id = str(uuid.uuid4())
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO tracked_calls (call_id, job_id, ticker, rating, confidence, currency, price_at_call, called_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (call_id, job_id, ticker, rating, confidence, currency, price_at_call, called_at),
+        )
+        for window_days in TRACKED_WINDOWS_DAYS:
+            checkpoint_date = called_at + window_days * 86400
+            conn.execute(
+                """
+                INSERT INTO tracked_call_checkpoints (call_id, window_days, checkpoint_date)
+                VALUES (?, ?, ?)
+                """,
+                (call_id, window_days, checkpoint_date),
+            )
+    return call_id
+
+
+def list_maturable_checkpoints(now: float) -> list:
+    """Checkpoints due to be scored: not yet scored, and their
+    checkpoint_date has arrived. Joined with tracked_calls for the
+    ticker/rating the outcome sweep needs to actually score them --
+    same reasoning db.get_latest_rating_for_ticker's own join comment
+    gives elsewhere, avoid a second round-trip per row."""
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT c.call_id, c.window_days, c.checkpoint_date, t.ticker, t.rating, t.currency, t.price_at_call
+            FROM tracked_call_checkpoints c
+            JOIN tracked_calls t ON t.call_id = c.call_id
+            WHERE c.scored_at IS NULL AND c.checkpoint_date <= ?
+            """,
+            (now,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def record_checkpoint_outcome(
+    call_id: str, window_days: int, price_at_checkpoint: float, realized_return_pct: float,
+    model_correct: Optional[bool], always_buy_correct: Optional[bool], always_hold_correct: Optional[bool],
+    scored_at: float,
+) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE tracked_call_checkpoints
+            SET price_at_checkpoint=?, realized_return_pct=?, model_correct=?,
+                always_buy_correct=?, always_hold_correct=?, scored_at=?
+            WHERE call_id=? AND window_days=?
+            """,
+            (
+                price_at_checkpoint, realized_return_pct,
+                None if model_correct is None else int(model_correct),
+                None if always_buy_correct is None else int(always_buy_correct),
+                None if always_hold_correct is None else int(always_hold_correct),
+                scored_at, call_id, window_days,
+            ),
+        )
+
+
+def list_scored_checkpoints(window_days: int) -> list:
+    """Every SCORED checkpoint for one window, with the call's own
+    rating joined in -- what get_scoreboard() aggregates into the
+    model/baseline accuracy and Buy/Sell/Hold breakdown. Never includes
+    a still-pending (scored_at IS NULL) row."""
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT c.realized_return_pct, c.model_correct, c.always_buy_correct, c.always_hold_correct, t.rating
+            FROM tracked_call_checkpoints c
+            JOIN tracked_calls t ON t.call_id = c.call_id
+            WHERE c.window_days=? AND c.scored_at IS NOT NULL
+            """,
+            (window_days,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def count_pending_checkpoints(window_days: int) -> int:
+    """Tracked calls for this window that haven't been scored yet --
+    regardless of whether checkpoint_date has arrived, since a call
+    tracked 2 days ago for the 90-day window is just as much "not
+    resolved yet" as one whose checkpoint date already passed but
+    hasn't been swept."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM tracked_call_checkpoints WHERE window_days=? AND scored_at IS NULL",
+            (window_days,),
+        ).fetchone()
+    return row[0]
 
 
 def reconcile_interrupted_jobs() -> int:
