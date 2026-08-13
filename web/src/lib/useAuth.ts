@@ -17,6 +17,11 @@ interface AuthState {
   resetAt: number | null;
   waitlistFeatures: string[];
   displayName: string | null;
+  onboardingCompleted: boolean;
+  investmentGoal: string | null;
+  investmentHorizon: string | null;
+  interestedInCrypto: boolean;
+  interestedInRealEstate: boolean;
   error: string | null;
 }
 
@@ -33,6 +38,11 @@ const UNAUTHENTICATED_STATE: AuthState = {
   resetAt: null,
   waitlistFeatures: [],
   displayName: null,
+  onboardingCompleted: false,
+  investmentGoal: null,
+  investmentHorizon: null,
+  interestedInCrypto: false,
+  interestedInRealEstate: false,
   error: null,
 };
 
@@ -60,6 +70,11 @@ export function useAuth() {
           resetAt: data.reset_at ?? null,
           waitlistFeatures: data.waitlist_features ?? [],
           displayName: data.display_name ?? null,
+          onboardingCompleted: data.onboarding_completed ?? false,
+          investmentGoal: data.investment_goal ?? null,
+          investmentHorizon: data.investment_horizon ?? null,
+          interestedInCrypto: data.interested_in_crypto ?? false,
+          interestedInRealEstate: data.interested_in_real_estate ?? false,
           error: null,
         });
       } else {
@@ -174,5 +189,39 @@ export function useAuth() {
     }).catch(() => {});
   }, []);
 
-  return { ...state, signup, login, logout, deleteAccount, setRiskTolerance, joinWaitlist, setDisplayName };
+  // NOT optimistic, unlike setRiskTolerance/joinWaitlist/setDisplayName
+  // above -- onboardingCompleted gates AuthGate.tsx's whole render
+  // branch, so flipping it locally before the server confirms the save
+  // would let a user past the one-time questionnaire on a request that
+  // actually failed, with no way back to it since AuthGate wouldn't
+  // show it again.
+  const completeOnboarding = useCallback(async (answers: {
+    riskTolerance: string; investmentGoal: string; investmentHorizon: string;
+    interestedInCrypto: boolean; interestedInRealEstate: boolean;
+  }) => {
+    setState((s) => ({ ...s, error: null }));
+    const resp = await fetch("/api/auth/onboarding", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        risk_tolerance: answers.riskTolerance,
+        investment_goal: answers.investmentGoal,
+        investment_horizon: answers.investmentHorizon,
+        interested_in_crypto: answers.interestedInCrypto,
+        interested_in_real_estate: answers.interestedInRealEstate,
+      }),
+    });
+    if (resp.ok) {
+      await checkSession();
+      return true;
+    }
+    const body = await resp.json().catch(() => ({ message: "Something went wrong." }));
+    setState((s) => ({ ...s, error: body.message || "Couldn't save your preferences." }));
+    return false;
+  }, [checkSession]);
+
+  return {
+    ...state, signup, login, logout, deleteAccount, setRiskTolerance, joinWaitlist, setDisplayName,
+    completeOnboarding,
+  };
 }
