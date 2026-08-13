@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import AuthGate from "@/components/AuthGate";
 import BottomNav from "@/components/BottomNav";
+import RealEstateGuidanceCard from "@/components/RealEstateGuidanceCard";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import { useTheme } from "@/lib/useTheme";
 import type { WatchlistItem } from "@/lib/types";
@@ -597,6 +598,10 @@ function ProfilePage({
             value="~45s"
             hint="Watchlist prices are cached for up to 45 seconds to avoid hammering the market data provider on every page load. Report prices are always fetched fresh, never cached."
           />
+        </div>
+
+        <div className="mt-3">
+          <RealEstateGuidanceCard />
         </div>
 
         <SectionHeader icon={<SourcesIcon />} label="CONNECTED SOURCES" />
