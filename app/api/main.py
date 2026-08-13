@@ -64,9 +64,11 @@ from app.data.stock_overview import get_stock_overview
 from app.reasoning.backtest_stats import get_backtest_accuracy_summary
 from app.reasoning.market_movers import get_top_movers
 from app.reasoning.model_consensus import compute_consensus, get_model_opinions, get_stock_model_opinions
+from app.reasoning.chat_router import handle_chat_message
 from app.reasoning.portfolio_fit import get_portfolio_fit_for_ticker
 from app.reasoning.real_estate_guidance import get_real_estate_guidance
 from app.reporting.news_client import fetch_company_news, fetch_market_news
+from app.reporting.portfolio_summary import build_portfolio_view
 
 TIMEOUT_SWEEP_INTERVAL_SECONDS = 60
 
@@ -1025,6 +1027,36 @@ def stock_portfolio_fit(ticker: str, current_user: str = Depends(auth.get_curren
     return get_portfolio_fit_for_ticker(ticker.upper(), holdings)
 
 
+class ChatMessageRequest(BaseModel):
+    message: str
+
+    @field_validator("message")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("message must not be blank")
+        return v
+
+
+@app.post("/v1/chat")
+def post_chat_message(body: ChatMessageRequest, current_user: str = Depends(auth.get_current_user)):
+    # Deliberately NOT the jobs/ThreadPoolExecutor machinery -- see
+    # chat_router.py's own module docstring for why the full research
+    # pipeline's MAX_CONCURRENT_JOBS=1 serialization must not become
+    # this endpoint's bottleneck too. Both turns are persisted
+    # regardless of how the assistant's turn was produced, so
+    # GET /v1/chat/history always reflects the real conversation.
+    db.add_chat_message(current_user, "user", body.message)
+    result = handle_chat_message(current_user, body.message)
+    db.add_chat_message(current_user, "assistant", result["reply"], intent=result["intent"], ticker=result["ticker"])
+    return result
+
+
+@app.get("/v1/chat/history")
+def get_chat_history(limit: int = Query(50, ge=1, le=200), current_user: str = Depends(auth.get_current_user)):
+    return {"messages": db.list_chat_messages(current_user, limit)}
+
+
 @app.post("/v1/stocks/{ticker}/model-compare")
 def stock_model_compare(ticker: str, current_user: str = Depends(auth.get_current_user)):
     """Model Compare for the stock-detail-page -- see
@@ -1148,108 +1180,10 @@ def remove_from_watchlist(ticker: str, current_user: str = Depends(auth.get_curr
 
 @app.get("/v1/portfolio")
 def get_portfolio(current_user: str = Depends(auth.get_current_user)):
-    # Each holding displays in its OWN native currency (price/cost_basis/
-    # market_value/today_pnl are never converted at the per-holding
-    # level) -- but the aggregate summary below needs one common unit
-    # to sum across a mixed USD/INR portfolio meaningfully, so summary
-    # totals are converted to USD equivalent via a live FX rate
-    # (get_usd_conversion_rate). A holding whose currency has no known
-    # FX rate is shown correctly on its own row but excluded from the
-    # summary totals (mixed_currency_excluded flags this for the UI)
-    # rather than silently mixing incompatible units again.
-    holdings = []
-    total_market_value = 0.0
-    total_cost_basis = 0.0
-    total_today_pnl = 0.0
-    # Denominator for total_today_pnl_pct -- only the market value of
-    # holdings that actually contributed a today_pnl (i.e. had a real
-    # previous_close), so a holding with a missing quote doesn't skew
-    # the percentage by inflating the denominator without a matching
-    # numerator contribution.
-    market_value_with_today_pnl = 0.0
-    any_non_usd = False
-    any_excluded_from_summary = False
-    for row in db.get_portfolio_holdings(current_user):
-        ticker = row["ticker"]
-        quantity = row["quantity"]
-        avg_cost = row["avg_cost"]
-        try:
-            quote = get_quote(ticker)
-        except Exception:
-            # Same per-ticker isolation as the watchlist -- one
-            # bad/delisted holding must not 500 the whole portfolio.
-            quote = None
-
-        price = quote["price"] if quote else None
-        previous_close = quote.get("previous_close") if quote else None
-        currency = quote.get("currency", "USD") if quote else "USD"
-        if currency != "USD":
-            any_non_usd = True
-        cost_basis = quantity * avg_cost
-        market_value = price * quantity if price is not None else None
-        unrealized_pnl = (market_value - cost_basis) if market_value is not None else None
-        unrealized_pnl_pct = (unrealized_pnl / cost_basis * 100) if unrealized_pnl is not None and cost_basis else None
-        today_pnl = quantity * (price - previous_close) if price is not None and previous_close else None
-
-        usd_rate = get_usd_conversion_rate(currency)
-        if usd_rate is None:
-            any_excluded_from_summary = True
-        else:
-            if market_value is not None:
-                total_market_value += market_value * usd_rate
-            total_cost_basis += cost_basis * usd_rate
-            if today_pnl is not None:
-                total_today_pnl += today_pnl * usd_rate
-                market_value_with_today_pnl += market_value * usd_rate
-
-        holdings.append({
-            "ticker": ticker,
-            "quantity": quantity,
-            "avg_cost": avg_cost,
-            "buy_date": row.get("buy_date"),
-            "price": price,
-            "change_pct": quote["change_pct"] if quote else None,
-            "currency": currency,
-            "cost_basis": cost_basis,
-            "market_value": market_value,
-            "unrealized_pnl": unrealized_pnl,
-            "unrealized_pnl_pct": unrealized_pnl_pct,
-            "today_pnl": today_pnl,
-            # Live verdict from this ticker's latest completed report --
-            # the SAME lookup the Watchlist already uses, so a holding
-            # whose research call has since flipped (e.g. to Sell) shows
-            # it here too, not just on the Watchlist card.
-            "rating": db.get_latest_rating_for_ticker(current_user, ticker),
-            "added_at": row["added_at"],
-        })
-
-    total_unrealized_pnl = total_market_value - total_cost_basis if holdings else None
-    total_unrealized_pnl_pct = (total_unrealized_pnl / total_cost_basis * 100) if total_unrealized_pnl and total_cost_basis else None
-
-    return {
-        "holdings": holdings,
-        "summary": {
-            "total_market_value": total_market_value if holdings else None,
-            "total_cost_basis": total_cost_basis if holdings else None,
-            "total_unrealized_pnl": total_unrealized_pnl,
-            "total_unrealized_pnl_pct": total_unrealized_pnl_pct,
-            "total_today_pnl": total_today_pnl if market_value_with_today_pnl else None,
-            # Percentage against YESTERDAY's value of just the holdings
-            # that contributed a today_pnl (today's market value minus
-            # today's gain) -- not total_market_value, which may include
-            # holdings with no previous_close and would otherwise skew
-            # the denominator without a matching numerator contribution.
-            "total_today_pnl_pct": (total_today_pnl / (market_value_with_today_pnl - total_today_pnl) * 100)
-                if market_value_with_today_pnl and (market_value_with_today_pnl - total_today_pnl) else None,
-            # Summary totals are always USD-equivalent, regardless of
-            # each holding's own native currency -- mixed_currency tells
-            # the frontend to label the total "(USD equiv.)" instead of
-            # implying every holding actually trades in dollars.
-            "currency": "USD",
-            "mixed_currency": any_non_usd,
-            "excluded_from_summary": any_excluded_from_summary,
-        },
-    }
+    # Body extracted to app/reporting/portfolio_summary.py so the fast-
+    # chat "what's my portfolio look like" intent (chat_router.py) can
+    # share this exact aggregation instead of a second, drifting copy.
+    return build_portfolio_view(current_user)
 
 
 @app.post("/v1/portfolio")
