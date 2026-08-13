@@ -57,6 +57,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pandas as pd
 import yfinance as yf
 
+from app.analysis.baseline_scoring import BUY_THRESHOLD, SELL_THRESHOLD, naive_baseline_accuracy, score_rating
 from app.core.research_context import ResearchContext
 from app.data.financial_normalizer import FinancialStatementNormaliser
 from app.tools.valuation_tool import ValuationTool
@@ -65,8 +66,6 @@ from app.valuation.ml_features import extract_features
 
 FILING_LAG_DAYS = 90
 BACKTEST_MONTHS_AGO = 12
-BUY_THRESHOLD = 5.0
-SELL_THRESHOLD = -5.0
 BETA_WINDOW_TRADING_DAYS = 252
 MARKET_BENCHMARK = "^GSPC"
 
@@ -271,22 +270,6 @@ def run_one(ticker, category, as_of_date, today_date, market_history):
     }
 
 
-def score_rating(rating, realized_return_pct):
-    """Scores an arbitrary rating string against a realized return --
-    factored out of score() so the same accuracy definition can also
-    be applied to a hypothetical rating (e.g. what dcf_only_rating
-    would have scored, had it not been downgraded)."""
-    if rating is None or rating == "Insufficient Data" or realized_return_pct is None:
-        return None
-    if rating == "Buy":
-        return realized_return_pct > BUY_THRESHOLD
-    if rating == "Sell":
-        return realized_return_pct < SELL_THRESHOLD
-    if rating == "Hold":
-        return SELL_THRESHOLD <= realized_return_pct <= BUY_THRESHOLD
-    return None
-
-
 def score(row):
     """Returns True/False (correct/incorrect), or None if not scored
     (Insufficient Data, or the run itself errored)."""
@@ -335,18 +318,6 @@ def _base_rate(scored_rows):
     for r in scored_rows:
         counts[_true_class(r["realized_return_pct"])] += 1
     return counts
-
-
-def _naive_baseline_accuracy(scored_rows, fixed_rating):
-    """Accuracy of a rater that ALWAYS says `fixed_rating`, scored the
-    same way the real model is -- a Buy/Hold/Sell prediction's accuracy
-    is nothing more than "how often did the market agree" if the model
-    itself doesn't beat this."""
-    scores = [score_rating(fixed_rating, r["realized_return_pct"]) for r in scored_rows]
-    valid_scores = [s for s in scores if s is not None]
-    if not valid_scores:
-        return None
-    return 100 * sum(valid_scores) / len(valid_scores)
 
 
 def _random_uniform_baseline_accuracy(scored_rows, trials=2000, seed=42):
@@ -577,7 +548,7 @@ def main():
         print(f"\nNAIVE BASELINES (scored the same way as OVERALL ACCURACY, same {n_scored} tickers):")
         fixed_baseline_accs = {}
         for label, fixed_rating in (("Always Buy", "Buy"), ("Always Hold", "Hold"), ("Always Sell", "Sell")):
-            acc = _naive_baseline_accuracy(scored, fixed_rating)
+            acc = naive_baseline_accuracy(scored, fixed_rating)
             fixed_baseline_accs[fixed_rating] = acc
             print(f"  {label:<18} {acc:5.1f}%")
         random_acc = _random_uniform_baseline_accuracy(scored)
