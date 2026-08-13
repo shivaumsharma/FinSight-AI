@@ -15,6 +15,7 @@ import ModelCompare from "@/components/ModelCompare";
 import NewsTab from "@/components/NewsTab";
 import PeerComparisonTable from "@/components/PeerComparisonTable";
 import PerformanceDashboard from "@/components/PerformanceDashboard";
+import PortfolioFitCard from "@/components/PortfolioFitCard";
 import PriceChart from "@/components/PriceChart";
 import PriceStatistics from "@/components/PriceStatistics";
 import RecentlyViewed from "@/components/RecentlyViewed";
@@ -124,6 +125,7 @@ function StockDetailContent({ ticker }: { ticker: string }) {
                     <CompanyInfoCard overview={overview} />
                     {!overview.is_crypto && (
                       <>
+                        <PortfolioFitCard ticker={overview.ticker} />
                         <PeerComparisonTable ticker={overview.ticker} />
                         <SimilarStocks ticker={overview.ticker} />
                       </>
