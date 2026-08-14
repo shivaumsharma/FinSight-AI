@@ -12,12 +12,13 @@ import type { ScoreboardResponse } from "@/lib/types";
 // full breakdown across all three windows lives on the page itself.
 export default function ScoreboardHomeCard() {
   const [data, setData] = useState<ScoreboardResponse | null>(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     fetch("/api/scoreboard")
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then(setData)
-      .catch(() => {});
+      .catch(() => setError(true));
   }, []);
 
   const window30 = data?.windows["30"];
@@ -43,7 +44,9 @@ export default function ScoreboardHomeCard() {
         <p className="font-mono text-[10px] tracking-wide text-dim">MODEL VS. NAIVE BASELINE</p>
         <span className="font-mono text-[10px] font-bold text-accent">VIEW SCOREBOARD &rarr;</span>
       </div>
-      {hasData ? (
+      {error ? (
+        <p className="mt-1.5 font-mono text-xs text-danger">Couldn&apos;t load the scoreboard. Try again.</p>
+      ) : hasData ? (
         <p className="mt-1.5 font-mono text-xs text-text">
           30-day: <span className={`font-bold ${modelColor}`}>{window30!.model_accuracy_pct!.toFixed(1)}%</span> model
           vs <span className="text-muted">{bestBaseline!.toFixed(1)}%</span> best naive baseline (n=
