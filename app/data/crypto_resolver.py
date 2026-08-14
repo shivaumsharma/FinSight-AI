@@ -24,12 +24,14 @@ not a broad automated scan.
 import json
 import re
 import time
-from pathlib import Path
 from typing import List
 
 import requests
 
-CACHE_DIR = Path(__file__).resolve().parents[2] / "filings_cache"
+from app.core.paths import DATA_DIR
+from app.core.retry import retry_on_transient_error
+
+CACHE_DIR = DATA_DIR / "filings_cache"
 CRYPTO_INDEX_CACHE = CACHE_DIR / "crypto_index.json"
 CRYPTO_INDEX_TTL_SECONDS = 7 * 24 * 3600
 
@@ -75,9 +77,12 @@ _crypto_index = None
 
 
 def _fetch_crypto_index() -> dict:
-    resp = requests.get(COINGECKO_MARKETS_URL, timeout=15)
-    resp.raise_for_status()
-    raw = resp.json()
+    def _do():
+        resp = requests.get(COINGECKO_MARKETS_URL, timeout=15)
+        resp.raise_for_status()
+        return resp
+
+    raw = retry_on_transient_error(_do).json()
 
     symbol_to_ticker = {}
     for entry in raw:
