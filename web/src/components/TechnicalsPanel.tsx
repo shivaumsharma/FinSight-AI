@@ -56,7 +56,7 @@ export default function TechnicalsPanel({ ticker, currency }: { ticker: string; 
   }, [ticker]);
 
   if (error) {
-    return <p className="mt-4 py-6 text-center font-mono text-[11px] text-dim">Technical data isn&apos;t available for this ticker.</p>;
+    return <p className="mt-4 py-6 text-center font-mono text-[11px] text-dim">Couldn&apos;t load technical data for this ticker.</p>;
   }
   if (!data) {
     return (

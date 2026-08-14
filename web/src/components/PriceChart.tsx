@@ -219,7 +219,7 @@ export default function PriceChart({ ticker, currency }: { ticker: string; curre
 
       <div className="mt-2 rounded-lg border border-border bg-card px-2 py-2">
         {error ? (
-          <p className="py-10 text-center font-mono text-[11px] text-dim">Price history isn&apos;t available for this ticker.</p>
+          <p className="py-10 text-center font-mono text-[11px] text-dim">Couldn&apos;t load price history for this ticker.</p>
         ) : !data ? (
           <div className="h-[320px] animate-pulse rounded bg-card/60" />
         ) : null}
