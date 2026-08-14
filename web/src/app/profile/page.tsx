@@ -309,21 +309,24 @@ function RiskToleranceRow({
   }
 
   return (
-    <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3.5 py-3">
-      <div
-        className="font-mono text-xs text-text"
-        title="Saved to your profile. Not yet applied to report generation -- DCF assumptions and ratings are the same regardless of this setting today."
-      >
-        Risk tolerance
+    <div className="rounded-lg border border-border bg-card px-3.5 py-3">
+      <div className="flex items-center justify-between">
+        <div className="font-mono text-xs text-text">Risk tolerance</div>
+        <button
+          type="button"
+          onClick={cycle}
+          className={`rounded border px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wide ${RISK_COLORS[current]}`}
+        >
+          {current}
+        </button>
       </div>
-      <button
-        type="button"
-        onClick={cycle}
-        title="Click to cycle · saved but not yet applied to reports"
-        className={`rounded border px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wide ${RISK_COLORS[current]}`}
-      >
-        {current}
-      </button>
+      {/* Visible caption, not just a hover title -- the DCF/ratings
+          disclosure needs to be readable on mobile/touch too, where a
+          title tooltip never shows. */}
+      <p className="mt-1.5 font-mono text-[10px] leading-relaxed text-dim">
+        Saved to your profile. Not yet applied to report generation -- DCF assumptions and ratings are the
+        same regardless of this setting today.
+      </p>
     </div>
   );
 }
