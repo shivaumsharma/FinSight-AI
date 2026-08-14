@@ -73,29 +73,3 @@ class FinancialStatementNormaliser:
                 warnings.append("operating cash flows are negative")
         
         return warnings
-    
-
-from app.data.market_data import MarketDataLoader
-
-if __name__ == "__main__":
-  loader=MarketDataLoader("AAPL")
-  income_stml=loader.get_income_statement()
-  balance_sheet=loader.get_balance_sheet()
-  cash_flow=loader.get_cash_flow()
-
-  normaliser=FinancialStatementNormaliser(income_stml,balance_sheet,cash_flow)
-  normalised_data=normaliser.normalise()
-
-  print(normalised_data)
-
-  print("\n===CASH FLOW INDEX===")
-  print(cash_flow.index)
-
-  print("\n===BALANCE SHEET INDEX===")
-  print(balance_sheet.index)
-
-  warnings=normaliser.validate_financials(normalised_data)
-
-  print("\n=== VALIDATION WARNINGS ===")
-  for warning in warnings:
-      print(warning)
