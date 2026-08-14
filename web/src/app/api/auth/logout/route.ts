@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { FINSIGHT_API_URL, backendHeaders } from "@/lib/config";
+import { proxyFetch } from "@/lib/proxyFetch";
 import { clearSessionCookie, getSessionToken } from "@/lib/session";
 
 // Proxies POST /v1/auth/logout. Clears the local cookie unconditionally,
@@ -11,7 +12,7 @@ export async function POST() {
   const sessionToken = await getSessionToken();
 
   if (sessionToken) {
-    await fetch(`${FINSIGHT_API_URL}/v1/auth/logout`, {
+    await proxyFetch(`${FINSIGHT_API_URL}/v1/auth/logout`, {
       method: "POST",
       headers: backendHeaders(sessionToken),
     }).catch(() => {
