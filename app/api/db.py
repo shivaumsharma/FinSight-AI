@@ -26,6 +26,7 @@ be a five-minute bug the first time two threads touch it at once.
 """
 
 import json
+import os
 import secrets
 import sqlite3
 import time
@@ -33,7 +34,7 @@ import uuid
 from contextlib import contextmanager
 from typing import Any, Dict, Optional
 
-from app.core.paths import DB_PATH  # noqa: F401 -- re-exported; see app/core/paths.py
+from app.core.paths import DB_PATH, REPORTS_DIR  # noqa: F401 -- re-exported; see app/core/paths.py
 
 # How long a job may sit in "running" before the periodic sweep (see
 # main.py's background thread) treats it as hung and marks it TIMEOUT.
@@ -508,18 +509,33 @@ def count_all_jobs(user_id: str) -> int:
 def delete_user_account(user_id: str) -> None:
     """Permanently removes this user and everything scoped to them --
     every OTHER session (not just the one making this request), every
-    job, every watchlist item, every push subscription, then the user
-    row itself. All in one connection/transaction (_connect() commits
-    once at the end) so a mid-delete crash can't leave the account in
-    a half-deleted state -- either all of it is gone or none of it is.
+    job, every watchlist item, every push subscription, the user row
+    itself, AND every PDF report (REPORTS_DIR/{job_id}.pdf) this
+    user's jobs ever generated -- jobs.py writes one per completed job
+    (see its own REPORTS_DIR usage), and deleting only the `jobs` row
+    would leave that file behind forever with nothing left pointing at
+    it. The DB rows are all removed in one connection/transaction
+    (_connect() commits once at the end) so a mid-delete crash can't
+    leave the account in a half-deleted state -- either all of it is
+    gone or none of it is; the PDF files are removed afterward, using
+    the job_ids captured before the `jobs` rows were deleted.
     Irreversible; main.py's DELETE /v1/auth/me requires a fresh
     password confirmation before ever calling this."""
     with _connect() as conn:
+        job_ids = [
+            row[0] for row in
+            conn.execute("SELECT job_id FROM jobs WHERE user_id=?", (user_id,)).fetchall()
+        ]
         conn.execute("DELETE FROM jobs WHERE user_id=?", (user_id,))
         conn.execute("DELETE FROM watchlist WHERE user_id=?", (user_id,))
         conn.execute("DELETE FROM push_subscriptions WHERE user_id=?", (user_id,))
         conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
         conn.execute("DELETE FROM users WHERE user_id=?", (user_id,))
+
+    for job_id in job_ids:
+        pdf_path = REPORTS_DIR / f"{job_id}.pdf"
+        if pdf_path.exists():
+            os.remove(pdf_path)
 
 
 # ---------------------------------------------------------------- push subscriptions
