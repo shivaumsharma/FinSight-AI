@@ -25,7 +25,7 @@ function sessionStatusLabel(micState: VoiceState, sending: boolean, speaking: bo
   if (speaking) return "SPEAKING...";
   if (sending || micState === "transcribing") return "THINKING...";
   if (micState === "recording") return "LISTENING...";
-  if (micState === "error") return "MIC ERROR";
+  if (micState === "error") return "DIDN'T CATCH THAT -- RETRYING...";
   return "STARTING...";
 }
 
@@ -72,6 +72,15 @@ function ChatContent() {
   // this, an interrupted session's await never resolves and the mic
   // never re-arms.
   const speakResolveRef = useRef<(() => void) | null>(null);
+  // Consecutive failed-transcription count within the current session --
+  // found live: VoiceInputButton's onTranscript only fires on SUCCESS,
+  // so a failed transcribe() call (network blip, Sarvam hiccup) never
+  // reached handleTranscript/sendMessage at all, meaning the mic
+  // re-arm logic (which lives inside sendMessage) never ran either --
+  // the session just silently stalled in "error" state until someone
+  // manually tapped to end it. Retried automatically now, capped so a
+  // genuinely denied mic permission doesn't spin forever.
+  const micErrorStreakRef = useRef(0);
 
   useEffect(() => {
     fetch("/api/chat/history")
@@ -121,7 +130,31 @@ function ChatContent() {
     sessionActiveRef.current = true;
     setSessionActive(true);
     setError(null);
+    micErrorStreakRef.current = 0;
     voiceInputRef.current?.start();
+  }
+
+  const MAX_MIC_ERROR_RETRIES = 2;
+
+  // VoiceInputButton's own state, surfaced here for both the status
+  // readout AND (new) automatic recovery: a failed transcription would
+  // otherwise strand an active session with nothing to re-arm the mic
+  // (see micErrorStreakRef's own comment above). A short delay before
+  // retrying keeps a genuinely denied permission from hammering
+  // getUserMedia in a tight loop.
+  function handleMicStateChange(newState: VoiceState) {
+    setMicState(newState);
+    if (newState !== "error" || !sessionActiveRef.current) return;
+
+    micErrorStreakRef.current += 1;
+    if (micErrorStreakRef.current <= MAX_MIC_ERROR_RETRIES) {
+      setTimeout(() => {
+        if (sessionActiveRef.current) voiceInputRef.current?.start();
+      }, 1200);
+    } else {
+      setError("Voice session paused -- couldn't hear you a few times in a row. Tap Start Voice Session to try again.");
+      endSession();
+    }
   }
 
   function endSession() {
@@ -221,6 +254,7 @@ function ChatContent() {
   // Inside a voice session, the whole point is hands-free, so it
   // auto-submits instead.
   function handleTranscript(text: string) {
+    micErrorStreakRef.current = 0; // a successful transcription -- the session is healthy again
     if (sessionActiveRef.current) void sendMessage(text);
     else setInput(text);
   }
@@ -307,7 +341,7 @@ function ChatContent() {
             // disabling the button would make that unreachable.
             disabled={sending && !speaking}
             onRecordingStart={stopSpeaking}
-            onStateChange={setMicState}
+            onStateChange={handleMicStateChange}
           />
           <button
             type="submit"
