@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FINSIGHT_API_URL, backendHeaders } from "@/lib/config";
+import { proxyFetch } from "@/lib/proxyFetch";
 import { getSessionToken } from "@/lib/session";
 
 // Proxies DELETE /v1/portfolio/{ticker}. params is a Promise in this
@@ -11,7 +12,7 @@ export async function DELETE(
   const { ticker } = await context.params;
   const sessionToken = await getSessionToken();
 
-  const resp = await fetch(`${FINSIGHT_API_URL}/v1/portfolio/${ticker}`, {
+  const resp = await proxyFetch(`${FINSIGHT_API_URL}/v1/portfolio/${ticker}`, {
     method: "DELETE",
     headers: backendHeaders(sessionToken),
   });
