@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FINSIGHT_API_URL, FINSIGHT_API_KEY } from "@/lib/config";
+import { proxyFetch } from "@/lib/proxyFetch";
 import { getSessionToken } from "@/lib/session";
 
 // Proxies POST /v1/voice/transcribe -- the FIRST multipart proxy route
@@ -23,7 +24,7 @@ export async function POST(request: NextRequest) {
   const outgoing = new FormData();
   outgoing.set("file", file, "recording.wav");
 
-  const resp = await fetch(`${FINSIGHT_API_URL}/v1/voice/transcribe`, {
+  const resp = await proxyFetch(`${FINSIGHT_API_URL}/v1/voice/transcribe`, {
     method: "POST",
     headers: {
       ...(FINSIGHT_API_KEY ? { "X-API-Key": FINSIGHT_API_KEY } : {}),
