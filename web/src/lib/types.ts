@@ -142,6 +142,11 @@ export interface ReportData {
   growth_analysis?: Record<string, number | string>;
   institutional_consensus?: InstitutionalConsensus;
   news_sources?: NewsSources;
+  // Powers ReportView.tsx's ticker-header subtitle only ("{name} ·
+  // {sector}") -- deliberately just the two fields actually read there,
+  // not a full mirror of StockOverview, since this comes from the
+  // report pipeline's own company lookup, not the /overview endpoint.
+  company_overview?: { name?: string | null; sector?: string | null };
   [key: string]: unknown;
 }
 
