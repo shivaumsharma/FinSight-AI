@@ -150,11 +150,5 @@ class ResearchSummaryBuilder:
 
         if not context.retrieved_chunks:
             lines.append("- Earnings call evidence unavailable.")
-        
-        for i, item in enumerate(lines):
-            if not isinstance(item, str):
-                print(i)
-                print(type(item))
-                print(item)
 
         return "\n".join(lines)
