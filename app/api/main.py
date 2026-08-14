@@ -668,6 +668,11 @@ async def transcribe_voice(
             content_type=file.content_type or "audio/webm",
         )
     except sarvam_client.SarvamTranscriptionError as e:
+        # Logged server-side (not just returned in the response body) --
+        # the response body is all a browser toast shows the user, but
+        # diagnosing a real-device failure after the fact needs this in
+        # Cloud Run's own logs, not a screenshot of a truncated toast.
+        logger.warning(f"Sarvam STT failed for user {current_user}, {len(audio_bytes)} bytes: {e}")
         raise errors.stt_unavailable(str(e))
 
     return {"transcript": transcript}
@@ -700,6 +705,7 @@ def synthesize_voice(body: VoiceSynthesizeRequest, current_user: str = Depends(a
     try:
         audio_bytes = sarvam_tts_client.synthesize(body.text)
     except sarvam_tts_client.SarvamSynthesisError as e:
+        logger.warning(f"Sarvam TTS failed for user {current_user}: {e}")
         raise errors.tts_unavailable(str(e))
 
     return Response(content=audio_bytes, media_type="audio/wav")
