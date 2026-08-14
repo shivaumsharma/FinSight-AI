@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FINSIGHT_API_URL, backendHeaders } from "@/lib/config";
+import { proxyFetch } from "@/lib/proxyFetch";
 import { getSessionToken } from "@/lib/session";
 
 // Proxies GET /v1/stocks/{ticker}/financials?period=yearly|quarterly.
@@ -11,7 +12,7 @@ export async function GET(
   const period = request.nextUrl.searchParams.get("period") || "yearly";
   const sessionToken = await getSessionToken();
 
-  const resp = await fetch(
+  const resp = await proxyFetch(
     `${FINSIGHT_API_URL}/v1/stocks/${encodeURIComponent(ticker)}/financials?period=${encodeURIComponent(period)}`,
     { headers: backendHeaders(sessionToken), cache: "no-store" }
   );
