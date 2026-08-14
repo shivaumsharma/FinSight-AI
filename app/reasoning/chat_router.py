@@ -46,11 +46,12 @@ INTENT_TICKER_QUESTION = "ticker_question"
 INTENT_PORTFOLIO_FIT = "portfolio_fit"
 INTENT_FULL_REPORT_REQUEST = "full_report_request"
 INTENT_ADVICE_REQUEST = "advice_request"
+INTENT_STOCK_DISCOVERY_REQUEST = "stock_discovery_request"
 INTENT_GENERAL = "general"
 
 _VALID_INTENTS = {
     INTENT_PORTFOLIO_STATUS, INTENT_TICKER_QUESTION, INTENT_PORTFOLIO_FIT,
-    INTENT_FULL_REPORT_REQUEST, INTENT_ADVICE_REQUEST, INTENT_GENERAL,
+    INTENT_FULL_REPORT_REQUEST, INTENT_ADVICE_REQUEST, INTENT_STOCK_DISCOVERY_REQUEST, INTENT_GENERAL,
 }
 # Intents that need a ticker to mean anything -- a message classified
 # into one of these with no ticker detected degrades to INTENT_GENERAL
@@ -72,6 +73,24 @@ _CHAT_MODEL = "llama-3.3-70b-versatile"
 # growing the prompt (and the per-call cost/latency) unboundedly as a
 # thread gets long.
 MAX_HISTORY_MESSAGES = 6
+
+# Shared persona/disclaimer fragments for every LLM-synthesis prompt
+# below -- found live: repeating "never claim to be a licensed
+# advisor" as an instruction made every single reply end with some
+# variant of "consult a licensed financial advisor," even on messages
+# where it added nothing. The compliance boundary itself doesn't
+# change (still never a personalized buy/sell call) -- only the
+# instruction to actively RESTATE it in every reply is gone, since the
+# app already shows that disclaimer once, on the Chat page itself and
+# in the global footer, not per-message.
+_PERSONA = (
+    "You're FinSight, a knowledgeable financial analyst talking directly to the user -- clear, warm, and "
+    "direct, the way you'd explain something to a colleague, not a compliance script."
+)
+_DISCLAIMER_NOTE = (
+    "Don't append a 'consult a licensed advisor' disclaimer -- that's already shown once elsewhere in the "
+    "app; repeating it in every reply reads as evasive, not careful."
+)
 
 
 def _format_history(history: list) -> str:
@@ -111,6 +130,7 @@ ticker_question - asking what's going on with, or for information about, a speci
 portfolio_fit - asking whether/how a specific stock fits, overlaps with, or diversifies their existing portfolio
 full_report_request - explicitly asking for a full/deep/detailed research report, DCF, or valuation
 advice_request - asking where/how to invest, allocate, or spend money based on their own goals or situation (e.g. "where should I invest", "how should I spend $40k", "what should a beginner do") -- NOT asking about an existing holding's status
+stock_discovery_request - asking the assistant to find, discover, suggest, or recommend NEW specific stocks/companies it hasn't already named (e.g. "find me two new companies", "give me some stock ideas", "what should I buy next") -- NOT asking about a ticker already mentioned in this conversation, and NOT general allocation advice
 general - anything else, including generic finance chit-chat
 
 {ticker_note}
@@ -191,13 +211,12 @@ def _handle_portfolio_status(user_id: str, message: str, history: list) -> str:
     portfolio_data = "\n".join(lines)
 
     prompt = (
-        "You are a terse assistant inside a stock research app, answering a question about the user's own "
-        "portfolio. Use ONLY the real data below -- never invent numbers. Answer the user's actual question in "
+        f"{_PERSONA} Use ONLY the real data below -- never invent numbers. Answer the user's actual question in "
         "2-4 sentences: if they ask about diversification, reference the sector mix; if they ask what's going "
         "well/badly, reference the per-holding ratings and overall P&L; if the question is generic, summarize "
         "total value and P&L. If the message references something from earlier in the conversation (e.g. "
-        "'that', 'it'), use the recent conversation below to understand what they mean. Never give a buy/sell "
-        "recommendation beyond restating existing ratings; never claim to be a licensed advisor.\n\n"
+        "'that', 'it'), use the recent conversation below to understand what they mean. Never name a buy/sell "
+        f"call beyond restating the existing rating. {_DISCLAIMER_NOTE}\n\n"
         f"PORTFOLIO DATA:\n{portfolio_data}\n\n"
         f"RECENT CONVERSATION:\n{_format_history(history)}\n\nMESSAGE: {message}"
     )
@@ -208,7 +227,15 @@ def _handle_portfolio_status(user_id: str, message: str, history: list) -> str:
         return portfolio_data
 
 
-def _handle_ticker_question(ticker: str) -> str:
+def _handle_ticker_question(ticker: str, message: str, history: list) -> str:
+    """Same "raw data doubles as LLM grounding AND outage fallback"
+    pattern as _handle_portfolio_status -- a plain "what's going on
+    with X" and a follow-up like "what's your source for that" or
+    "why do you say that" both need real answers, not the identical
+    canned rating dump repeated verbatim regardless of what was asked
+    (a real bug caught live: a user's "what's your source, where did
+    you get this" follow-up got back the exact same rating summary as
+    the question before it)."""
     try:
         insights = build_stock_insights(ticker)
     except TickerNotFoundError:
@@ -234,7 +261,24 @@ def _handle_ticker_question(ticker: str) -> str:
     if articles:
         lines.append("Recent news: " + "; ".join(a["headline"] for a in articles[:3]) + ".")
 
-    return "\n".join(lines)
+    stock_data = "\n".join(lines)
+
+    prompt = (
+        f"{_PERSONA} Use ONLY the real data below -- never invent numbers. Answer the user's actual question in "
+        "2-4 sentences: if they ask for the source/methodology, explain this is FinSight's own algorithmic "
+        "rating (computed from a DCF valuation plus financial-health and momentum/growth signals), not a "
+        "third-party analyst call; if they ask why a flag applies, reference the flags below; if the question "
+        "is generic, summarize the rating and news. If the message references something from earlier in the "
+        "conversation, use the recent conversation below to understand what they mean. Never name a buy/sell "
+        f"call beyond restating the existing rating. {_DISCLAIMER_NOTE}\n\n"
+        f"STOCK DATA:\n{stock_data}\n\n"
+        f"RECENT CONVERSATION:\n{_format_history(history)}\n\nMESSAGE: {message}"
+    )
+    try:
+        provider = HostedProvider(model=_CHAT_MODEL)
+        return provider.generate(prompt, max_new_tokens=200).strip()
+    except LLMProviderError:
+        return stock_data
 
 
 def _handle_portfolio_fit(user_id: str, ticker: str) -> str:
@@ -295,13 +339,13 @@ def _handle_advice_request(user_id: str, message: str, history: list) -> str:
             )
 
     prompt = (
-        "You are a terse assistant inside a stock research app, answering a request for investing/allocation "
-        "guidance. Use ONLY the real context below -- never invent numbers. Answer in 2-4 sentences, at the "
-        "level of asset classes/sectors/allocation percentages, not a specific buy/sell call on an individual "
-        "stock. If onboarding preferences are unset, give general starter guidance (e.g. diversified index "
-        "funds first) but mention completing onboarding for guidance tailored to their risk tolerance. If the "
-        "message references something from earlier in the conversation (e.g. 'that', 'the $40k thing'), use "
-        "the recent conversation below to understand what they mean. Never claim to be a licensed advisor.\n\n"
+        f"{_PERSONA} You're answering a request for investing/allocation guidance. Use ONLY the real context "
+        "below -- never invent numbers. Answer in 2-4 sentences, at the level of asset classes/sectors/"
+        "allocation percentages, not a specific buy/sell call on an individual stock. If onboarding preferences "
+        "are unset, give general starter guidance (e.g. diversified index funds first) but mention completing "
+        "onboarding for guidance tailored to their risk tolerance. If the message references something from "
+        "earlier in the conversation (e.g. 'that', 'the $40k thing'), use the recent conversation below to "
+        f"understand what they mean. {_DISCLAIMER_NOTE}\n\n"
         "CONTEXT:\n" + "\n".join(context_lines)
         + f"\n\nRECENT CONVERSATION:\n{_format_history(history)}\n\nMESSAGE: {message}"
     )
@@ -312,6 +356,24 @@ def _handle_advice_request(user_id: str, message: str, history: list) -> str:
         return "I can give allocation-level guidance using your real portfolio and preferences, but couldn't generate a response just now -- try again in a moment."
 
 
+def _handle_stock_discovery_request() -> str:
+    """Deliberately a FIXED string, not an LLM call -- caught live: a
+    user pushing on "find me two new companies" got a different,
+    self-contradicting answer every turn (first "I'll suggest two
+    sectors" using their real portfolio data, then "I would need to
+    know more about your current portfolio" moments later, having just
+    used it). Recommending brand-new, unresearched securities is a real
+    capability gap, not something to paper over with an LLM guessing at
+    a plausible-sounding deflection each time -- one honest, consistent
+    answer beats a different vague one on every turn."""
+    return (
+        "I can't discover or recommend brand-new stocks -- picking specific, unresearched securities is "
+        "outside what this app does (same boundary as real estate: allocation-level guidance only, never "
+        "property- or security-specific). What I can do: tell you how a stock you already have in mind fits "
+        "your portfolio, or pull a full research report for a specific ticker you name."
+    )
+
+
 def _handle_general(message: str, history: list) -> str:
     """Short, caveated LLM answer with no specific data context -- no
     portfolio/ticker to key off for this message, so this deliberately
@@ -320,11 +382,10 @@ def _handle_general(message: str, history: list) -> str:
     as understood rather than ignored -- it has no new data to answer
     with regardless."""
     prompt = (
-        "You are a terse assistant inside a stock research app. Answer the user's message in 1-3 sentences. "
-        "You have no access to their portfolio or any specific stock data for this message -- if the question "
-        "needs that, say so and suggest asking about a specific ticker or their portfolio instead. Use the "
-        "recent conversation below only to understand references like 'that' or 'it' -- never give "
-        "personalized investment advice; you are not a licensed advisor.\n\n"
+        f"{_PERSONA} Answer the user's message in 1-3 sentences. You have no access to their portfolio or any "
+        "specific stock data for this message -- if the question needs that, say so and suggest asking about a "
+        "specific ticker or their portfolio instead. Use the recent conversation below only to understand "
+        f"references like 'that' or 'it'. Never give personalized investment advice. {_DISCLAIMER_NOTE}\n\n"
         f"RECENT CONVERSATION:\n{_format_history(history)}\n\nMESSAGE: {message}"
     )
     try:
@@ -336,10 +397,11 @@ def _handle_general(message: str, history: list) -> str:
 
 _HANDLERS = {
     INTENT_PORTFOLIO_STATUS: lambda user_id, ticker, message, history: _handle_portfolio_status(user_id, message, history),
-    INTENT_TICKER_QUESTION: lambda user_id, ticker, message, history: _handle_ticker_question(ticker),
+    INTENT_TICKER_QUESTION: lambda user_id, ticker, message, history: _handle_ticker_question(ticker, message, history),
     INTENT_PORTFOLIO_FIT: lambda user_id, ticker, message, history: _handle_portfolio_fit(user_id, ticker),
     INTENT_FULL_REPORT_REQUEST: lambda user_id, ticker, message, history: _handle_full_report_request(ticker),
     INTENT_ADVICE_REQUEST: lambda user_id, ticker, message, history: _handle_advice_request(user_id, message, history),
+    INTENT_STOCK_DISCOVERY_REQUEST: lambda user_id, ticker, message, history: _handle_stock_discovery_request(),
     INTENT_GENERAL: lambda user_id, ticker, message, history: _handle_general(message, history),
 }
 
