@@ -11,14 +11,18 @@ import type { FxRate } from "@/lib/types";
 // currency Portfolio summary, not a trading tool.
 export default function CurrencyTracker() {
   const [fx, setFx] = useState<FxRate | null>(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     fetch("/api/market/fx")
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then(setFx)
-      .catch(() => setFx(null));
+      .catch(() => setError(true));
   }, []);
 
+  // Distinct from "still loading" -- a failed fetch must not leave the
+  // skeleton spinning forever, same pattern as AIInsightsCard.tsx.
+  if (error) return null;
   if (fx === null) return <SectionSkeleton label="CURRENCY" rows={1} />;
   if (fx.rate === null) return null;
 
