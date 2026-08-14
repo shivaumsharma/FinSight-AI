@@ -154,7 +154,7 @@ def test_handle_portfolio_status_falls_back_to_the_raw_summary_on_llm_outage(mon
 
 # ---------------------------------------------------------------- _handle_ticker_question
 
-def test_handle_ticker_question_summarizes_insights_and_news(monkeypatch):
+def test_handle_ticker_question_grounds_the_llm_in_real_insights_and_the_actual_question(monkeypatch):
     insights = {
         "rating": "Sell", "fair_value_estimate": 107.0, "current_price": 300.0,
         "upside_percent": -64.3, "flags": ["Rich Valuation"],
@@ -162,20 +162,36 @@ def test_handle_ticker_question_summarizes_insights_and_news(monkeypatch):
     monkeypatch.setattr(cr, "build_stock_insights", lambda ticker: insights)
     monkeypatch.setattr(cr, "fetch_company_news", lambda ticker: [{"headline": "AAPL beats earnings"}])
 
-    result = cr._handle_ticker_question("AAPL")
+    captured = {}
 
-    assert "Sell" in result
-    assert "107.00" in result
-    assert "Rich Valuation" in result
-    assert "AAPL beats earnings" in result
+    class _TickerProvider:
+        def __init__(self, model=None, **kwargs):
+            pass
+
+        def generate(self, prompt, max_new_tokens=150):
+            captured["prompt"] = prompt
+            return "This is FinSight's own algorithmic rating, not a third-party call."
+
+    monkeypatch.setattr(cr, "HostedProvider", _TickerProvider)
+
+    history = [{"role": "assistant", "content": "AAPL: algorithmic rating is Sell.", "ticker": "AAPL"}]
+    result = cr._handle_ticker_question("AAPL", "what's your source for that", history)
+
+    assert "algorithmic rating" in result
+    assert "Sell" in captured["prompt"]
+    assert "107.00" in captured["prompt"]
+    assert "Rich Valuation" in captured["prompt"]
+    assert "AAPL beats earnings" in captured["prompt"]
+    assert "what's your source for that" in captured["prompt"]
 
 
 def test_handle_ticker_question_degrades_on_insufficient_data(monkeypatch):
     insights = {"rating": "Insufficient Data", "fair_value_estimate": None, "current_price": None, "upside_percent": None, "flags": []}
     monkeypatch.setattr(cr, "build_stock_insights", lambda ticker: insights)
     monkeypatch.setattr(cr, "fetch_company_news", lambda ticker: [])
+    monkeypatch.setattr(cr, "HostedProvider", _RaisingProvider)  # exercise the fallback path
 
-    result = cr._handle_ticker_question("BTC-USD")
+    result = cr._handle_ticker_question("BTC-USD", "what's going on with this", [])
 
     assert "not enough data" in result
 
@@ -186,7 +202,7 @@ def test_handle_ticker_question_propagates_bad_ticker_as_a_plain_message(monkeyp
 
     monkeypatch.setattr(cr, "build_stock_insights", _raise)
 
-    result = cr._handle_ticker_question("ZZZZ")
+    result = cr._handle_ticker_question("ZZZZ", "what's going on with this", [])
 
     assert "couldn't find ZZZZ" in result
 
@@ -199,10 +215,22 @@ def test_handle_ticker_question_survives_a_news_fetch_failure(monkeypatch):
         raise Exception("news feed down")
 
     monkeypatch.setattr(cr, "fetch_company_news", _raise_news)
+    monkeypatch.setattr(cr, "HostedProvider", _RaisingProvider)  # exercise the fallback path
 
-    result = cr._handle_ticker_question("AAPL")
+    result = cr._handle_ticker_question("AAPL", "what's going on with this", [])
 
     assert "Buy" in result
+
+
+def test_handle_ticker_question_falls_back_to_the_raw_summary_on_llm_outage(monkeypatch):
+    insights = {"rating": "Hold", "fair_value_estimate": None, "current_price": None, "upside_percent": None, "flags": []}
+    monkeypatch.setattr(cr, "build_stock_insights", lambda ticker: insights)
+    monkeypatch.setattr(cr, "fetch_company_news", lambda ticker: [])
+    monkeypatch.setattr(cr, "HostedProvider", _RaisingProvider)
+
+    result = cr._handle_ticker_question("AAPL", "what's your source", [])
+
+    assert "Hold" in result
 
 
 # ---------------------------------------------------------------- _handle_portfolio_fit
@@ -289,6 +317,50 @@ def test_handle_advice_request_falls_back_on_llm_outage(monkeypatch):
     result = cr._handle_advice_request("u1", "where should I invest", [])
 
     assert "allocation-level guidance" in result
+
+
+# ---------------------------------------------------------------- _handle_stock_discovery_request
+
+def test_handle_stock_discovery_request_is_a_fixed_consistent_message():
+    # Deliberately not LLM-generated -- must return the exact same
+    # answer every time, no monkeypatched provider involved at all.
+    result = cr._handle_stock_discovery_request()
+    assert "can't discover or recommend brand-new stocks" in result
+    assert result == cr._handle_stock_discovery_request()  # identical on a second call
+
+
+def test_classify_intent_routes_a_new_stock_request_to_discovery(monkeypatch):
+    class _DiscoveryProvider:
+        def __init__(self, model=None, **kwargs):
+            pass
+
+        def generate(self, prompt, max_new_tokens=150):
+            return "INTENT: stock_discovery_request"
+
+    monkeypatch.setattr(cr, "resolve_companies", lambda q: [])
+    monkeypatch.setattr(cr, "HostedProvider", _DiscoveryProvider)
+
+    result = cr.classify_intent("find me two new companies to buy")
+
+    assert result["intent"] == "stock_discovery_request"
+
+
+def test_handle_chat_message_dispatches_stock_discovery_without_a_ticker(monkeypatch):
+    class _DiscoveryProvider:
+        def __init__(self, model=None, **kwargs):
+            pass
+
+        def generate(self, prompt, max_new_tokens=150):
+            return "INTENT: stock_discovery_request"
+
+    monkeypatch.setattr(cr, "resolve_companies", lambda q: [])
+    monkeypatch.setattr(cr, "HostedProvider", _DiscoveryProvider)
+
+    result = cr.handle_chat_message("u1", "find me two new companies")
+
+    assert result["intent"] == "stock_discovery_request"
+    assert result["ticker"] is None
+    assert "can't discover or recommend brand-new stocks" in result["reply"]
 
 
 # ---------------------------------------------------------------- _handle_general
