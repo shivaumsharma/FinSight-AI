@@ -199,6 +199,41 @@ class ValuationPipeline:
 
     revenue_forecasts=fcff_engine.forecast_revenue()
     fcff_forecasts=fcff_engine.forecast_fcff(terminal_growth_rate=self.terminal_growth_rate)
+
+    # forecast_fcff() returns None (not a crash) when the revenue CAGR
+    # it needs for the fade math isn't computable -- fewer than two
+    # usable years of revenue, or a non-positive/NaN starting value
+    # (see FCFFEngine.calculate_revenue_cagr's own docstring). Same
+    # "structurally cannot run" situation as a None base_fcff above,
+    # so it routes to the same _unavailable_result path rather than
+    # letting a None forecast reach DCFEngine (which would crash on
+    # len(None) inside calculate_discount_factors).
+    if fcff_forecasts is None:
+        return self._unavailable_result(
+            "FCFF-DCF does not apply: revenue CAGR could not be computed "
+            "-- this company has fewer than two years of usable revenue "
+            "data, or its earliest reported revenue is zero or negative. "
+            "The recommendation below is instead derived from relative "
+            "valuation and sentiment."
+        )
+
+    # market_cap can be None -- market_data_tool.py only guards
+    # company_name/current_price before populating context.market_cap
+    # from context.company_info.get("market_cap"), which yfinance
+    # itself can omit. WACCEngine.calculate_total_value/calculate_wacc
+    # both use market_cap directly in arithmetic (equity_value+debt_value,
+    # equity_value/total_value) that would raise a TypeError against
+    # None rather than degrade -- caught here, before WACCEngine is
+    # even constructed, and routed to the same "unavailable" path as
+    # every other structurally-missing-input case above.
+    if self.market_cap is None:
+        return self._unavailable_result(
+            "FCFF-DCF does not apply: market capitalization is unavailable "
+            "for this company, so WACC (which weights cost of equity by "
+            "market value) cannot be computed. The recommendation below is "
+            "instead derived from relative valuation and sentiment."
+        )
+
     wacc_engine=(WACCEngine(
         financial_df=self.financial_df,
         market_cap=self.market_cap,
