@@ -33,7 +33,7 @@ export default function AuthGate({ children }: { children: (auth: AuthedProps) =
     status, userId, email: authedEmail, createdAt, jobsUsedToday, dailyLimit,
     totalReports, sessionExpiresAt, riskTolerance, resetAt, waitlistFeatures, displayName,
     onboardingCompleted, completeOnboarding, error,
-    signup, login, logout, deleteAccount, setRiskTolerance, joinWaitlist, setDisplayName,
+    signup, login, logout, deleteAccount, setRiskTolerance, joinWaitlist, setDisplayName, retry,
   } = useAuth();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
@@ -44,6 +44,30 @@ export default function AuthGate({ children }: { children: (auth: AuthedProps) =
     return (
       <div className="flex min-h-screen items-center justify-center bg-bg">
         <span className="font-mono text-xs text-muted">loading...</span>
+      </div>
+    );
+  }
+
+  // Distinct from "unauthenticated" -- the backend proxy couldn't be
+  // reached at all, so showing the login/signup gate here would be
+  // misleading (it looks identical to "you're logged out" when the
+  // real issue is a backend hiccup, not the user's session).
+  if (status === "unreachable") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-bg px-5">
+        <div className="w-full max-w-sm text-center">
+          <p className="font-mono text-sm text-text">Couldn&apos;t reach the server.</p>
+          <p className="mt-2 font-mono text-xs text-muted">
+            The backend service may be starting up or temporarily unavailable.
+          </p>
+          <button
+            type="button"
+            onClick={() => retry()}
+            className="mt-5 rounded-lg border border-border bg-card px-4 py-2 font-mono text-xs font-bold text-text hover:border-accent"
+          >
+            RETRY
+          </button>
+        </div>
       </div>
     );
   }
