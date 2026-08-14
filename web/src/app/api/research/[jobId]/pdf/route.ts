@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FINSIGHT_API_URL, backendHeaders } from "@/lib/config";
+import { proxyFetch } from "@/lib/proxyFetch";
 import { getSessionToken } from "@/lib/session";
 
 // Proxies GET /v1/research/{job_id}/pdf -- binary passthrough, not JSON.
@@ -20,7 +21,7 @@ export async function GET(
   if (exp) backendUrl.searchParams.set("exp", exp);
   if (sig) backendUrl.searchParams.set("sig", sig);
 
-  const resp = await fetch(backendUrl.toString(), {
+  const resp = await proxyFetch(backendUrl.toString(), {
     headers: backendHeaders(sessionToken),
     cache: "no-store",
   });
