@@ -26,6 +26,7 @@ export default function ChatPage() {
 function ChatContent() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [historyError, setHistoryError] = useState(false);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,9 +34,9 @@ function ChatContent() {
 
   useEffect(() => {
     fetch("/api/chat/history")
-      .then((r) => (r.ok ? r.json() : { messages: [] }))
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((data) => setMessages(data.messages ?? []))
-      .catch(() => {})
+      .catch(() => setHistoryError(true))
       .finally(() => setHistoryLoaded(true));
   }, []);
 
@@ -88,7 +89,12 @@ function ChatContent() {
         </p>
 
         <div className="mt-6 flex flex-col gap-3">
-          {historyLoaded && messages.length === 0 && (
+          {historyLoaded && historyError && (
+            <p className="mt-4 text-center font-mono text-xs text-danger">
+              Couldn&apos;t load your chat history. Try again.
+            </p>
+          )}
+          {historyLoaded && !historyError && messages.length === 0 && (
             <p className="mt-4 text-center font-mono text-xs text-dim">
               Try &quot;what&apos;s my portfolio look like&quot; or &quot;what&apos;s going on with AAPL&quot;.
             </p>
