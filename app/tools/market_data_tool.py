@@ -23,7 +23,7 @@ import pandas as pd
 
 from app.core.research_context import ResearchContext
 from app.data.crypto_resolver import is_crypto_ticker
-from app.data.market_data import MarketDataLoader, TickerNotFoundError
+from app.data.market_data import MarketDataLoader, TickerNotFoundError, MarketDataUnavailableError
 from app.data.financial_normalizer import FinancialStatementNormaliser
 from app.analysis.financial_analysis import FinancialAnalysisBuilder
 from .base_tool import BaseTool
@@ -52,7 +52,17 @@ class MarketDataTool(BaseTool):
         # the user sees one clear "ticker not found" message instead
         # of whichever of get_income_statement/get_balance_sheet/
         # get_cash_flow happens to hit an empty DataFrame first.
+        #
+        # A throttled/failed yfinance response is a DIFFERENT
+        # situation from a genuinely bad ticker and must not be
+        # reported the same way -- loader.info_fetch_failed (set by
+        # get_company_info() when its own retry-wrapped fetch failed
+        # even after retries) is the signal that distinguishes the
+        # two, since a real bad ticker gets an empty-ish info dict
+        # back WITHOUT the fetch itself ever failing.
         if not context.company_info.get("company_name") and not context.company_info.get("current_price"):
+            if loader.info_fetch_failed:
+                raise MarketDataUnavailableError(context.ticker)
             raise TickerNotFoundError(context.ticker)
 
         # Crypto has no income statement/balance sheet/cash flow --
