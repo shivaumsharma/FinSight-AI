@@ -18,7 +18,23 @@ const MAX_RECORDING_MS = 25_000;
 // silently for a moment before starting would cut the recording off
 // before they've said anything.
 const SILENCE_RMS_THRESHOLD = 0.02;
-const SILENCE_HOLD_MS = 1600;
+// 2600ms, not 1600ms -- found live in a real voice session: 1.6s cut
+// a user off mid-thought after "Okay, so..." (a natural pause while
+// forming the rest of a sentence), sending an incomplete utterance as
+// its own turn instead of waiting for the actual question. A longer
+// hold costs a bit of latency on a genuinely finished sentence, which
+// is a much smaller cost than losing the rest of what someone meant
+// to say.
+const SILENCE_HOLD_MS = 2600;
+// A single loud sample (a mic bump, a cough, ambient noise) must not
+// latch hasSpokenRef on its own -- found live in a real voice session:
+// a session's auto-re-armed mic picked up a brief noise blip with no
+// one actually speaking, and Sarvam hallucinated a plausible-sounding
+// word ("Hello") out of what was functionally silence. Requiring the
+// signal to stay continuously above SILENCE_RMS_THRESHOLD for this
+// long filters out a blip while still being far under normal
+// word-length, so real speech onset is still caught quickly.
+const MIN_VOICED_MS = 300;
 
 export type VoiceState = "idle" | "recording" | "transcribing" | "error";
 
@@ -162,6 +178,11 @@ const VoiceInputButton = forwardRef<VoiceInputHandle, {
   const rafRef = useRef<number | null>(null);
   const hasSpokenRef = useRef(false);
   const lastLoudAtRef = useRef(0);
+  // Tracks how long the signal has been continuously above threshold,
+  // reset on any dip below it -- hasSpokenRef only latches true once
+  // this streak clears MIN_VOICED_MS, not on a single loud sample.
+  const voicedStreakMsRef = useRef(0);
+  const lastTickAtRef = useRef(0);
 
   useImperativeHandle(ref, () => ({ start: () => void startRecording(), stop: stopRecording }), []);
 
@@ -195,6 +216,8 @@ const VoiceInputButton = forwardRef<VoiceInputHandle, {
     if (!analyser) return;
 
     const data = new Uint8Array(analyser.frequencyBinCount);
+    lastTickAtRef.current = performance.now();
+    voicedStreakMsRef.current = 0;
     const tick = () => {
       analyser.getByteTimeDomainData(data);
       let sumSquares = 0;
@@ -204,13 +227,19 @@ const VoiceInputButton = forwardRef<VoiceInputHandle, {
       }
       const rms = Math.sqrt(sumSquares / data.length);
       const now = performance.now();
+      const deltaMs = now - lastTickAtRef.current;
+      lastTickAtRef.current = now;
 
       if (rms > SILENCE_RMS_THRESHOLD) {
-        hasSpokenRef.current = true;
         lastLoudAtRef.current = now;
-      } else if (hasSpokenRef.current && now - lastLoudAtRef.current > SILENCE_HOLD_MS) {
-        stopRecording();
-        return; // stopRecording() -> onstop tears this loop down
+        voicedStreakMsRef.current += deltaMs;
+        if (voicedStreakMsRef.current >= MIN_VOICED_MS) hasSpokenRef.current = true;
+      } else {
+        voicedStreakMsRef.current = 0;
+        if (hasSpokenRef.current && now - lastLoudAtRef.current > SILENCE_HOLD_MS) {
+          stopRecording();
+          return; // stopRecording() -> onstop tears this loop down
+        }
       }
 
       rafRef.current = requestAnimationFrame(tick);
