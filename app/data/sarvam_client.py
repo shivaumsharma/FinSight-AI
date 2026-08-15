@@ -20,9 +20,11 @@ Confirmed against Sarvam's live REST API docs, not guessed:
 - multipart/form-data POST, auth via `api-subscription-key` header
   (NOT Bearer-prefixed -- different convention from this app's own
   session tokens).
-- WebM is a natively supported input format, which matters because
-  browsers' MediaRecorder defaults to audio/webm;codecs=opus -- no
-  client-side transcoding needed anywhere in this pipeline.
+- The endpoint rejects webm/opus outright (only wav/mp3/aac/... are
+  accepted), which matters because browsers' MediaRecorder defaults to
+  audio/webm;codecs=opus -- VoiceInputButton.tsx decodes each recording
+  via the Web Audio API and re-encodes it to WAV client-side before
+  upload, so this client always receives WAV.
 - The synchronous endpoint used here caps input at 30 seconds of audio
   (a separate batch API exists for longer clips, not needed for a
   spoken question -- VoiceInputButton enforces a 25s recording ceiling
