@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import AuthGate from "@/components/AuthGate";
 import BottomNav from "@/components/BottomNav";
-import VoiceInputButton from "@/components/VoiceInputButton";
+import VoiceInputButton, { MicIcon } from "@/components/VoiceInputButton";
+import { useConversationalAssistant } from "@/lib/useConversationalAssistant";
+import { sessionStatusLabel, SpeakerIcon } from "@/components/ConversationalAssistantUI";
+import { useEffect, useRef } from "react";
 import type { ChatMessage } from "@/lib/types";
 
 // The fast conversational assistant -- deliberately separate from the
@@ -14,7 +16,10 @@ import type { ChatMessage } from "@/lib/types";
 // MAX_CONCURRENT_JOBS=1, so chat can't reuse it and stay fast). A
 // full_report_request reply hands off to that existing flow via the
 // same `?q=` pre-fill pattern the stock detail page's own link uses,
-// rather than duplicating the job/poll logic here.
+// rather than duplicating the job/poll logic here. All the state and
+// session-loop logic lives in useConversationalAssistant -- the same
+// hook backs the compact widget embedded on Home, this is just the
+// full-page layout (full message thread, sticky input bar).
 export default function ChatPage() {
   return (
     <AuthGate>
@@ -24,109 +29,105 @@ export default function ChatPage() {
 }
 
 function ChatContent() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [historyLoaded, setHistoryLoaded] = useState(false);
-  const [historyError, setHistoryError] = useState(false);
-  const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const a = useConversationalAssistant();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch("/api/chat/history")
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((data) => setMessages(data.messages ?? []))
-      .catch(() => setHistoryError(true))
-      .finally(() => setHistoryLoaded(true));
-  }, []);
-
-  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, sending]);
-
-  async function handleSend(e: React.FormEvent) {
-    e.preventDefault();
-    const message = input.trim();
-    if (!message || sending) return;
-
-    setInput("");
-    setError(null);
-    setSending(true);
-    // Optimistic user bubble -- the server persists the real row, but
-    // waiting for the round-trip before showing what was just typed
-    // would make every message feel laggy.
-    const optimisticUser: ChatMessage = {
-      id: `local-${Date.now()}`, role: "user", content: message, intent: null, ticker: null, created_at: Date.now() / 1000,
-    };
-    setMessages((prev) => [...prev, optimisticUser]);
-
-    try {
-      const resp = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
-      });
-      if (!resp.ok) throw new Error("chat request failed");
-      const data = await resp.json();
-      const assistantMessage: ChatMessage = {
-        id: `local-${Date.now()}-reply`, role: "assistant", content: data.reply,
-        intent: data.intent, ticker: data.ticker, created_at: Date.now() / 1000,
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
-    } catch {
-      setError("Couldn't reach the assistant. Try again.");
-    } finally {
-      setSending(false);
-    }
-  }
+  }, [a.messages, a.sending]);
 
   return (
     <div className="min-h-screen bg-bg pb-36">
       <div className="mx-auto max-w-2xl px-5 py-8">
-        <h1 className="font-mono text-lg font-bold text-text">Chat</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="font-mono text-lg font-bold text-text">Chat</h1>
+          <button
+            type="button"
+            onClick={a.toggleVoiceMode}
+            aria-label={a.voiceMode ? "Turn off spoken replies" : "Turn on spoken replies"}
+            title={a.voiceMode ? "Spoken replies on -- tap to turn off" : "Spoken replies off -- tap to turn on"}
+            className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 font-mono text-[10px] font-bold transition-colors ${
+              a.voiceMode ? "border-accent text-accent" : "border-border text-dim hover:text-muted"
+            }`}
+          >
+            <SpeakerIcon speaking={a.speaking} />
+            {a.speaking ? "SPEAKING" : a.voiceMode ? "VOICE ON" : "VOICE OFF"}
+          </button>
+        </div>
         <p className="mt-1 font-mono text-[10px] text-dim">
           Ask about your portfolio or a specific ticker. Informational only, not personalized investment advice.
         </p>
 
+        {a.sessionActive ? (
+          <button
+            type="button"
+            onClick={a.endSession}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-accent bg-accent/10 py-3 font-mono text-xs font-bold text-accent"
+          >
+            <MicIcon active={a.micState === "recording"} />
+            {sessionStatusLabel(a.micState, a.sending, a.speaking)} -- TAP TO END SESSION
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={a.startSession}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-card py-3 font-mono text-xs font-bold text-muted hover:border-accent hover:text-accent"
+          >
+            <MicIcon active={false} />
+            START VOICE SESSION
+          </button>
+        )}
+
         <div className="mt-6 flex flex-col gap-3">
-          {historyLoaded && historyError && (
+          {a.historyLoaded && a.historyError && (
             <p className="mt-4 text-center font-mono text-xs text-danger">
               Couldn&apos;t load your chat history. Try again.
             </p>
           )}
-          {historyLoaded && !historyError && messages.length === 0 && (
+          {a.historyLoaded && !a.historyError && a.messages.length === 0 && (
             <p className="mt-4 text-center font-mono text-xs text-dim">
               Try &quot;what&apos;s my portfolio look like&quot; or &quot;what&apos;s going on with AAPL&quot;.
             </p>
           )}
-          {messages.map((m) => (
+          {a.messages.map((m) => (
             <MessageBubble key={m.id} message={m} />
           ))}
-          {sending && (
+          {a.sending && (
             <div className="self-start rounded-lg border border-border bg-card px-3.5 py-2.5 font-mono text-xs text-muted">
               thinking&hellip;
             </div>
           )}
-          {error && <p className="font-mono text-[10px] text-danger">{error}</p>}
+          {a.error && <p className="font-mono text-[10px] text-danger">{a.error}</p>}
           <div ref={bottomRef} />
         </div>
       </div>
 
       <div className="fixed inset-x-0 bottom-16 z-10 border-t border-border bg-bg/95 px-5 py-3 backdrop-blur">
-        <form onSubmit={handleSend} className="mx-auto flex max-w-2xl items-center gap-2">
+        <form onSubmit={a.handleSend} className="mx-auto flex max-w-2xl items-center gap-2">
           <input
             type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="ask finsight..."
-            disabled={sending}
+            value={a.input}
+            onChange={(e) => a.setInput(e.target.value)}
+            placeholder={a.sessionActive ? "voice session active..." : "ask finsight..."}
+            disabled={a.sending || a.sessionActive}
             autoComplete="off"
             className="min-w-0 flex-1 rounded-lg border border-border bg-card px-3.5 py-2.5 font-mono text-sm text-text placeholder:text-muted focus:outline-none focus:border-accent disabled:opacity-60"
           />
-          <VoiceInputButton onTranscript={setInput} disabled={sending} />
+          <VoiceInputButton
+            ref={a.voiceInputRef}
+            onTranscript={a.handleTranscript}
+            // Not disabled while merely "speaking" (even though
+            // `sending` is still true for that whole window, since
+            // synthesizeAndSpeak is awaited before sending flips back
+            // to false) -- a tap during playback is barge-in, and
+            // disabling the button would make that unreachable.
+            disabled={a.sending && !a.speaking}
+            onRecordingStart={a.stopSpeaking}
+            onStateChange={a.handleMicStateChange}
+          />
           <button
             type="submit"
-            disabled={sending || !input.trim()}
+            disabled={a.sending || a.sessionActive || !a.input.trim()}
             className="rounded-lg bg-accent px-4 py-2.5 font-mono text-xs font-bold text-bg disabled:cursor-not-allowed disabled:opacity-40"
           >
             SEND
