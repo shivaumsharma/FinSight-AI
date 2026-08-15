@@ -259,7 +259,7 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
         {/* Conversational assistant -- active the instant the app
             opens, not buried behind the separate Chat tab. Same
             hook/session-loop as the full-page /chat view. */}
-        <HomeAssistant />
+        <HomeAssistant userName={greetingName(email, displayName)} />
 
         <ScoreboardHomeCard />
 
