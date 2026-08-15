@@ -20,6 +20,7 @@ import MarketMovers from "@/components/MarketMovers";
 import ScoreboardHomeCard from "@/components/ScoreboardHomeCard";
 import SentimentGauge from "@/components/SentimentGauge";
 import VoiceInputButton from "@/components/VoiceInputButton";
+import HomeAssistant from "@/components/HomeAssistant";
 
 const QUICK_TICKERS = ["AAPL", "NVDA", "TSLA", "MSFT"];
 
@@ -167,22 +168,9 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
           {greetingForHour(hour)}, {greetingName(email, displayName)}
         </h1>
 
-        <ScoreboardHomeCard />
-
-        <IndicesCarousel />
-
-        <CurrencyTracker />
-
-        <Portfolio />
-
-        <OrderTicket />
-
-        <MarketMovers />
-
-        <SentimentGauge />
-
-        <MarketNews />
-
+        {/* RAG research agent -- the app's core interaction, kept above
+            the supplementary market widgets below rather than buried
+            under them. */}
         {!isBusy && status !== "done" && (
           <p className="mt-2 text-sm text-muted">
             An LLM planning agent that builds institutional-style equity research on demand. Not a
@@ -267,6 +255,27 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
             <ReportView result={result} jobId={jobId} latencySeconds={latencySeconds} />
           </>
         )}
+
+        {/* Conversational assistant -- active the instant the app
+            opens, not buried behind the separate Chat tab. Same
+            hook/session-loop as the full-page /chat view. */}
+        <HomeAssistant userName={greetingName(email, displayName)} />
+
+        <ScoreboardHomeCard />
+
+        <IndicesCarousel />
+
+        <CurrencyTracker />
+
+        <Portfolio />
+
+        <OrderTicket />
+
+        <MarketMovers />
+
+        <SentimentGauge />
+
+        <MarketNews />
 
         <p className="mt-16 text-center font-mono text-[10px] text-dim">
           LLM Planner + RAG over live SEC filings, ChromaDB, FinBERT and DCF valuation tools

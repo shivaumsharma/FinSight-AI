@@ -23,7 +23,7 @@ from app.api.main import app
 from app.api.serialization import context_to_api_dict, financial_df_from_json
 from app.core import llm_provider as lp
 from app.core.research_context import ResearchContext
-from app.data import sarvam_client
+from app.data import sarvam_client, sarvam_tts_client
 from app.data.market_data import TickerNotFoundError
 
 
@@ -506,7 +506,7 @@ def test_stock_portfolio_fit_requires_auth(client):
 
 def test_post_chat_message_returns_the_reply_and_persists_both_turns(client, monkeypatch, auth_headers):
     fake_result = {"reply": "You have no holdings yet.", "intent": "portfolio_status", "ticker": None}
-    monkeypatch.setattr(main, "handle_chat_message", lambda user_id, message: fake_result)
+    monkeypatch.setattr(main, "handle_chat_message", lambda user_id, message, history: fake_result)
 
     resp = client.post("/v1/chat", json={"message": "hows my portfolio"}, headers=auth_headers)
 
@@ -518,6 +518,27 @@ def test_post_chat_message_returns_the_reply_and_persists_both_turns(client, mon
     assert history[0]["content"] == "hows my portfolio"
     assert history[1]["content"] == "You have no holdings yet."
     assert history[1]["intent"] == "portfolio_status"
+
+
+def test_post_chat_message_passes_prior_history_not_including_the_current_message(client, monkeypatch, auth_headers):
+    # The message being classified right now must never appear inside
+    # its own "history" argument -- history is everything BEFORE it.
+    monkeypatch.setattr(
+        main, "handle_chat_message",
+        lambda user_id, message, history: {"reply": "first reply", "intent": "general", "ticker": None},
+    )
+    client.post("/v1/chat", json={"message": "first message"}, headers=auth_headers)
+
+    captured = {}
+
+    def _fake_handle_second(user_id, message, history):
+        captured["history"] = history
+        return {"reply": "second reply", "intent": "general", "ticker": None}
+
+    monkeypatch.setattr(main, "handle_chat_message", _fake_handle_second)
+    client.post("/v1/chat", json={"message": "second message"}, headers=auth_headers)
+
+    assert [m["content"] for m in captured["history"]] == ["first message", "first reply"]
 
 
 def test_post_chat_message_rejects_a_blank_message(client, auth_headers):
@@ -903,6 +924,57 @@ def test_onboarding_rejects_an_invalid_horizon(client, auth_headers):
 
 def test_onboarding_requires_auth(client):
     resp = client.patch("/v1/auth/onboarding", json=_onboarding_body())
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------- POST /v1/onboarding/classify-answer
+
+def test_classify_onboarding_answer_returns_the_mapped_value(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "classify_onboarding_answer", lambda field, answer: "Moderate")
+
+    resp = client.post(
+        "/v1/onboarding/classify-answer",
+        json={"field": "risk_tolerance", "answer": "somewhere in the middle"},
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"value": "Moderate"}
+
+
+def test_classify_onboarding_answer_returns_null_when_ambiguous(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(main, "classify_onboarding_answer", lambda field, answer: None)
+
+    resp = client.post(
+        "/v1/onboarding/classify-answer",
+        json={"field": "risk_tolerance", "answer": "what's the weather like"},
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"value": None}
+
+
+def test_classify_onboarding_answer_rejects_an_unknown_field(client, auth_headers):
+    resp = client.post(
+        "/v1/onboarding/classify-answer",
+        json={"field": "favorite_color", "answer": "blue"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
+
+
+def test_classify_onboarding_answer_rejects_a_blank_answer(client, auth_headers):
+    resp = client.post(
+        "/v1/onboarding/classify-answer",
+        json={"field": "risk_tolerance", "answer": "   "},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
+
+
+def test_classify_onboarding_answer_requires_auth(client):
+    resp = client.post("/v1/onboarding/classify-answer", json={"field": "risk_tolerance", "answer": "moderate"})
     assert resp.status_code == 401
 
 
@@ -1599,3 +1671,46 @@ def test_transcribe_voice_rejects_oversized_file(client, monkeypatch, auth_heade
 
     assert resp.status_code == 400
     assert resp.json()["code"] == "INVALID_AUDIO"
+
+
+# ---------------------------------------------------------- POST /v1/voice/synthesize
+
+def test_synthesize_voice_success(client, monkeypatch, auth_headers):
+    monkeypatch.setattr(sarvam_tts_client, "synthesize", lambda *a, **k: b"fake-wav-bytes")
+
+    resp = client.post("/v1/voice/synthesize", json={"text": "Your portfolio is up 4%."}, headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.content == b"fake-wav-bytes"
+    assert resp.headers["content-type"] == "audio/wav"
+
+
+def test_synthesize_voice_requires_auth(client):
+    resp = client.post("/v1/voice/synthesize", json={"text": "hello"})
+    assert resp.status_code == 401
+
+
+def test_synthesize_voice_maps_sarvam_failure_to_503(client, monkeypatch, auth_headers):
+    def _boom(*a, **k):
+        raise sarvam_tts_client.SarvamSynthesisError("Sarvam TTS request failed: synthetic")
+
+    monkeypatch.setattr(sarvam_tts_client, "synthesize", _boom)
+
+    resp = client.post("/v1/voice/synthesize", json={"text": "hello"}, headers=auth_headers)
+
+    assert resp.status_code == 503
+    assert resp.json()["code"] == "TTS_UNAVAILABLE"
+
+
+def test_synthesize_voice_rejects_blank_text(client, auth_headers):
+    resp = client.post("/v1/voice/synthesize", json={"text": "   "}, headers=auth_headers)
+    assert resp.status_code == 422
+
+
+def test_synthesize_voice_rejects_text_over_the_character_limit(client, auth_headers):
+    resp = client.post(
+        "/v1/voice/synthesize",
+        json={"text": "x" * (sarvam_tts_client.MAX_TEXT_CHARS + 1)},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422

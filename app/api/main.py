@@ -44,14 +44,14 @@ from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from typing import Literal, Optional
 
-from fastapi import Depends, FastAPI, File, Header, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Header, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, field_validator
 
 from app.api import auth, db, errors, jobs
 from app.core.company_resolver import get_company_name, resolve_companies, suggest_companies
-from app.data import sarvam_client
+from app.data import sarvam_client, sarvam_tts_client
 from app.data.market_data import (
     TickerNotFoundError, get_corporate_actions, get_corporate_actions_history, get_quote, get_usd_conversion_rate,
 )
@@ -66,8 +66,9 @@ from app.reasoning.backtest_stats import get_backtest_accuracy_summary
 from app.reasoning.call_tracker import check_matured_checkpoints, get_scoreboard
 from app.reasoning.market_movers import get_top_movers
 from app.reasoning.model_consensus import compute_consensus, get_model_opinions, get_stock_model_opinions
-from app.reasoning.chat_router import handle_chat_message
+from app.reasoning.chat_router import MAX_HISTORY_MESSAGES, handle_chat_message
 from app.reasoning.portfolio_fit import get_portfolio_fit_for_ticker
+from app.reasoning.onboarding_voice import classify_onboarding_answer
 from app.reasoning.real_estate_guidance import get_real_estate_guidance
 from app.reporting.news_client import fetch_company_news, fetch_market_news
 from app.reporting.portfolio_summary import build_portfolio_view
@@ -525,6 +526,32 @@ def update_onboarding(body: OnboardingRequest, current_user: str = Depends(auth.
     return {"status": "ok"}
 
 
+class OnboardingAnswerRequest(BaseModel):
+    field: Literal[
+        "risk_tolerance", "investment_goal", "investment_horizon",
+        "interested_in_crypto", "interested_in_real_estate",
+    ]
+    answer: str
+
+    @field_validator("answer")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("answer must not be blank")
+        return v
+
+
+@app.post("/v1/onboarding/classify-answer")
+def classify_onboarding_answer_endpoint(body: OnboardingAnswerRequest, current_user: str = Depends(auth.get_current_user)):
+    """Powers voice-driven onboarding -- maps a spoken free-text answer
+    onto one of that field's fixed options (or null if ambiguous).
+    Never writes anything itself; the caller still submits the final
+    answers through the existing PATCH /v1/auth/onboarding above, which
+    stays the actual (and only) write path/validation gate."""
+    value = classify_onboarding_answer(body.field, body.answer)
+    return {"value": value}
+
+
 @app.get("/v1/auth/real-estate-guidance")
 def get_real_estate_guidance_for_user(current_user: str = Depends(auth.get_current_user)):
     # {} (not null) when the user hasn't opted in -- lets the frontend
@@ -642,9 +669,47 @@ async def transcribe_voice(
             content_type=file.content_type or "audio/webm",
         )
     except sarvam_client.SarvamTranscriptionError as e:
+        # Logged server-side (not just returned in the response body) --
+        # the response body is all a browser toast shows the user, but
+        # diagnosing a real-device failure after the fact needs this in
+        # Cloud Run's own logs, not a screenshot of a truncated toast.
+        logger.warning(f"Sarvam STT failed for user {current_user}, {len(audio_bytes)} bytes: {e}")
         raise errors.stt_unavailable(str(e))
 
     return {"transcript": transcript}
+
+
+class VoiceSynthesizeRequest(BaseModel):
+    text: str
+
+    @field_validator("text")
+    @classmethod
+    def _valid_text(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("text must not be blank")
+        if len(v) > sarvam_tts_client.MAX_TEXT_CHARS:
+            raise ValueError(f"text must be under {sarvam_tts_client.MAX_TEXT_CHARS} characters")
+        return v
+
+
+@app.post("/v1/voice/synthesize")
+def synthesize_voice(body: VoiceSynthesizeRequest, current_user: str = Depends(auth.get_current_user)):
+    """
+    Text-to-speech for spoken chat replies (voice-conversation feature,
+    Phase 1) -- returns raw WAV audio bytes directly, not JSON, so the
+    frontend can play it as a Blob without a second base64-decode round
+    trip on top of the one sarvam_tts_client.synthesize() already does
+    against Sarvam's own base64 response. Session-gated like voice
+    transcription above -- TTS calls cost real money against Sarvam's
+    rate-limited tiers.
+    """
+    try:
+        audio_bytes = sarvam_tts_client.synthesize(body.text)
+    except sarvam_tts_client.SarvamSynthesisError as e:
+        logger.warning(f"Sarvam TTS failed for user {current_user}: {e}")
+        raise errors.tts_unavailable(str(e))
+
+    return Response(content=audio_bytes, media_type="audio/wav")
 
 
 @app.post("/v1/research")
@@ -865,15 +930,25 @@ def get_my_stocks_news(limit: int = Query(default=15, le=30), current_user: str 
     portfolio_tickers = {h["ticker"] for h in db.get_portfolio_holdings(current_user)}
     tickers = watchlist_tickers | portfolio_tickers
 
+    # Cap per ticker before merging: Finnhub's free news coverage is
+    # heavily US-skewed (near-zero for .NS-suffixed NSE tickers), so
+    # without a cap a single well-covered ticker (e.g. a US stock sitting
+    # on the watchlist) can silently fill the entire aggregated list even
+    # though it's a minority of the underlying tickers.
+    MAX_ARTICLES_PER_TICKER = 3
     cutoff = (date.today() - timedelta(days=7)).isoformat()
     seen_urls = set()
     articles = []
     for ticker in tickers:
+        kept_for_ticker = 0
         for article in fetch_company_news(ticker):
+            if kept_for_ticker >= MAX_ARTICLES_PER_TICKER:
+                break
             if article["date"] < cutoff or article["url"] in seen_urls:
                 continue
             seen_urls.add(article["url"])
             articles.append({**article, "ticker": ticker})
+            kept_for_ticker += 1
 
     articles.sort(key=lambda a: a["date"], reverse=True)
     return {"articles": articles[:limit]}
@@ -1102,8 +1177,13 @@ def post_chat_message(body: ChatMessageRequest, current_user: str = Depends(auth
     # this endpoint's bottleneck too. Both turns are persisted
     # regardless of how the assistant's turn was produced, so
     # GET /v1/chat/history always reflects the real conversation.
+    #
+    # History is fetched BEFORE persisting this message -- handle_chat_
+    # message needs "everything before now", not a list that already
+    # includes the message it's about to classify.
+    history = db.list_chat_messages(current_user, limit=MAX_HISTORY_MESSAGES)
     db.add_chat_message(current_user, "user", body.message)
-    result = handle_chat_message(current_user, body.message)
+    result = handle_chat_message(current_user, body.message, history)
     db.add_chat_message(current_user, "assistant", result["reply"], intent=result["intent"], ticker=result["ticker"])
     return result
 

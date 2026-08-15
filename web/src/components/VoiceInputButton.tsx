@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 // Hard recording ceiling, not a substitute for silence detection below --
 // margin under Sarvam's synchronous STT endpoint's own 30s cap (see
@@ -18,9 +18,35 @@ const MAX_RECORDING_MS = 25_000;
 // silently for a moment before starting would cut the recording off
 // before they've said anything.
 const SILENCE_RMS_THRESHOLD = 0.02;
-const SILENCE_HOLD_MS = 1600;
+// 2600ms, not 1600ms -- found live in a real voice session: 1.6s cut
+// a user off mid-thought after "Okay, so..." (a natural pause while
+// forming the rest of a sentence), sending an incomplete utterance as
+// its own turn instead of waiting for the actual question. A longer
+// hold costs a bit of latency on a genuinely finished sentence, which
+// is a much smaller cost than losing the rest of what someone meant
+// to say.
+const SILENCE_HOLD_MS = 2600;
+// A single loud sample (a mic bump, a cough, ambient noise) must not
+// latch hasSpokenRef on its own -- found live in a real voice session:
+// a session's auto-re-armed mic picked up a brief noise blip with no
+// one actually speaking, and Sarvam hallucinated a plausible-sounding
+// word ("Hello") out of what was functionally silence. Requiring the
+// signal to stay continuously above SILENCE_RMS_THRESHOLD for this
+// long filters out a blip while still being far under normal
+// word-length, so real speech onset is still caught quickly.
+const MIN_VOICED_MS = 300;
 
-type VoiceState = "idle" | "recording" | "transcribing" | "error";
+export type VoiceState = "idle" | "recording" | "transcribing" | "error";
+
+export interface VoiceInputHandle {
+  // Imperative start, for a caller that needs to arm the mic without a
+  // click -- the voice-session loop (chat/page.tsx) re-arms it itself
+  // right after a spoken reply finishes, which is never a click event.
+  start: () => void;
+  // Imperative stop, for a caller ending a session mid-recording (the
+  // user hit "end session" while the mic was still listening).
+  stop: () => void;
+}
 
 // Sarvam's /speech-to-text endpoint rejects webm/opus outright (only
 // wav/mp3/aac/... are accepted) -- but MediaRecorder can't record
@@ -90,7 +116,7 @@ function encodeWav(audioBuffer: AudioBuffer): Blob {
   return new Blob([buffer], { type: "audio/wav" });
 }
 
-function MicIcon({ active }: { active: boolean }) {
+export function MicIcon({ active }: { active: boolean }) {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
       <rect x="9" y="2" width="6" height="12" rx="3" />
@@ -110,18 +136,31 @@ function SpinnerIcon() {
   );
 }
 
-// Peer of the question <input> in page.tsx -- only ever calls
-// onTranscript (page.tsx's setQuery), never submits/runs anything
-// itself. A misheard word should cost nothing more than the Sarvam
-// call; the user reviews/edits the filled-in text before hitting the
-// existing submit button themselves.
-export default function VoiceInputButton({
-  onTranscript,
-  disabled,
-}: {
+// Peer of the question <input> in page.tsx -- by default only ever
+// calls onTranscript (page.tsx's setQuery), never submits/runs
+// anything itself, so a misheard word costs nothing more than the
+// Sarvam call and the user reviews/edits before hitting submit
+// themselves. The voice-session loop (chat/page.tsx) is the one
+// caller that treats onTranscript as an auto-submit signal instead --
+// that's a decision the caller makes, this component's own contract
+// doesn't change.
+const VoiceInputButton = forwardRef<VoiceInputHandle, {
   onTranscript: (text: string) => void;
   disabled?: boolean;
-}) {
+  // Fired the instant recording actually starts (mic permission
+  // granted, MediaRecorder live) -- lets a caller with its own audio
+  // playback (e.g. spoken chat replies) implement barge-in: opening
+  // the mic cuts off whatever's currently speaking. Optional so every
+  // existing caller (page.tsx, chat/page.tsx's text-fill usage) is
+  // unaffected.
+  onRecordingStart?: () => void;
+  // Fired whenever the internal idle/recording/transcribing/error
+  // state changes -- lets a caller (the voice-session loop) render one
+  // unified status indicator that spans both this component's own
+  // recording state and its own TTS-playback state, without
+  // duplicating this component's state machine.
+  onStateChange?: (state: VoiceState) => void;
+}>(function VoiceInputButton({ onTranscript, disabled, onRecordingStart, onStateChange }, ref) {
   const [state, setState] = useState<VoiceState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [supported, setSupported] = useState(true);
@@ -139,6 +178,18 @@ export default function VoiceInputButton({
   const rafRef = useRef<number | null>(null);
   const hasSpokenRef = useRef(false);
   const lastLoudAtRef = useRef(0);
+  // Tracks how long the signal has been continuously above threshold,
+  // reset on any dip below it -- hasSpokenRef only latches true once
+  // this streak clears MIN_VOICED_MS, not on a single loud sample.
+  const voicedStreakMsRef = useRef(0);
+  const lastTickAtRef = useRef(0);
+
+  useImperativeHandle(ref, () => ({ start: () => void startRecording(), stop: stopRecording }), []);
+
+  useEffect(() => {
+    onStateChange?.(state);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
 
   useEffect(() => {
     setSupported(
@@ -165,6 +216,8 @@ export default function VoiceInputButton({
     if (!analyser) return;
 
     const data = new Uint8Array(analyser.frequencyBinCount);
+    lastTickAtRef.current = performance.now();
+    voicedStreakMsRef.current = 0;
     const tick = () => {
       analyser.getByteTimeDomainData(data);
       let sumSquares = 0;
@@ -174,13 +227,19 @@ export default function VoiceInputButton({
       }
       const rms = Math.sqrt(sumSquares / data.length);
       const now = performance.now();
+      const deltaMs = now - lastTickAtRef.current;
+      lastTickAtRef.current = now;
 
       if (rms > SILENCE_RMS_THRESHOLD) {
-        hasSpokenRef.current = true;
         lastLoudAtRef.current = now;
-      } else if (hasSpokenRef.current && now - lastLoudAtRef.current > SILENCE_HOLD_MS) {
-        stopRecording();
-        return; // stopRecording() -> onstop tears this loop down
+        voicedStreakMsRef.current += deltaMs;
+        if (voicedStreakMsRef.current >= MIN_VOICED_MS) hasSpokenRef.current = true;
+      } else {
+        voicedStreakMsRef.current = 0;
+        if (hasSpokenRef.current && now - lastLoudAtRef.current > SILENCE_HOLD_MS) {
+          stopRecording();
+          return; // stopRecording() -> onstop tears this loop down
+        }
       }
 
       rafRef.current = requestAnimationFrame(tick);
@@ -234,6 +293,7 @@ export default function VoiceInputButton({
       recorder.start();
       mediaRecorderRef.current = recorder;
       setState("recording");
+      onRecordingStart?.();
       stopTimerRef.current = setTimeout(() => stopRecording(), MAX_RECORDING_MS);
       watchForSilence();
     } catch {
@@ -303,4 +363,6 @@ export default function VoiceInputButton({
       )}
     </div>
   );
-}
+});
+
+export default VoiceInputButton;
