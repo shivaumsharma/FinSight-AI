@@ -196,3 +196,49 @@ def verify_pdf_signature(job_id: str, expires_at: int, signature: str) -> bool:
     message = f"{job_id}:{expires_at}".encode("utf-8")
     expected = hmac.new(_PDF_SHARE_SECRET.encode("utf-8"), message, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature)
+
+
+# Same fallback pattern as _PDF_SHARE_SECRET above, kept as its own
+# separate secret rather than reused -- a token minted for one purpose
+# should never verify against another purpose's HMAC, even though both
+# currently use the identical "random fallback if unset" shape.
+_WAKE_LISTEN_SECRET = os.environ.get("WAKE_LISTEN_SECRET") or secrets.token_urlsafe(32)
+WAKE_LISTEN_TOKEN_TTL_SECONDS = 60
+
+
+def sign_wake_listen_token(user_id: str) -> str:
+    """Short-lived, single-purpose credential for the browser-direct
+    /v1/voice/wake-listen WebSocket connection (main.py). The REAL
+    session token lives in an httpOnly cookie specifically so
+    client-side JS can never read it (XSS protection, see
+    session.ts's own comment) -- this mints a separate, narrowly
+    scoped, 60-second-lived token instead of ever exposing that real
+    one to the browser. Same "expiry baked into the signed message"
+    shape as sign_pdf_url above, but self-contained: the user_id is
+    encoded IN the token (not looked up from a table), since the
+    WebSocket handshake has no session-cookie access to resolve one
+    from -- verify_wake_listen_token below is what extracts it back
+    out, only if the signature actually matches."""
+    expires_at = int(time.time()) + WAKE_LISTEN_TOKEN_TTL_SECONDS
+    message = f"{user_id}:{expires_at}".encode("utf-8")
+    signature = hmac.new(_WAKE_LISTEN_SECRET.encode("utf-8"), message, hashlib.sha256).hexdigest()
+    return f"{user_id}.{expires_at}.{signature}"
+
+
+def verify_wake_listen_token(token: str) -> Optional[str]:
+    """Returns the user_id if `token` is a valid, unexpired
+    sign_wake_listen_token() output, else None. user_id is a uuid4
+    string (hyphens only, see db.py's create_user) so splitting on "."
+    is unambiguous."""
+    try:
+        user_id, expires_at_str, signature = token.split(".", 2)
+        expires_at = int(expires_at_str)
+    except (ValueError, AttributeError):
+        return None
+    if expires_at < time.time():
+        return None
+    message = f"{user_id}:{expires_at}".encode("utf-8")
+    expected = hmac.new(_WAKE_LISTEN_SECRET.encode("utf-8"), message, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        return None
+    return user_id

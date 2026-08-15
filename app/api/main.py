@@ -44,14 +44,14 @@ from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from typing import Literal, Optional
 
-from fastapi import Depends, FastAPI, File, Header, Query, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Header, Query, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, field_validator
 
 from app.api import auth, db, errors, jobs
 from app.core.company_resolver import get_company_name, resolve_companies, suggest_companies
-from app.data import sarvam_client, sarvam_tts_client
+from app.data import sarvam_client, sarvam_realtime_client, sarvam_tts_client
 from app.data.market_data import (
     TickerNotFoundError, get_corporate_actions, get_corporate_actions_history, get_quote, get_usd_conversion_rate,
 )
@@ -709,6 +709,86 @@ def synthesize_voice(body: VoiceSynthesizeRequest, current_user: str = Depends(a
         raise errors.tts_unavailable(str(e))
 
     return Response(content=audio_bytes, media_type="audio/wav")
+
+
+@app.get("/v1/voice/wake-listen-token")
+def get_wake_listen_token(current_user: str = Depends(auth.get_current_user)):
+    """
+    Mints the short-lived credential the browser needs to open the
+    /v1/voice/wake-listen WebSocket directly against this backend (see
+    that endpoint's own docstring for why it can't just reuse the real
+    session token: that one lives in an httpOnly cookie specifically so
+    client-side JS can never read it). Normal session-gated HTTP
+    endpoint, proxied through the Next.js app like every other one --
+    only the WebSocket connection itself talks to this backend
+    directly, since Next.js Route Handlers cannot proxy WebSockets.
+    """
+    return {"token": auth.sign_wake_listen_token(current_user), "expires_in": auth.WAKE_LISTEN_TOKEN_TTL_SECONDS}
+
+
+@app.websocket("/v1/voice/wake-listen")
+async def wake_listen(websocket: WebSocket):
+    """
+    Backs the "Hey FinSight" wake-word listener -- see
+    app/data/sarvam_realtime_client.py's own module docstring for why
+    this exists and what it does/doesn't do (detects the phrase only;
+    the actual command still goes through the existing batch STT
+    pipeline once detected).
+
+    Unlike every other endpoint in this file, the browser connects to
+    this one DIRECTLY (not proxied through the Next.js app -- see
+    GET /v1/voice/wake-listen-token above for why, and why that's safe
+    despite breaking the "browser never talks to Cloud Run directly"
+    pattern every other endpoint follows: this WebSocket carries no
+    deployment-level X-API-Key gate at all -- FastAPI's `http` request
+    middleware, including main.py's require_api_key, never runs for a
+    `websocket` ASGI scope -- so the short-lived, single-purpose,
+    HMAC-signed wake_token is the ONLY gate here, not a second layer on
+    top of one.
+
+    Auth: browsers cannot set custom headers on a WebSocket handshake,
+    so this can't reuse auth.get_current_user's normal Authorization-
+    header Depends() either way. The FIRST message after connecting
+    must be {"wake_token": "..."} (from the endpoint above), verified
+    via auth.verify_wake_listen_token. Every message after that first
+    one is raw binary audio, no further JSON expected from the browser.
+    """
+    await websocket.accept()
+
+    try:
+        first_message = await websocket.receive_json()
+    except Exception:
+        await websocket.close(code=4001, reason="Expected a JSON auth message first.")
+        return
+
+    user_id = auth.verify_wake_listen_token(first_message.get("wake_token", ""))
+    if user_id is None:
+        await websocket.close(code=4401, reason="Invalid or expired wake_token.")
+        return
+
+    try:
+        await sarvam_realtime_client.relay_for_wake_word(websocket)
+    except sarvam_realtime_client.SarvamRealtimeError as e:
+        logger.warning(f"Wake-word listener failed for user {user_id}: {e}")
+        try:
+            await websocket.send_json({"event": "error", "message": str(e)})
+            await websocket.close(code=1011)
+        except Exception:
+            pass  # the socket may already be closed/gone -- nothing left to notify
+        return
+    except WebSocketDisconnect:
+        return
+
+    # relay_for_wake_word returned normally rather than raising --
+    # already handles the ordinary "browser disconnected" case
+    # internally, so reaching here means it exited some other way.
+    # An ASGI WebSocket app that returns without ever sending a close
+    # frame leaves the connection in an undefined state (found live:
+    # this hung the test client indefinitely waiting for one).
+    try:
+        await websocket.close(code=1000)
+    except Exception:
+        pass
 
 
 @app.post("/v1/research")
