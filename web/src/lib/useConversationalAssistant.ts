@@ -227,6 +227,6 @@ export function useConversationalAssistant() {
     messages, historyLoaded, input, setInput, sending, error,
     voiceMode, toggleVoiceMode, speaking, sessionActive, micState,
     voiceInputRef, startSession, endSession, handleMicStateChange,
-    stopSpeaking, handleSend, handleTranscript,
+    stopSpeaking, handleSend, handleTranscript, synthesizeAndSpeak,
   };
 }

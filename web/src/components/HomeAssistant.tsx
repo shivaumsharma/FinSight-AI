@@ -1,22 +1,107 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import VoiceInputButton, { MicIcon } from "@/components/VoiceInputButton";
 import { useConversationalAssistant } from "@/lib/useConversationalAssistant";
 import { sessionStatusLabel, SpeakerIcon } from "@/components/ConversationalAssistantUI";
 
+const GREETED_SESSION_KEY = "finsight-greeted";
+
 // Compact conversational assistant, embedded on Home so talking to
 // FinSight (text or voice) is active the instant the app opens --
 // previously only reachable by first switching to the separate Chat
 // tab. Same useConversationalAssistant hook as the full-page /chat
-// view (identical session-loop behavior, no duplicated logic), just a
-// smaller footprint: only the latest exchange shown inline, with a
-// link to /chat for the full thread, since Home already has several
-// other cards below this one.
-export default function HomeAssistant() {
+// view (identical session-loop behavior, no duplicated logic).
+//
+// Two states, on purpose:
+// - Before any interaction this session: a minimal spoken greeting
+//   ("Hi <name>, what would you like to do today?") plus ONE big
+//   tap-to-talk control -- no visible text box, no message history,
+//   nothing to read before you can act. A real platform limit shapes
+//   this: a browser can never start listening on its own (mic access
+//   requires an actual tap, no exception, on every browser), so
+//   "voice-activated on open" in practice means "the greeting speaks
+//   itself, and the very next tap starts a full session" -- the
+//   closest thing to hands-free a web page can offer.
+// - After the first message either way: the fuller card (latest
+//   exchange, text input, link to the full thread) -- once there's
+//   something to review, hiding it would be worse, not more minimal.
+export default function HomeAssistant({ userName }: { userName: string }) {
   const a = useConversationalAssistant();
+  const greetedRef = useRef(false);
   const lastUser = [...a.messages].reverse().find((m) => m.role === "user");
   const lastAssistant = [...a.messages].reverse().find((m) => m.role === "assistant");
+  // Deliberately NOT derived from a.messages.length > 0 -- that would
+  // include history from EARLIER visits (fetched on mount), so a
+  // returning user with any past conversation would never see the
+  // greeting screen at all. This tracks only "did something happen
+  // THIS page visit" -- the greeting should show every time the app
+  // opens, not just the very first time ever.
+  const [justInteracted, setJustInteracted] = useState(false);
+  const hasInteracted = justInteracted || a.sessionActive;
+
+  async function handleGreetingSend(e: React.FormEvent) {
+    e.preventDefault();
+    if (!a.input.trim()) return;
+    setJustInteracted(true);
+    await a.handleSend(e);
+  }
+
+  useEffect(() => {
+    if (greetedRef.current) return;
+    if (sessionStorage.getItem(GREETED_SESSION_KEY)) return;
+    greetedRef.current = true;
+    sessionStorage.setItem(GREETED_SESSION_KEY, "1");
+    // Best-effort: browsers commonly block audio.play() this soon
+    // after a page load with no direct click on THIS page (autoplay
+    // policy) -- synthesizeAndSpeak already swallows a rejected
+    // play() silently, so a blocked greeting just never plays instead
+    // of erroring. The greeting text itself still renders either way.
+    void a.synthesizeAndSpeak(`Hi ${userName}, what would you like to do today?`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!hasInteracted) {
+    return (
+      <div className="mt-4 rounded-lg border border-border bg-card px-4 py-5 text-center">
+        <p className="font-mono text-sm text-text">
+          Hi {userName}, what would you like to do today?
+        </p>
+        <button
+          type="button"
+          onClick={a.startSession}
+          aria-label="Start talking to FinSight"
+          className="mx-auto mt-3 flex h-14 w-14 items-center justify-center rounded-full border border-accent text-accent hover:bg-accent/10"
+        >
+          <MicIcon active={false} />
+        </button>
+        <p className="mt-2 font-mono text-[10px] text-dim">tap to talk, or type instead</p>
+        <form
+          onSubmit={handleGreetingSend}
+          className="mx-auto mt-3 flex max-w-sm items-center gap-2"
+        >
+          <input
+            type="text"
+            value={a.input}
+            onChange={(e) => a.setInput(e.target.value)}
+            placeholder="or type a question..."
+            disabled={a.sending}
+            autoComplete="off"
+            className="min-w-0 flex-1 rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs text-text placeholder:text-muted focus:outline-none focus:border-accent disabled:opacity-60"
+          />
+          <button
+            type="submit"
+            disabled={a.sending || !a.input.trim()}
+            className="shrink-0 rounded-lg bg-accent px-3 py-2 font-mono text-[11px] font-bold text-bg disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            SEND
+          </button>
+        </form>
+        {a.error && <p className="mt-1.5 font-mono text-[10px] text-danger">{a.error}</p>}
+      </div>
+    );
+  }
 
   return (
     <div className="mt-4 rounded-lg border border-border bg-card px-3.5 py-3">
