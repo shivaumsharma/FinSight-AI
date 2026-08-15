@@ -4,9 +4,16 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import VoiceInputButton, { MicIcon } from "@/components/VoiceInputButton";
 import { useConversationalAssistant } from "@/lib/useConversationalAssistant";
+import { useWakeWordListener } from "@/lib/useWakeWordListener";
 import { sessionStatusLabel, SpeakerIcon } from "@/components/ConversationalAssistantUI";
 
 const GREETED_SESSION_KEY = "finsight-greeted";
+
+function wakeWordLabel(state: "idle" | "listening" | "error"): string {
+  if (state === "listening") return 'LISTENING FOR "HEY FINSIGHT"';
+  if (state === "error") return "WAKE WORD ERROR -- TAP TO RETRY";
+  return 'ENABLE "HEY FINSIGHT"';
+}
 
 // Compact conversational assistant, embedded on Home so talking to
 // FinSight (text or voice) is active the instant the app opens --
@@ -41,11 +48,40 @@ export default function HomeAssistant({ userName }: { userName: string }) {
   const [justInteracted, setJustInteracted] = useState(false);
   const hasInteracted = justInteracted || a.sessionActive;
 
+  // Detecting the phrase only hands off to the EXISTING tap-to-start
+  // session loop for the actual command -- same reasoning as the
+  // backend relay's own docstring: keep the new, riskier code (a
+  // persistent mic stream + WebSocket) doing as little as possible,
+  // and reuse the already-hardened batch pipeline for everything else.
+  const wakeWord = useWakeWordListener(() => {
+    setJustInteracted(true);
+    wakeWord.pause();
+    void a.startSession();
+  });
+
+  // Resume listening for the NEXT wake phrase once the triggered
+  // session ends -- but only if the listener is still meant to be
+  // running (the user might have tapped "stop" mid-session, or a mic
+  // error might have already torn it down).
+  const prevSessionActiveRef = useRef(false);
+  useEffect(() => {
+    if (prevSessionActiveRef.current && !a.sessionActive && wakeWord.state === "listening") {
+      wakeWord.resume();
+    }
+    prevSessionActiveRef.current = a.sessionActive;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [a.sessionActive]);
+
   async function handleGreetingSend(e: React.FormEvent) {
     e.preventDefault();
     if (!a.input.trim()) return;
     setJustInteracted(true);
     await a.handleSend(e);
+  }
+
+  function toggleWakeWord() {
+    if (wakeWord.state === "listening") wakeWord.stop();
+    else void wakeWord.start();
   }
 
   useEffect(() => {
@@ -98,7 +134,17 @@ export default function HomeAssistant({ userName }: { userName: string }) {
             SEND
           </button>
         </form>
+        <button
+          type="button"
+          onClick={toggleWakeWord}
+          className={`mx-auto mt-3 block font-mono text-[10px] font-bold ${
+            wakeWord.state === "listening" ? "text-accent" : "text-dim hover:text-muted"
+          }`}
+        >
+          {wakeWordLabel(wakeWord.state)}
+        </button>
         {a.error && <p className="mt-1.5 font-mono text-[10px] text-danger">{a.error}</p>}
+        {wakeWord.errorMessage && <p className="mt-1.5 font-mono text-[10px] text-danger">{wakeWord.errorMessage}</p>}
       </div>
     );
   }
@@ -111,6 +157,16 @@ export default function HomeAssistant({ userName }: { userName: string }) {
           <Link href="/chat" className="font-mono text-[10px] font-bold text-muted hover:text-accent">
             FULL CONVERSATION &rarr;
           </Link>
+          <button
+            type="button"
+            onClick={toggleWakeWord}
+            title={wakeWordLabel(wakeWord.state)}
+            className={`flex items-center gap-1 rounded-md border px-2 py-1 font-mono text-[9px] font-bold transition-colors ${
+              wakeWord.state === "listening" ? "border-accent text-accent animate-pulse" : "border-border text-dim hover:text-muted"
+            }`}
+          >
+            <MicIcon active={wakeWord.state === "listening"} />
+          </button>
           <button
             type="button"
             onClick={a.toggleVoiceMode}
