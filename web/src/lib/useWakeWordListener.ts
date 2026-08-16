@@ -16,7 +16,7 @@ const CHUNK_SAMPLES = 4096; // ScriptProcessorNode buffer size, in samples at SA
 const RECONNECT_BEFORE_MS = 4 * 60 * 1000;
 const RECONNECT_AFTER_ERROR_MS = 2000;
 
-export type WakeWordState = "idle" | "listening" | "error";
+export type WakeWordState = "idle" | "connecting" | "listening" | "error";
 
 // Continuously streams the mic to the backend's /v1/voice/wake-listen
 // relay (app/data/sarvam_realtime_client.py), watching for "Hey
@@ -73,20 +73,31 @@ export function useWakeWordListener(onWakeDetected: (text: string) => void) {
 
       ws.onopen = () => {
         ws.send(JSON.stringify({ wake_token: token }));
-        setState("listening");
+        // Not "listening" yet -- this only confirms OUR WebSocket to the
+        // backend opened, well before the backend's own downstream
+        // connection to Sarvam is actually up. Flipping the UI to
+        // "listening" here let a user say the wake phrase into a
+        // connection that wasn't capturing yet, which read as the whole
+        // feature being slow/unreliable. The backend now sends an
+        // explicit "ready" event once Sarvam's session has actually
+        // begun (see sarvam_realtime_client.py's session.begin handling)
+        // -- that's the real signal.
+        setState("connecting");
         setErrorMessage(null);
       };
       ws.onmessage = (event) => {
         if (typeof event.data !== "string") return; // audio never arrives this direction, only JSON
         try {
           const data = JSON.parse(event.data);
-          if (data.event === "wake_detected") onWakeDetected(data.text ?? "");
+          if (data.event === "ready") setState("listening");
+          else if (data.event === "wake_detected") onWakeDetected(data.text ?? "");
         } catch {
           // ignore anything that isn't the JSON shape we expect
         }
       };
       ws.onclose = () => {
         if (stoppedRef.current) return;
+        setState("connecting"); // was silently stale at "listening" through a drop/reconnect before
         reconnectTimerRef.current = setTimeout(() => void openWs(), RECONNECT_AFTER_ERROR_MS);
       };
 
