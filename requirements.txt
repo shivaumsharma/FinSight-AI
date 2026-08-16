@@ -66,3 +66,14 @@ pypdf
 # POST /v1/voice/transcribe (first real multipart endpoint in this
 # codebase, for the home page's voice-input mic button).
 python-multipart
+
+# Sarvam's official SDK, for the wake-word listener's realtime STT
+# relay (app/data/sarvam_realtime_client.py) -- app/data/sarvam_client.py
+# and sarvam_tts_client.py deliberately use plain requests instead
+# (simple request/response, no SDK needed), but the realtime WebSocket
+# protocol's exact message shapes are worth getting from Sarvam's own
+# maintained client rather than hand-rolling raw JSON against docs that
+# turned out to be inconsistent across pages. Also pulls in `websockets`,
+# which uvicorn's WebSocketProtocol auto-detects for serving our own
+# WS endpoint -- no separate declaration needed.
+sarvamai
