@@ -85,9 +85,13 @@ export default function Watchlist() {
   async function handleRemove(t: string) {
     // Optimistic removal -- the DELETE endpoint is idempotent and
     // near-instant, no need to wait for the round-trip before the
-    // card disappears.
+    // card disappears. refresh() afterwards re-syncs from the server
+    // either way, so a failed delete doesn't leave the ticker
+    // permanently (and incorrectly) missing from the UI -- same
+    // approach as Portfolio.tsx's handleRemove.
     setItems((prev) => (prev ? prev.filter((i) => i.ticker !== t) : prev));
     await fetch(`/api/watchlist/${t}`, { method: "DELETE" }).catch(() => {});
+    refresh();
   }
 
   return (

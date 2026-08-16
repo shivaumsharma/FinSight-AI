@@ -24,6 +24,7 @@ EMAIL_ALREADY_REGISTERED = "EMAIL_ALREADY_REGISTERED"
 FORBIDDEN = "FORBIDDEN"
 RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED"
 TICKER_NOT_FOUND = "TICKER_NOT_FOUND"
+OPTIONS_UNAVAILABLE = "OPTIONS_UNAVAILABLE"
 BACKTEST_ACCURACY_UNAVAILABLE = "BACKTEST_ACCURACY_UNAVAILABLE"
 INSUFFICIENT_SHARES = "INSUFFICIENT_SHARES"
 INTERNAL_ERROR = "INTERNAL_ERROR"
@@ -108,6 +109,18 @@ def ticker_not_found(ticker: str) -> APIError:
         TICKER_NOT_FOUND,
         f"'{ticker}' doesn't look like a valid, currently-listed ticker.",
         status_code=status.HTTP_400_BAD_REQUEST,
+    )
+
+
+def options_unavailable(ticker: str) -> APIError:
+    # 404-family, same as ticker_not_found/backtest_accuracy_unavailable
+    # -- this is "the resource you asked for (an options chain) doesn't
+    # exist for this ticker," not a malformed request on the caller's
+    # part.
+    return APIError(
+        OPTIONS_UNAVAILABLE,
+        f"No listed options found for '{ticker}'.",
+        status_code=status.HTTP_404_NOT_FOUND,
     )
 
 

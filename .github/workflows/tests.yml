@@ -53,8 +53,18 @@ jobs:
       # above: a collection-time ModuleNotFoundError/RuntimeError on
       # every test module importing app.api.main or
       # test_nse_filings_client.py.
+      #
+      # sarvamai (app.data.sarvam_realtime_client's wake-word relay,
+      # imported at module load time by app.api.main) is the same
+      # recurring gap again -- added to requirements.txt without a
+      # matching update here, which broke collection for every test
+      # module importing app.api.main (test_api.py, test_orders.py,
+      # test_portfolio.py, test_watchlist.py) plus
+      # test_sarvam_realtime_client.py itself. No torch/chromadb
+      # dependency (it's a small HTTP/WebSocket client SDK), so it's
+      # cheap to add here like every other entry in this list.
       - name: Install test dependencies
-        run: pip install pandas numpy langgraph==1.2.9 redis fastapi httpx yfinance rapidfuzz python-dotenv pywebpush joblib scikit-learn python-multipart pypdf -r requirements-dev.txt
+        run: pip install pandas numpy langgraph==1.2.9 redis fastapi httpx yfinance rapidfuzz python-dotenv pywebpush joblib scikit-learn python-multipart pypdf sarvamai -r requirements-dev.txt
 
       # test_finbert.py and test_rag.py are manual smoke tests (see
       # their own docstrings) -- they need the full model stack and

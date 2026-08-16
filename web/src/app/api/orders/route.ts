@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FINSIGHT_API_URL, backendHeaders } from "@/lib/config";
+import { proxyFetch } from "@/lib/proxyFetch";
 import { getSessionToken } from "@/lib/session";
 
 // Proxies GET/POST /v1/orders -- same thin-proxy pattern as
@@ -8,7 +9,7 @@ export async function GET(request: NextRequest) {
   const limit = request.nextUrl.searchParams.get("limit") || "20";
   const sessionToken = await getSessionToken();
 
-  const resp = await fetch(`${FINSIGHT_API_URL}/v1/orders?limit=${encodeURIComponent(limit)}`, {
+  const resp = await proxyFetch(`${FINSIGHT_API_URL}/v1/orders?limit=${encodeURIComponent(limit)}`, {
     headers: backendHeaders(sessionToken),
     cache: "no-store",
   });
@@ -21,7 +22,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const sessionToken = await getSessionToken();
 
-  const resp = await fetch(`${FINSIGHT_API_URL}/v1/orders`, {
+  const resp = await proxyFetch(`${FINSIGHT_API_URL}/v1/orders`, {
     method: "POST",
     headers: backendHeaders(sessionToken),
     body: JSON.stringify({ ticker: body.ticker, side: body.side, quantity: body.quantity }),

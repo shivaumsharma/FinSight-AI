@@ -123,7 +123,7 @@ export default function FinancialPerformanceChart({ ticker, currency }: { ticker
 
       <div className="mt-2 rounded-lg border border-border bg-card px-3.5 py-3">
         {error ? (
-          <p className="py-6 text-center font-mono text-[11px] text-dim">Financial statement data isn&apos;t available for this ticker.</p>
+          <p className="py-6 text-center font-mono text-[11px] text-dim">Couldn&apos;t load financial statement data for this ticker.</p>
         ) : !data ? (
           <div className="h-[220px] animate-pulse rounded bg-card/60" />
         ) : !hasData ? (

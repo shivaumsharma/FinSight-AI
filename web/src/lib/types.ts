@@ -142,6 +142,11 @@ export interface ReportData {
   growth_analysis?: Record<string, number | string>;
   institutional_consensus?: InstitutionalConsensus;
   news_sources?: NewsSources;
+  // Powers ReportView.tsx's ticker-header subtitle only ("{name} ·
+  // {sector}") -- deliberately just the two fields actually read there,
+  // not a full mirror of StockOverview, since this comes from the
+  // report pipeline's own company lookup, not the /overview endpoint.
+  company_overview?: { name?: string | null; sector?: string | null };
   [key: string]: unknown;
 }
 
@@ -293,6 +298,59 @@ export interface StockOverview {
     target_low_price: number | null;
     number_of_analyst_opinions: number | null;
   };
+}
+
+// GET /v1/stocks/{ticker}/options's per-contract row shape (one entry
+// of either `calls` or `puts` below). market_price/strike are the only
+// fields guaranteed non-null -- implied_vol_pct/theoretical_price/the
+// greeks/bid/ask/open_interest can each independently fail to compute
+// (thin quotes, a strike Black-Scholes can't solve IV for, etc.) and
+// come back null; render those as "--", never "0"/"NaN".
+export interface OptionContractRow {
+  strike: number;
+  market_price: number;
+  bid: number | null;
+  ask: number | null;
+  implied_vol_pct: number | null;
+  // yfinance's own pre-computed IV, surfaced purely as a sanity-check
+  // alongside implied_vol_pct (which is solved fresh against this
+  // row's real market price -- see app/derivatives/options_pricer.py's
+  // module docstring for why the two can differ). Not rendered as its
+  // own column, just available if a future pass wants it.
+  yfinance_implied_vol_pct?: number | null;
+  theoretical_price: number | null;
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  vega: number | null;
+  rho: number | null;
+  in_the_money: boolean;
+  open_interest: number | null;
+}
+
+// GET /v1/stocks/{ticker}/options?expiry=YYYY-MM-DD's response shape --
+// live options chain plus Black-Scholes-derived theoretical pricing/
+// greeks for the selected expiry. On failure (no listed options for
+// this ticker at all, or the ticker doesn't resolve) the backend
+// returns an ApiErrorBody instead of this shape -- most tickers,
+// especially non-US ones, simply have no options chain, so that's an
+// expected, calmly-handled outcome in OptionsPanel.tsx, not an error
+// state.
+export interface OptionsAnalysis {
+  ticker: string;
+  spot_price: number;
+  currency: string;
+  risk_free_rate: number;
+  // Null when the realized-vol fetch itself fails (e.g. a brand-new
+  // listing with under a year of price history) -- see
+  // build_options_analysis's own try/except, this degrades to null
+  // rather than failing the whole request.
+  realized_volatility_pct: number | null;
+  expiries: string[];
+  selected_expiry: string;
+  days_to_expiry: number;
+  calls: OptionContractRow[];
+  puts: OptionContractRow[];
 }
 
 export type JobStatus = "queued" | "running" | "done" | "error";

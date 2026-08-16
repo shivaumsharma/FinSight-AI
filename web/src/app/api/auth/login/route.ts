@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FINSIGHT_API_URL, backendHeaders } from "@/lib/config";
+import { proxyFetch } from "@/lib/proxyFetch";
 import { setSessionCookie } from "@/lib/session";
 
 // Proxies POST /v1/auth/login -- same session-cookie handling as
@@ -7,7 +8,7 @@ import { setSessionCookie } from "@/lib/session";
 export async function POST(request: NextRequest) {
   const body = await request.json();
 
-  const resp = await fetch(`${FINSIGHT_API_URL}/v1/auth/login`, {
+  const resp = await proxyFetch(`${FINSIGHT_API_URL}/v1/auth/login`, {
     method: "POST",
     headers: backendHeaders(),
     body: JSON.stringify({ email: body.email, password: body.password }),
