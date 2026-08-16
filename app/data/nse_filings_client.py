@@ -55,18 +55,17 @@ import json
 import logging
 import re
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Optional
 
 import pypdf
 import requests
 
+from app.core.paths import DATA_DIR
 from app.core.retry import retry_on_transient_error
 
 logger = logging.getLogger(__name__)
 
-BASE_DIR = Path(__file__).resolve().parents[2]
-CACHE_DIR = BASE_DIR / "filings_cache"
+CACHE_DIR = DATA_DIR / "filings_cache"
 
 ANNOUNCEMENTS_URL = "https://www.nseindia.com/api/corporate-announcements"
 

@@ -30,12 +30,12 @@ from typing import Dict, List, Optional
 import requests
 from dotenv import load_dotenv
 
+from app.core.paths import DATA_DIR
 from app.core.retry import retry_on_transient_error
 
 load_dotenv()
 
-BASE_DIR = Path(__file__).resolve().parents[2]
-CACHE_DIR = BASE_DIR / "filings_cache"
+CACHE_DIR = DATA_DIR / "filings_cache"
 NEWS_CACHE_TTL_SECONDS = 24 * 3600  # respect Finnhub's free-tier rate limit
 
 FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY")

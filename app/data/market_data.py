@@ -5,6 +5,7 @@ import yfinance as yf
 import pandas as pd
 
 from app.core.cache import cache_get, cache_set, make_key
+from app.core.retry import retry_on_transient_error
 
 # TTL-only caching (see app/core/cache.py's module docstring for why
 # this is a different strategy than the content-addressed caches in
@@ -25,6 +26,19 @@ class TickerNotFoundError(Exception):
     streamlit_app.py to show a friendly message instead of a raw
     traceback from whichever statement fetch happens to hit an empty
     DataFrame first."""
+
+
+class MarketDataUnavailableError(Exception):
+    """Raised by market_data_tool.py when a data-provider fetch itself
+    failed (even after retry_on_transient_error's retries exhausted) --
+    e.g. a throttled/rate-limited yfinance response -- as opposed to
+    TickerNotFoundError, which means the provider responded fine but
+    genuinely had nothing for this ticker. The two must not be
+    conflated: a throttled response about a perfectly valid ticker
+    reported as "ticker not found" would be actively misleading. See
+    MarketDataLoader.get_company_info's info_fetch_failed flag, which
+    is the signal market_data_tool.py keys off to raise this instead
+    of TickerNotFoundError."""
 
 
 # Deliberately separate from get_company_info() below, not a thin
@@ -309,14 +323,36 @@ def get_benchmark_history(ticker: str, period: str = "5y"):
 
 
 class MarketDataLoader:
-  
+
   def __init__(self,ticker:str):
      self.ticker=ticker.upper()
      self.stock=yf.Ticker(self.ticker)
+     # Set by get_company_info() below on every call -- True only when
+     # its own retry-wrapped .info fetch failed outright (a transient
+     # provider issue), never for a fetch that succeeded but simply had
+     # nothing useful for this ticker. market_data_tool.py reads this
+     # right after calling get_company_info() to tell the two apart.
+     self.info_fetch_failed = False
 
   def get_company_info(self):
-     info =self.stock.info
-     
+     def _do():
+        return self.stock.info
+
+     try:
+        info = retry_on_transient_error(_do)
+     except Exception:
+        # Same never-crash-the-caller contract as get_quote() above,
+        # just degrading to {} instead of raising -- get_company_info()
+        # callers (market_data_tool.py) expect a dict back, not an
+        # exception. The failure is still surfaced, just via
+        # info_fetch_failed rather than a raised exception, so a
+        # throttled/failed fetch isn't silently indistinguishable from
+        # yfinance genuinely having nothing for a bad ticker (which
+        # returns an empty-ish info dict WITHOUT raising at all).
+        self.info_fetch_failed = True
+        return {}
+
+     self.info_fetch_failed = False
      return {
         "company_name":info.get("longName"),
         "sector":info.get("sector"),
@@ -355,19 +391,19 @@ class MarketDataLoader:
         return None
 
   def get_historical_prices(self,period="5y"):
-     
-     df=self.stock.history(period=period)
+
+     df=retry_on_transient_error(lambda: self.stock.history(period=period))
      if df.empty:
         raise ValueError("No price data found for {self.ticker}")
      return df
-  
+
   def _cached_statement(self, statement_name, fetch_fn, error_message):
      key = make_key("statement", self.ticker, statement_name)
      cached = cache_get(key)
      if cached is not None:
         return cached
 
-     df = fetch_fn()
+     df = retry_on_transient_error(fetch_fn)
      if df.empty:
         raise ValueError(error_message)
 
@@ -426,47 +462,3 @@ class MarketDataLoader:
         "cash_flow": self.get_cash_flow(),
         "historical_prices": self.get_historical_prices()
     }
-  
-if __name__=="__main__":
-   loader=MarketDataLoader("AAPL")
-   income_stml=loader.get_income_statement()
-   revenue=loader.extract_metric(
-      income_stml,
-      "Total Revenue"
-   )
-
-   print("\n===Revenue===")
-   print(revenue)
-   print(income_stml.index)
-   print(income_stml.columns)
-   print(income_stml.shape)
-
-   print("\n===ORIGINAL SHAPE===")
-   print(income_stml.shape)
-
-   transposed_stmt=(income_stml.T).sort_index()
-   
-   transposed_stmt["Revenue Growth"]=(
-      transposed_stmt["Operating Revenue"]
-      .pct_change()
-   )
-
-   print("\n===Revenue Growth===")
-   print(
-      transposed_stmt[
-         ["Operating Revenue","Revenue Growth"]
-      ]
-   )
-
-   revenue_series=transposed_stmt["Operating Revenue"]
-   
-   revenue_series=revenue_series.dropna()
-   starting_value=revenue_series.iloc[0]
-   ending_value=revenue_series.iloc[-1]
-   n=len(revenue_series)-1
-   cagr=((ending_value/starting_value)**(1/n))-1
-
-   print("\n===CAGR===")
-   print(f"{cagr:.2%}")
-
-   

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FINSIGHT_API_URL, backendHeaders } from "@/lib/config";
+import { proxyFetch } from "@/lib/proxyFetch";
 import { getSessionToken, clearSessionCookie } from "@/lib/session";
 
 // Proxies GET /v1/auth/me -- the client calls this once on load to
@@ -15,7 +16,7 @@ export async function GET() {
     return NextResponse.json({ code: "UNAUTHORIZED", message: "Not logged in." }, { status: 401 });
   }
 
-  const resp = await fetch(`${FINSIGHT_API_URL}/v1/auth/me`, {
+  const resp = await proxyFetch(`${FINSIGHT_API_URL}/v1/auth/me`, {
     headers: backendHeaders(sessionToken),
     cache: "no-store",
   });
@@ -32,7 +33,7 @@ export async function DELETE(request: NextRequest) {
   const body = await request.json();
   const sessionToken = await getSessionToken();
 
-  const resp = await fetch(`${FINSIGHT_API_URL}/v1/auth/me`, {
+  const resp = await proxyFetch(`${FINSIGHT_API_URL}/v1/auth/me`, {
     method: "DELETE",
     headers: backendHeaders(sessionToken),
     body: JSON.stringify({ password: body.password }),

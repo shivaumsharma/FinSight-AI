@@ -19,6 +19,11 @@ const MAX_MIC_ERROR_RETRIES = 2;
 export function useConversationalAssistant() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  // Distinct from "loaded, zero messages" -- a failed fetch must not
+  // look identical to a genuinely new conversation (see the /chat
+  // page's own empty-state copy, which reads this to decide between
+  // "couldn't load your history" and "try asking...").
+  const [historyError, setHistoryError] = useState(false);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,9 +59,9 @@ export function useConversationalAssistant() {
 
   useEffect(() => {
     fetch("/api/chat/history")
-      .then((r) => (r.ok ? r.json() : { messages: [] }))
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((data) => setMessages(data.messages ?? []))
-      .catch(() => {})
+      .catch(() => setHistoryError(true))
       .finally(() => setHistoryLoaded(true));
     // Voice mode is a standing preference, not per-message -- read once
     // on mount (deliberately after the initial render, not via
@@ -224,7 +229,7 @@ export function useConversationalAssistant() {
   }
 
   return {
-    messages, historyLoaded, input, setInput, sending, error,
+    messages, historyLoaded, historyError, input, setInput, sending, error,
     voiceMode, toggleVoiceMode, speaking, sessionActive, micState,
     voiceInputRef, startSession, endSession, handleMicStateChange,
     stopSpeaking, handleSend, handleTranscript, synthesizeAndSpeak,

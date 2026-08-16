@@ -65,3 +65,20 @@ def test_valuation_unavailable_when_debt_literally_exceeds_enterprise_value():
     df = _financial_df(total_debt=[1_000_000, 1_000_000], cash=[0, 0])
     result = ValuationPipeline(financial_df=df, market_cap=5000, beta=1.1, ticker="TEST").run_valuation()
     assert result["dcf_available"] is False
+
+
+def test_valuation_unavailable_when_market_cap_is_none():
+    # context.market_cap can be None (market_data_tool.py only guards
+    # company_name/current_price before populating it from yfinance's
+    # own company_info, which can omit marketCap) -- WACCEngine uses
+    # market_cap directly in arithmetic (equity_value+debt_value,
+    # equity_value/total_value) that would raise a TypeError against
+    # None rather than degrade. Must route to the same unavailable-DCF
+    # path as every other structurally-missing-input case, not crash.
+    df = _financial_df(total_debt=[50, 55], cash=[40, 42])
+    result = ValuationPipeline(financial_df=df, market_cap=None, beta=1.1, ticker="TEST").run_valuation()
+
+    assert result["dcf_available"] is False
+    assert result["enterprise_value"] is None
+    assert result["equity_value"] is None
+    assert "market capitalization" in result["dcf_unavailable_reason"].lower()

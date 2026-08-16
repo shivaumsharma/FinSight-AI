@@ -26,16 +26,15 @@ import json
 import os
 import re
 import time
-from pathlib import Path
 from typing import Optional, Dict
 
 import requests
 from bs4 import BeautifulSoup
 
+from app.core.paths import DATA_DIR
 from app.core.retry import retry_on_transient_error
 
-BASE_DIR = Path(__file__).resolve().parents[2]
-CACHE_DIR = BASE_DIR / "filings_cache"
+CACHE_DIR = DATA_DIR / "filings_cache"
 TICKER_MAP_CACHE = CACHE_DIR / "ticker_cik_map.json"
 TICKER_MAP_TTL_SECONDS = 7 * 24 * 3600  # SEC's ticker list changes rarely; refresh weekly
 
