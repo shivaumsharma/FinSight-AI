@@ -26,18 +26,18 @@ How it works
 import json
 import re
 import time
-from pathlib import Path
 from typing import List, Optional
 
 import requests
 from rapidfuzz import fuzz, process
 from rapidfuzz.utils import default_process
 
+from app.core.paths import DATA_DIR
+from app.core.retry import retry_on_transient_error
 from app.data.crypto_resolver import resolve_crypto_mentions
 from app.data.sec_edgar_client import HEADERS
 
-BASE_DIR = Path(__file__).resolve().parents[2]
-CACHE_DIR = BASE_DIR / "filings_cache"
+CACHE_DIR = DATA_DIR / "filings_cache"
 COMPANY_INDEX_CACHE = CACHE_DIR / "company_index.json"
 COMPANY_INDEX_TTL_SECONDS = 7 * 24 * 3600
 
@@ -120,13 +120,16 @@ _index = None
 
 
 def _fetch_company_index() -> dict:
-    resp = requests.get(
-        "https://www.sec.gov/files/company_tickers.json",
-        headers=HEADERS,
-        timeout=15,
-    )
-    resp.raise_for_status()
-    raw = resp.json()
+    def _do():
+        resp = requests.get(
+            "https://www.sec.gov/files/company_tickers.json",
+            headers=HEADERS,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp
+
+    raw = retry_on_transient_error(_do).json()
 
     tickers = set()
     title_to_ticker = {}
@@ -165,7 +168,21 @@ def _load_index() -> dict:
                 _index["tickers"] = set(_index["tickers"])
                 return _index
 
-    data = _fetch_company_index()
+    try:
+        data = _fetch_company_index()
+    except (requests.RequestException, ValueError, KeyError):
+        # SEC's company index is the primary US ticker universe (unlike
+        # NSE's own index below, which is best-effort/secondary) -- a
+        # transient fetch failure here should still serve a stale
+        # on-disk cache (even past its TTL) rather than silently
+        # resolving zero US companies for this run. Only re-raises if
+        # there's truly no cache at all AND the network call failed.
+        if COMPANY_INDEX_CACHE.exists():
+            with open(COMPANY_INDEX_CACHE, "r", encoding="utf-8") as f:
+                _index = json.load(f)
+                _index["tickers"] = set(_index["tickers"])
+                return _index
+        raise
 
     with open(COMPANY_INDEX_CACHE, "w", encoding="utf-8") as f:
         json.dump(data, f)

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FINSIGHT_API_URL, backendHeaders } from "@/lib/config";
+import { proxyFetch } from "@/lib/proxyFetch";
 import { getSessionToken } from "@/lib/session";
 
 export async function GET(
@@ -10,7 +11,7 @@ export async function GET(
   const peer = request.nextUrl.searchParams.get("peer") || "";
   const sessionToken = await getSessionToken();
 
-  const resp = await fetch(
+  const resp = await proxyFetch(
     `${FINSIGHT_API_URL}/v1/stocks/${encodeURIComponent(ticker)}/peer-comparison?peer=${encodeURIComponent(peer)}`,
     { headers: backendHeaders(sessionToken), cache: "no-store" }
   );

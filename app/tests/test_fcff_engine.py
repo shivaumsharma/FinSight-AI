@@ -23,6 +23,30 @@ def test_revenue_cagr_over_multiple_years():
     assert engine.calculate_revenue_cagr() == pytest.approx(0.21)
 
 
+def test_revenue_cagr_returns_none_for_a_single_data_point():
+    # n = len(revenue_series) - 1 would be 0, making 1/n a
+    # ZeroDivisionError -- must degrade to None instead of raising.
+    df = _df(revenue=[100])
+    engine = FCFFEngine(df)
+    assert engine.calculate_revenue_cagr() is None
+
+
+def test_revenue_cagr_returns_none_for_a_non_positive_beginning_value():
+    # A zero-or-negative starting value makes (ending/beginning)**(1/n)
+    # either undefined or a meaningless complex/negative-base result.
+    df = _df(revenue=[0, 100])
+    engine = FCFFEngine(df)
+    assert engine.calculate_revenue_cagr() is None
+
+
+def test_forecast_revenue_returns_none_when_cagr_is_uncomputable():
+    # forecast_revenue must propagate calculate_revenue_cagr()'s None
+    # rather than assume a numeric growth rate exists.
+    df = _df(revenue=[100])
+    engine = FCFFEngine(df)
+    assert engine.forecast_revenue() is None
+
+
 def test_forecast_revenue_compounds_at_cagr():
     df = _df(revenue=[100, 110])
     engine = FCFFEngine(df)

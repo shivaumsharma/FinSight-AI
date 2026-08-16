@@ -57,6 +57,7 @@ from app.data.market_data import (
 )
 from app.analysis.growth_metrics import build_financial_performance, build_growth_metrics
 from app.analysis.technical_indicators import build_technicals
+from app.derivatives.options_pricer import OptionsUnavailableError, build_options_analysis
 from app.reasoning.peer_comparison import build_peer_comparison
 from app.reasoning.similar_stocks import find_similar_stocks
 from app.reasoning.stock_score import build_stock_insights
@@ -1192,6 +1193,26 @@ def get_stock_technicals(
         return build_technicals(ticker, range_period=range)
     except (ValueError, TickerNotFoundError):
         raise errors.ticker_not_found(ticker)
+
+
+@app.get("/v1/stocks/{ticker}/options")
+def get_stock_options(
+    ticker: str,
+    expiry: Optional[str] = Query(default=None),
+    current_user: str = Depends(auth.get_current_user),
+):
+    # Black-Scholes pricing/Greeks over the real live options chain --
+    # see build_options_analysis's own docstring. OptionsUnavailableError
+    # (no listed options market for this ticker, or an `expiry` that
+    # isn't actually listed) is distinct from TickerNotFoundError (the
+    # ticker itself doesn't resolve) -- see options_pricer.py's own
+    # comment on why the two error types aren't conflated.
+    try:
+        return build_options_analysis(ticker, expiry=expiry)
+    except (ValueError, TickerNotFoundError):
+        raise errors.ticker_not_found(ticker)
+    except OptionsUnavailableError:
+        raise errors.options_unavailable(ticker)
 
 
 @app.get("/v1/stocks/{ticker}/insights")

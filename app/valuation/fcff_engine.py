@@ -7,21 +7,44 @@ class FCFFEngine:
         self.financial_df=financial_df
     
     def calculate_revenue_cagr(self):
+        """
+        Returns None (not a crash) when CAGR isn't computable: fewer
+        than two usable revenue data points (n=len-1 would be 0,
+        making 1/n a ZeroDivisionError) or a non-positive/NaN starting
+        value (a zero-or-negative beginning_value makes
+        (ending/beginning)**(1/n) either undefined or a meaningless
+        complex/negative-base result). Same "degrade to None" contract
+        as calculate_normalized_base_fcff/calculate_return_on_equity
+        above -- callers (forecast_revenue, forecast_fcff below) must
+        propagate this None rather than assume a numeric growth rate.
+        """
         revenue_series=self.financial_df["revenue"].dropna()
+        if len(revenue_series) < 2:
+            return None
+
         beginning_value=revenue_series.iloc[0]
         ending_value=revenue_series.iloc[-1]
         n=len(revenue_series)-1
 
+        if pd.isna(beginning_value) or beginning_value <= 0:
+            return None
+
         cagr=((ending_value/beginning_value)**(1/n))-1
 
         return cagr
-    
+
     def forecast_revenue(self,forecast_years=5):
+        """Returns None (not a crash) when calculate_revenue_cagr()
+        can't produce a growth rate -- see that method's own docstring
+        for when that happens."""
         revenue_series=(self.financial_df["revenue"].dropna())
 
         current_revenue=revenue_series.iloc[-1]
 
         growth_rate=(self.calculate_revenue_cagr())
+
+        if growth_rate is None:
+            return None
 
         forecasted_revenues=[]
 
@@ -252,6 +275,19 @@ class FCFFEngine:
        base_fcff=(base_fcff_override if base_fcff_override is not None else self.calculate_normalized_base_fcff())
 
        initial_growth_rate=(initial_growth_rate_override if initial_growth_rate_override is not None else self.calculate_revenue_cagr())
+
+       # Same None-degrades-not-crashes contract as
+       # calculate_normalized_base_fcff/calculate_revenue_cagr above --
+       # a structurally-missing base FCFF or an uncomputable revenue
+       # CAGR (fewer than two usable revenue data points, or a
+       # non-positive starting value) makes the fade math below
+       # (intermediate_growth_rate = (initial_growth_rate +
+       # terminal_growth_rate) / 2, etc.) undefined, not just
+       # optimistic -- caller (ValuationPipeline) treats None here the
+       # same way it already treats a None base_fcff: skip DCF, don't
+       # crash.
+       if base_fcff is None or initial_growth_rate is None:
+           return None
 
        # Three-stage fade, not a single linear fade across the whole
        # window. A high-growth mega-cap doesn't decelerate to terminal

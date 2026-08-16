@@ -280,7 +280,7 @@ export default function ReportView({
   const alphaFactors = valuation.alpha_factors;
   const consensus = rd.institutional_consensus?.recommendation_consensus;
   const news = rd.news_sources || {};
-  const company = (rd.company_overview as Record<string, unknown>) || {};
+  const company = rd.company_overview || {};
 
   const upside = valuation["Upside (%)"];
   const upsideNum = typeof upside === "string" ? parseFloat(upside) : (upside as number | undefined);

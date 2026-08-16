@@ -229,13 +229,6 @@ class FinancialAnalysisBuilder:
         if financial_df is None or financial_df.empty:
             return {}
 
-        print("=" * 80)
-        print("NORMALIZED FINANCIAL DATA")
-        print("=" * 80)
-        print(financial_df.columns.tolist())
-        print(financial_df.tail())
-        print("=" * 80)
-
         latest = financial_df.iloc[-1]
 
         summary = {}
@@ -575,9 +568,5 @@ class FinancialAnalysisBuilder:
         summary["FCF Trend"] = self._trend(
             summary["FCF Growth (%)"]
         )
-
-        print("\nFINANCIAL SUMMARY")
-        print(summary)
-        print("=" * 80)
 
         return summary

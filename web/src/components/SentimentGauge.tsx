@@ -12,14 +12,18 @@ import type { MarketSentiment } from "@/lib/types";
 // docstring for why) but still shown as its own count below the bar.
 export default function SentimentGauge() {
   const [data, setData] = useState<MarketSentiment | null>(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     fetch("/api/market/sentiment")
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then(setData)
-      .catch(() => setData(null));
+      .catch(() => setError(true));
   }, []);
 
+  // Distinct from "still loading" -- a failed fetch must not leave the
+  // skeleton spinning forever, same pattern as AIInsightsCard.tsx.
+  if (error) return null;
   if (data === null) return <SectionSkeleton label="FINSIGHT RESEARCH SENTIMENT" rows={1} />;
 
   const hasVotes = data.buy_pct !== null && data.sell_pct !== null;

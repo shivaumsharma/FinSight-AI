@@ -79,7 +79,12 @@ function ChatContent() {
         )}
 
         <div className="mt-6 flex flex-col gap-3">
-          {a.historyLoaded && a.messages.length === 0 && (
+          {a.historyLoaded && a.historyError && (
+            <p className="mt-4 text-center font-mono text-xs text-danger">
+              Couldn&apos;t load your chat history. Try again.
+            </p>
+          )}
+          {a.historyLoaded && !a.historyError && a.messages.length === 0 && (
             <p className="mt-4 text-center font-mono text-xs text-dim">
               Try &quot;what&apos;s my portfolio look like&quot; or &quot;what&apos;s going on with AAPL&quot;.
             </p>
