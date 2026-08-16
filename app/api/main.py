@@ -28,17 +28,23 @@ Startup does two things before the app accepts any request:
    for why), so it gets marked INTERRUPTED here rather than silently
    staying RUNNING forever from the next client's point of view.
 
-A background thread then periodically calls
-db.reconcile_timed_out_jobs() so a hung job's row stops lying to
-clients even between restarts -- see db.py's JOB_TIMEOUT_SECONDS
-docstring for the documented limitation this does NOT solve (it can't
-force-kill the actual stuck worker thread).
+db.reconcile_timed_out_jobs() and call_tracker's
+check_matured_checkpoints() (a hung job's row shouldn't keep lying to
+clients; a matured tracked call should get scored within a few hours
+of maturing) used to run on their own in-process `while True: sleep()`
+threads. That requires Cloud Run's CPU to stay allocated to the
+container at all times, not just while handling a request (its default
+billing model) -- turning that on made this service bill like an
+always-on VM 24/7 instead of per-request, which is what actually ran
+up real cost here (see POST /v1/internal/sweep/* below). Both are now
+plain on-demand endpoints, triggered by a free external cron (see
+.github/workflows/sweep-cron.yml) instead of a thread that needs to be
+alive between requests.
 """
 
 import logging
 import os
 import re
-import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
@@ -72,9 +78,6 @@ from app.reasoning.onboarding_voice import classify_onboarding_answer
 from app.reasoning.real_estate_guidance import get_real_estate_guidance
 from app.reporting.news_client import fetch_company_news, fetch_market_news
 from app.reporting.portfolio_summary import build_portfolio_view
-
-TIMEOUT_SWEEP_INTERVAL_SECONDS = 60
-CALL_OUTCOME_SWEEP_INTERVAL_SECONDS = 6 * 3600
 
 # Generous abuse/mistake guard, not a real constraint -- 25s of
 # webm/opus (VoiceInputButton's own recording ceiling) is well under
@@ -146,48 +149,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger(__name__)
 
 
-def _timeout_sweep_loop():
-    while True:
-        time.sleep(TIMEOUT_SWEEP_INTERVAL_SECONDS)
-        try:
-            db.reconcile_timed_out_jobs()
-        except Exception:
-            # A failed sweep iteration must never kill the sweep thread
-            # itself -- the next iteration should still get a chance to run.
-            pass
-
-
-def _call_outcome_sweep_loop():
-    # Checkpoints are 7+ days out, so this doesn't need the job-timeout
-    # sweep's minute-level polling -- 6h keeps a matured checkpoint
-    # from sitting unscored for more than a few hours without adding
-    # meaningful load (each iteration is a handful of yfinance calls
-    # at most, not a hot loop).
-    while True:
-        time.sleep(CALL_OUTCOME_SWEEP_INTERVAL_SECONDS)
-        try:
-            scored = check_matured_checkpoints()
-            if scored:
-                logger.info(f"[call-outcome sweep] scored {scored} matured checkpoint(s)")
-        except Exception:
-            # Same convention as _timeout_sweep_loop -- one bad
-            # iteration (a flaky price fetch, etc.) must not kill the
-            # thread; the next iteration gets another chance.
-            pass
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
     reconciled = db.reconcile_interrupted_jobs()
     if reconciled:
         logger.info(f"[startup] reconciled {reconciled} orphaned job(s) from a previous run -> INTERRUPTED")
-
-    sweep_thread = threading.Thread(target=_timeout_sweep_loop, daemon=True)
-    sweep_thread.start()
-
-    call_outcome_thread = threading.Thread(target=_call_outcome_sweep_loop, daemon=True)
-    call_outcome_thread.start()
 
     yield
 
@@ -860,6 +827,35 @@ def get_call_scoreboard(current_user: str = Depends(auth.get_current_user)):
     # window's stats come back null, not a fabricated 0%), not an
     # error condition the way missing backtest result files would be.
     return get_scoreboard()
+
+
+@app.post("/v1/internal/sweep/timeouts")
+def sweep_timeouts():
+    """
+    On-demand replacement for what used to be an in-process
+    `while True: sleep(60); ...` background thread (see this module's
+    own docstring) -- triggered every few minutes by
+    .github/workflows/sweep-cron.yml instead. No per-user session
+    applies (nothing here is scoped to one user); protected by the
+    same X-API-Key deployment gate as every other /v1/* endpoint
+    (require_api_key above), which the cron job sends explicitly.
+    """
+    return {"reconciled": db.reconcile_timed_out_jobs()}
+
+
+@app.post("/v1/internal/sweep/call-outcomes")
+def sweep_call_outcomes():
+    """
+    On-demand replacement for the old in-process 6-hourly call-outcome
+    sweep thread -- see sweep_timeouts above for why this moved out of
+    a background thread. Triggered by the same cron workflow, on its
+    own much coarser schedule (checkpoints mature 7+ days out, so
+    sitting unscored for a few extra hours costs nothing).
+    """
+    scored = check_matured_checkpoints()
+    if scored:
+        logger.info(f"[call-outcome sweep] scored {scored} matured checkpoint(s)")
+    return {"scored": scored}
 
 
 @app.get("/v1/research/{job_id}")

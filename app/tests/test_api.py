@@ -789,6 +789,38 @@ def test_scoreboard_requires_a_session(client):
     assert resp.status_code == 401
 
 
+# ---------------------------------------------------------------- internal sweep endpoints
+
+def test_sweep_timeouts_reconciles_and_returns_a_count(client, monkeypatch):
+    # On-demand replacement for the old in-process sweep thread (see
+    # main.py's module docstring) -- no session required, since nothing
+    # here is scoped to one user; the deployment-level X-API-Key gate
+    # (disabled by default in this fixture) is the only protection.
+    monkeypatch.setattr(main.db, "reconcile_timed_out_jobs", lambda: 3)
+
+    resp = client.post("/v1/internal/sweep/timeouts")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"reconciled": 3}
+
+
+def test_sweep_call_outcomes_scores_and_returns_a_count(client, monkeypatch):
+    monkeypatch.setattr(main, "check_matured_checkpoints", lambda: 2)
+
+    resp = client.post("/v1/internal/sweep/call-outcomes")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"scored": 2}
+
+
+def test_sweep_endpoints_require_the_api_key_when_configured(client, monkeypatch):
+    monkeypatch.setattr(main, "_API_KEY", "the-real-key")
+
+    resp = client.post("/v1/internal/sweep/timeouts")
+
+    assert resp.status_code == 401
+
+
 def test_scoreboard_never_404s_with_zero_tracked_calls(client, auth_headers):
     # No monkeypatching -- exercises the real get_scoreboard() against
     # this test's own empty temp DB, confirming the "no tracked calls
