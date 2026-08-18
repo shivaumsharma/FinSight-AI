@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars (git-ignored) and fill in real values, or pass
+# via TF_VAR_* environment variables instead -- never commit real secrets.
+
+finnhub_api_key   = "paste-your-finnhub-key"
+llm_api_key       = "paste-your-groq-key"
+api_key           = "paste-a-strong-random-value" # gates this deployment; must match Vercel's FINSIGHT_API_KEY and sweep-cron.yml's secret
+vapid_private_key = "paste-the-EXISTING-vapid-private-key-here" # reuse the current one or every existing push subscription breaks
+pdf_share_secret  = "paste-the-EXISTING-pdf-share-secret-here"  # reuse the current one or every existing share link breaks
+sarvam_api_key    = "" # optional -- leave blank if you don't have one, voice features just degrade gracefully
