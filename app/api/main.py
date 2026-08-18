@@ -56,7 +56,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, field_validator
 
 from app.api import auth, db, errors, jobs
-from app.core.company_resolver import get_company_name, resolve_companies, suggest_companies
+from app.core.company_resolver import resolve_companies, suggest_companies
 from app.data import sarvam_client, sarvam_realtime_client, sarvam_tts_client
 from app.data.market_data import (
     TickerNotFoundError, get_corporate_actions, get_corporate_actions_history, get_quote, get_usd_conversion_rate,
@@ -71,12 +71,16 @@ from app.data.stock_overview import get_stock_overview
 from app.reasoning.backtest_stats import get_backtest_accuracy_summary
 from app.reasoning.call_tracker import check_matured_checkpoints, get_scoreboard
 from app.reasoning.market_movers import get_top_movers
+from app.reasoning.daily_briefing import sweep_daily_briefings
+from app.reasoning.price_alerts import sweep_price_alerts
+from app.reasoning.rating_alerts import sweep_rating_changes
 from app.reasoning.model_consensus import compute_consensus, get_model_opinions, get_stock_model_opinions
 from app.reasoning.chat_router import MAX_HISTORY_MESSAGES, handle_chat_message
 from app.reasoning.portfolio_fit import get_portfolio_fit_for_ticker
 from app.reasoning.onboarding_voice import classify_onboarding_answer
 from app.reasoning.real_estate_guidance import get_real_estate_guidance
 from app.reporting.news_client import fetch_company_news, fetch_market_news
+from app.reporting.corporate_actions_feed import build_corporate_actions_feed
 from app.reporting.portfolio_summary import build_portfolio_view
 
 # Generous abuse/mistake guard, not a real constraint -- 25s of
@@ -329,6 +333,31 @@ class OrderRequest(BaseModel):
         return v.strip().upper()
 
     @field_validator("quantity")
+    @classmethod
+    def _must_be_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("Must be greater than zero.")
+        return v
+
+
+class PriceAlertRequest(BaseModel):
+    ticker: str
+    side: Literal["BUY", "SELL"]
+    direction: Literal["above", "below"]
+    target_price: float
+    # Defaults to False -- see app/reasoning/chat_router.py's
+    # _parse_alert_command docstring for why the chat-command path
+    # requires a separately-worded opt-in for this same field; the REST
+    # form (this endpoint) makes the same choice explicit and visible
+    # instead, never pre-checked.
+    auto_execute: bool = False
+
+    @field_validator("ticker")
+    @classmethod
+    def _normalize_ticker(cls, v: str) -> str:
+        return v.strip().upper()
+
+    @field_validator("target_price")
     @classmethod
     def _must_be_positive(cls, v: float) -> float:
         if v <= 0:
@@ -858,6 +887,60 @@ def sweep_call_outcomes():
     return {"scored": scored}
 
 
+@app.post("/v1/internal/sweep/rating-changes")
+def sweep_rating_changes_endpoint():
+    """
+    Feature 2 -- same on-demand cron-triggered pattern as sweep_timeouts/
+    sweep_call_outcomes above (see that one's own docstring for why this
+    is an endpoint and not a background thread). For every user, every
+    watchlist/portfolio ticker whose latest completed rating has
+    genuinely changed since they were last notified gets one proposal
+    chat message + push notification -- see
+    app/reasoning/rating_alerts.py's own docstring for the full
+    dedup/failure-isolation behavior.
+    """
+    sent = sweep_rating_changes()
+    if sent:
+        logger.info(f"[rating-change sweep] sent {sent} proposal(s)")
+    return {"sent": sent}
+
+
+@app.post("/v1/internal/sweep/price-alerts")
+def sweep_price_alerts_endpoint():
+    """
+    Feature 3 -- same on-demand cron-triggered pattern as the other
+    sweeps above. Checks every active price alert's ticker against a
+    live quote; a non-auto trigger writes a proposal chat message (same
+    Foundation confirm-then-execute flow the reply goes through), an
+    auto_execute=1 trigger calls db.execute_order directly and notifies
+    with the real outcome either way -- see
+    app/reasoning/price_alerts.py's own docstring for the full
+    one-shot/failure-isolation behavior.
+    """
+    fired = sweep_price_alerts()
+    if fired:
+        logger.info(f"[price-alert sweep] fired {fired} alert(s)")
+    return {"fired": fired}
+
+
+@app.post("/v1/internal/sweep/daily-briefings")
+def sweep_daily_briefings_endpoint():
+    """
+    Feature 5 -- same on-demand cron-triggered pattern as the other
+    sweeps above. For every user whose last briefing (on-demand or
+    sweep-sent alike) is more than 20 hours old, builds and delivers
+    one: a proposal-shaped chat message plus a push notification. See
+    app/reasoning/daily_briefing.py's own docstring for the full
+    interval-gating/failure-isolation behavior. On-demand delivery
+    ("give me my briefing" in chat) always works regardless of this
+    sweep, via chat_router.py's own INTENT_DAILY_BRIEFING handling.
+    """
+    sent = sweep_daily_briefings()
+    if sent:
+        logger.info(f"[daily-briefing sweep] sent {sent} briefing(s)")
+    return {"sent": sent}
+
+
 @app.get("/v1/research/{job_id}")
 def get_research(job_id: str, current_user: str = Depends(auth.get_current_user)):
     job = db.get_job(job_id)
@@ -1070,38 +1153,12 @@ def get_corporate_actions_feed(
     scope: Literal["all", "portfolio"] = Query(default="all"),
     current_user: str = Depends(auth.get_current_user),
 ):
-    # "portfolio" scope is just the self-reported holdings; "all" adds
-    # in the watchlist too -- the same two ticker sources Watchlist.tsx
-    # and Portfolio.tsx already track separately, just unioned here into
-    # one chronological feed rather than shown per-component. A ticker
-    # on both lists contributes its events only once (set union, not
-    # concatenation).
-    portfolio_tickers = {h["ticker"] for h in db.get_portfolio_holdings(current_user)}
-    if scope == "portfolio":
-        tickers = portfolio_tickers
-    else:
-        watchlist_tickers = {w["ticker"] for w in db.get_watchlist(current_user)}
-        tickers = watchlist_tickers | portfolio_tickers
-
-    events = []
-    for ticker in tickers:
-        try:
-            actions = get_corporate_actions(ticker)
-        except Exception:
-            # Same per-ticker isolation as everywhere else -- one bad
-            # symbol must not blank out the rest of the feed.
-            continue
-        name = get_company_name(ticker) or ticker
-        if actions["next_earnings_date"]:
-            events.append({"ticker": ticker, "name": name, "type": "earnings", "date": actions["next_earnings_date"]})
-        if actions["next_ex_dividend_date"]:
-            events.append({"ticker": ticker, "name": name, "type": "ex_dividend", "date": actions["next_ex_dividend_date"]})
-
-    # ISO date strings sort correctly as plain strings -- soonest
-    # upcoming event first, matching what a "what's coming up" feed
-    # should lead with.
-    events.sort(key=lambda e: e["date"])
-    return {"events": events, "scope": scope}
+    # Body extracted to app/reporting/corporate_actions_feed.py so
+    # Feature 5's daily-briefing intent can share this exact
+    # implementation instead of a second, drifting copy -- same
+    # reasoning GET /v1/portfolio's own build_portfolio_view extraction
+    # already established.
+    return build_corporate_actions_feed(current_user, scope)
 
 
 @app.get("/v1/market/movers")
@@ -1516,3 +1573,40 @@ def place_order(body: OrderRequest, current_user: str = Depends(auth.get_current
 @app.get("/v1/orders")
 def get_orders(limit: int = Query(default=20, le=50), current_user: str = Depends(auth.get_current_user)):
     return {"orders": db.list_orders(current_user, limit)}
+
+
+# ---------------------------------------------------------------- price alerts (Feature 3)
+#
+# A standing "check this in the background" condition, NOT itself a
+# trade -- see app/reasoning/price_alerts.py's own docstring for the
+# sweep that actually watches these, and db.py's price_alerts table
+# comment for the side/direction/auto_execute shape.
+
+@app.post("/v1/alerts")
+def create_price_alert(body: PriceAlertRequest, current_user: str = Depends(auth.get_current_user)):
+    # Same fast-path-then-resolve_companies-fallback validation as
+    # POST /v1/orders, so a fuzzy/Indian company name works here too.
+    ticker = body.ticker
+    try:
+        get_quote(ticker)
+    except TickerNotFoundError:
+        resolved = resolve_companies(body.ticker)
+        if not resolved:
+            raise errors.ticker_not_found(body.ticker)
+        ticker = resolved[0]
+        try:
+            get_quote(ticker)
+        except TickerNotFoundError:
+            raise errors.ticker_not_found(body.ticker)
+
+    alert_id = db.create_price_alert(
+        current_user, ticker, body.side, body.direction, body.target_price, body.auto_execute,
+    )
+    return {"alert_id": alert_id}
+
+
+@app.get("/v1/alerts")
+def list_price_alerts(
+    active_only: bool = Query(default=True), current_user: str = Depends(auth.get_current_user)
+):
+    return {"alerts": db.list_price_alerts(current_user, active_only)}

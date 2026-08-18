@@ -813,6 +813,15 @@ def test_sweep_call_outcomes_scores_and_returns_a_count(client, monkeypatch):
     assert resp.json() == {"scored": 2}
 
 
+def test_sweep_rating_changes_sends_and_returns_a_count(client, monkeypatch):
+    monkeypatch.setattr(main, "sweep_rating_changes", lambda: 4)
+
+    resp = client.post("/v1/internal/sweep/rating-changes")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"sent": 4}
+
+
 def test_sweep_endpoints_require_the_api_key_when_configured(client, monkeypatch):
     monkeypatch.setattr(main, "_API_KEY", "the-real-key")
 
