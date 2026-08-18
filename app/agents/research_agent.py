@@ -27,6 +27,8 @@ The rewritten agent:
     reasoning on a decision that has only one sane answer.
 """
 
+from typing import Callable, Optional
+
 from app.core.research_context import ResearchContext
 from app.core.company_resolver import resolve_companies, is_comparison_question
 from app.planner import Planner
@@ -47,7 +49,12 @@ class ResearchAgent:
         self.planner = Planner()
         self.registry = ToolRegistry()
 
-    def run(self, question: str) -> ResearchContext:
+    def run(
+        self,
+        question: str,
+        risk_tolerance: str = "Moderate",
+        on_step: Optional[Callable[[str], None]] = None,
+    ) -> ResearchContext:
 
         companies = resolve_companies(question)
 
@@ -57,6 +64,7 @@ class ResearchAgent:
         context = ResearchContext(
             ticker=companies[0],
             question=question,
+            risk_tolerance=risk_tolerance,
         )
 
         if is_comparison_question(question) and len(companies) >= 2:
@@ -74,10 +82,20 @@ class ResearchAgent:
 
         context.add_metadata("plan", plan)
 
+        # Sentinel fired once, before any tool runs, so the caller (see
+        # app/api/jobs.py's _run_job/_on_step) learns this question's
+        # REAL, full step list up front -- the plan is dynamic per
+        # question (see this module's docstring), so there is no fixed
+        # list a caller could otherwise know in advance.
+        if on_step:
+            on_step("__plan__:" + ",".join(plan))
+
         for tool_name in plan:
             tool = self.registry.get(tool_name)
             if tool is None:
                 continue
+            if on_step:
+                on_step(tool_name)
             tool.run(context)
 
         return context

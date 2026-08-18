@@ -26,9 +26,10 @@ why persistence exists at all (surviving a restart), which a
 still-in-memory PDF blob would have quietly defeated.
 """
 
+import inspect
 import logging
 import os
-from typing import Callable, Optional
+from typing import Any, Callable, Dict, Optional
 
 from app.api import auth, db
 from app.api.serialization import context_to_api_dict
@@ -41,6 +42,20 @@ from concurrent.futures import ThreadPoolExecutor
 # Uses the root logger's handler/level/format configured once by
 # main.py's logging.basicConfig() call at import time -- see there.
 logger = logging.getLogger(__name__)
+
+# In-memory, per-job real-progress signal for the hand_rolled
+# orchestrator only (see ResearchAgent.run()'s on_step callback) --
+# {"plan": [tool_name, ...], "completed": [tool_name, ...], "current":
+# tool_name or None}. Deliberately NOT persisted to SQLite: this is
+# ephemeral, high-frequency, non-critical data (a lost in-flight
+# progress signal across a restart just means the frontend falls back
+# to its simulated-timer estimate, same as it always has) -- the same
+# "no new table for something this disposable" reasoning db.py's own
+# module comments use elsewhere (e.g. model-compare not being
+# persisted). Populated by _on_step inside _run_job, read via
+# get_job_progress by main.py's GET /v1/research/{job_id}, and cleaned
+# up in _run_job's own finally block so it never leaks across jobs.
+_job_progress: Dict[str, Dict[str, Any]] = {}
 
 
 def _resolve_max_workers() -> int:
@@ -218,8 +233,58 @@ def _run_job(job_id: str, question: str, orchestrator_name: str,
             provider = get_llm_provider()
             provider.reset_usage()
 
+            # Same "NULL/unset defaults to Moderate at read time" convention
+            # main.py's GET /v1/auth/me already uses for this exact column
+            # (see that endpoint's own comment) -- reused here rather than
+            # invented fresh, so a fresh signup or a pre-migration row
+            # behaves identically whether it's read from the profile
+            # endpoint or (as here) from inside the pipeline itself.
+            job_row = db.get_job(job_id)
+            risk_tolerance = "Moderate"
+            if job_row is not None:
+                owner = db.get_user_by_id(job_row["user_id"])
+                if owner and owner.get("risk_tolerance"):
+                    risk_tolerance = owner["risk_tolerance"]
+
             agent = (agent_factory or ORCHESTRATORS[orchestrator_name])()
-            context = agent.run(question)
+
+            def _on_step(step: str) -> None:
+                progress = _job_progress.setdefault(job_id, {"plan": [], "completed": [], "current": None})
+                if step.startswith("__plan__:"):
+                    plan_str = step[len("__plan__:"):]
+                    progress["plan"] = plan_str.split(",") if plan_str else []
+                    progress["completed"] = []
+                    progress["current"] = None
+                    return
+                if progress["current"] is not None:
+                    progress["completed"].append(progress["current"])
+                progress["current"] = step
+
+            # Only pass kwargs the agent's own run() actually declares --
+            # ResearchAgent/LangGraphResearchAgent both accept
+            # risk_tolerance now, but a handful of lightweight test-double
+            # agents (app/tests/test_api.py, test_llm_provider.py,
+            # test_portfolio.py, test_push_notifications.py,
+            # test_watchlist.py -- swapped in via ORCHESTRATORS monkeypatch
+            # or the agent_factory param) still only implement
+            # `run(self, question)`, the narrower pre-this-feature
+            # contract. Introspecting the real bound method here (rather
+            # than branching on orchestrator_name/agent_factory, which
+            # can't tell a real agent from a stub registered the same way)
+            # keeps every existing stub working unchanged while the real
+            # orchestrators get both kwargs. Real per-step progress
+            # (on_step) is further restricted to the hand_rolled
+            # orchestrator only, by design -- see this module's own
+            # docstring on the LangGraph path keeping the frontend's
+            # simulated timer instead.
+            run_params = inspect.signature(agent.run).parameters
+            run_kwargs: Dict[str, Any] = {}
+            if "risk_tolerance" in run_params:
+                run_kwargs["risk_tolerance"] = risk_tolerance
+            if orchestrator_name == "hand_rolled" and "on_step" in run_params:
+                run_kwargs["on_step"] = _on_step
+
+            context = agent.run(question, **run_kwargs)
 
             # Moved here from streamlit_app.py: this needs to happen for
             # every job regardless of which client submitted it (Streamlit,
@@ -288,6 +353,28 @@ def _run_job(job_id: str, question: str, orchestrator_name: str,
         # this is the one place it's called from, not each mark_done/
         # mark_error site individually.
         _notify_job_complete(job_id)
+
+        # Same reasoning: this job's row in the in-memory progress store
+        # (see _job_progress's own module-level comment) is only ever
+        # meaningful while the job is actually running -- once it's
+        # terminal (done/error, whichever branch above ran, or even the
+        # outer safety net), there is no more progress to report and
+        # leaving the entry behind would just leak memory across the
+        # process's lifetime. pop(..., None) rather than del: a job that
+        # never reached ResearchAgent.run() at all (e.g. get_llm_provider()
+        # raised first) never had an entry to begin with.
+        _job_progress.pop(job_id, None)
+
+
+def get_job_progress(job_id: str) -> Optional[Dict[str, Any]]:
+    """Real per-step progress for a hand_rolled-orchestrator job still in
+    flight -- see _job_progress's own module-level comment. None for a
+    job that hasn't reached ResearchAgent.run()'s planning stage yet, is
+    running under langgraph (on_step is never wired up for that path,
+    see _run_job), or has already finished (this module's own finally
+    block above pops the entry) -- GET /v1/research/{job_id} in main.py
+    must treat None as "no real signal yet," not an error."""
+    return _job_progress.get(job_id)
 
 
 def enqueue_job(

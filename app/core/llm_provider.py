@@ -72,6 +72,26 @@ LLM_MAX_RETRIES = 3
 _BACKOFF_BASE_SECONDS = 1.0
 
 
+def _merge_usage(a: dict, b: dict, combine) -> dict:
+    """Recursively combines two usage dicts leaf-by-leaf via `combine(a_val,
+    b_val)`. Needed because some hosted models (Groq's gpt-oss/qwen
+    reasoning models) nest extra fields under completion_tokens_details
+    (e.g. {"reasoning_tokens": N}) instead of keeping every usage field a
+    flat int -- a naive top-level `a.get(k, 0) + b.get(k, 0)` raises
+    TypeError: unsupported operand type(s) for +/-: 'dict' and 'int' on
+    those, which used to take the whole call down with it (this ran in
+    logged_generate's `finally`, after the real response had already been
+    produced, so the exception it raised replaced a perfectly good result)."""
+    result = {}
+    for k in set(a) | set(b):
+        av, bv = a.get(k), b.get(k)
+        if isinstance(av, dict) or isinstance(bv, dict):
+            result[k] = _merge_usage(av or {}, bv or {}, combine)
+        else:
+            result[k] = combine(av or 0, bv or 0)
+    return result
+
+
 class LLMProviderError(Exception):
     """Raised when a provider fails after exhausting retries, is
     unreachable, is misconfigured, or returns a non-retryable error.
@@ -130,7 +150,7 @@ class LocalLlamaProvider(LLMProvider):
     def _accumulate(existing: Optional[dict], new: dict) -> dict:
         if not existing:
             return dict(new)
-        return {k: existing.get(k, 0) + new.get(k, 0) for k in set(existing) | set(new)}
+        return _merge_usage(existing, new, lambda a, b: a + b)
 
 
 class HostedProvider(LLMProvider):
@@ -248,7 +268,7 @@ class HostedProvider(LLMProvider):
     def _accumulate(existing: Optional[dict], new: dict) -> dict:
         if not existing:
             return dict(new)
-        return {k: existing.get(k, 0) + new.get(k, 0) for k in set(existing) | set(new)}
+        return _merge_usage(existing, new, lambda a, b: a + b)
 
 
 _provider = None
@@ -330,21 +350,32 @@ def _install_call_logging(provider: LLMProvider) -> None:
             error = str(e)
             raise
         finally:
-            latency = time.time() - start
-            usage_after = provider.get_last_usage() or {}
-            call_usage = {
-                k: usage_after.get(k, 0) - usage_before.get(k, 0)
-                for k in set(usage_before) | set(usage_after)
-            } or None
-            _log_llm_call(
-                provider=type(provider).__name__,
-                model=getattr(provider, "model", None) or "local-llama",
-                prompt=prompt,
-                response=response,
-                usage=call_usage,
-                latency_seconds=latency,
-                error=error,
-            )
+            # The whole block is best-effort, matching _log_llm_call's own
+            # "logging must never be the reason a real request fails"
+            # contract -- this runs in a `finally` after `try` already hit
+            # `return response`, so an exception raised here doesn't just
+            # fail to log, it REPLACES the real (already-successful)
+            # response the caller was about to receive. Confirmed the hard
+            # way: the usage-delta math used to assume every usage field
+            # was a flat int, which crashed here (and silently ate every
+            # otherwise-successful response) the moment a model's usage
+            # payload nested a nested dict field under it (Groq's gpt-oss/
+            # qwen reasoning models' completion_tokens_details).
+            try:
+                latency = time.time() - start
+                usage_after = provider.get_last_usage() or {}
+                call_usage = _merge_usage(usage_before, usage_after, lambda a, b: b - a) or None
+                _log_llm_call(
+                    provider=type(provider).__name__,
+                    model=getattr(provider, "model", None) or "local-llama",
+                    prompt=prompt,
+                    response=response,
+                    usage=call_usage,
+                    latency_seconds=latency,
+                    error=error,
+                )
+            except Exception:
+                pass
 
     provider.generate = logged_generate
 
