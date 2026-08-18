@@ -30,11 +30,13 @@ spell a ticker" reasoning company_resolver.py's docstring gives.
 """
 
 import re
+import time
 
 from app.api import db
 from app.core.company_resolver import resolve_companies
+from app.core.currency import currency_symbol
 from app.core.llm_provider import HostedProvider, LLMProviderError
-from app.data.market_data import TickerNotFoundError
+from app.data.market_data import TickerNotFoundError, get_quote
 from app.reasoning.portfolio_fit import get_portfolio_fit_for_ticker, get_portfolio_sector_allocation
 from app.reasoning.real_estate_guidance import get_real_estate_guidance
 from app.reasoning.stock_score import build_stock_insights
@@ -47,24 +49,45 @@ INTENT_PORTFOLIO_FIT = "portfolio_fit"
 INTENT_FULL_REPORT_REQUEST = "full_report_request"
 INTENT_ADVICE_REQUEST = "advice_request"
 INTENT_STOCK_DISCOVERY_REQUEST = "stock_discovery_request"
+INTENT_PLACE_ORDER = "place_order"
+INTENT_CREATE_ALERT = "create_alert"
+INTENT_LIST_ALERTS = "list_alerts"
+INTENT_DAILY_BRIEFING = "daily_briefing"
 INTENT_GENERAL = "general"
 
 _VALID_INTENTS = {
     INTENT_PORTFOLIO_STATUS, INTENT_TICKER_QUESTION, INTENT_PORTFOLIO_FIT,
-    INTENT_FULL_REPORT_REQUEST, INTENT_ADVICE_REQUEST, INTENT_STOCK_DISCOVERY_REQUEST, INTENT_GENERAL,
+    INTENT_FULL_REPORT_REQUEST, INTENT_ADVICE_REQUEST, INTENT_STOCK_DISCOVERY_REQUEST,
+    INTENT_PLACE_ORDER, INTENT_CREATE_ALERT, INTENT_LIST_ALERTS, INTENT_DAILY_BRIEFING, INTENT_GENERAL,
 }
 # Intents that need a ticker to mean anything -- a message classified
 # into one of these with no ticker detected degrades to INTENT_GENERAL
 # in classify_intent() below, since there's nothing to look up.
-_TICKER_SCOPED_INTENTS = {INTENT_TICKER_QUESTION, INTENT_PORTFOLIO_FIT, INTENT_FULL_REPORT_REQUEST}
+# INTENT_PLACE_ORDER is deliberately NOT here: a batch command ("sell
+# everything rated Sell") is a perfectly valid order intent with no
+# single ticker at all -- _handle_place_order below is the one that
+# decides whether a missing ticker means "invalid", not this
+# blanket degrade. INTENT_LIST_ALERTS is also not here -- it lists
+# every alert regardless of ticker, same as portfolio_status.
+_TICKER_SCOPED_INTENTS = {
+    INTENT_TICKER_QUESTION, INTENT_PORTFOLIO_FIT, INTENT_FULL_REPORT_REQUEST, INTENT_CREATE_ALERT,
+}
 
 _INTENT_RE = re.compile(r"INTENT:\s*(\w+)", re.IGNORECASE)
 
-# A small, fast model is enough for a 5-way classification and a short
+# A small, fast model is enough for an 8-way classification and a short
 # generic reply -- same model_consensus.py precedent of picking a
 # cheap model for a short, low-stakes call rather than the biggest
-# available one.
-_CHAT_MODEL = "llama-3.3-70b-versatile"
+# available one. allam-2-7b specifically (not a gpt-oss/reasoning
+# model): it answers directly with no hidden chain-of-thought tax, so
+# it reliably fits this file's tight max_new_tokens budgets (20-200) --
+# confirmed live against Groq's current catalog after llama-3.3-70b
+# was fully removed (was 404ing every call here, degrading every
+# message to INTENT_GENERAL by design -- see classify_intent's
+# docstring -- which made this file look like it worked while actually
+# never classifying anything). Public (not `_`-prefixed): see this
+# constant's own cross-module reuse note further down.
+CHAT_MODEL = "allam-2-7b"
 
 # How many recent messages (not turns -- individual user+assistant rows)
 # to fold into a prompt as conversation memory. Small on purpose: this
@@ -82,15 +105,331 @@ MAX_HISTORY_MESSAGES = 6
 # change (still never a personalized buy/sell call) -- only the
 # instruction to actively RESTATE it in every reply is gone, since the
 # app already shows that disclaimer once, on the Chat page itself and
-# in the global footer, not per-message.
-_PERSONA = (
+# in the global footer, not per-message. Public (not `_`-prefixed),
+# same as CHAT_MODEL/suggest_quantity above -- also reused by
+# app/reasoning/daily_briefing.py's own LLM-synthesis step, so the tone
+# and compliance boundary stay identical across every conversational
+# surface instead of a second, drifting copy of this exact wording.
+PERSONA = (
     "You're FinSight, a knowledgeable financial analyst talking directly to the user -- clear, warm, and "
     "direct, the way you'd explain something to a colleague, not a compliance script."
 )
-_DISCLAIMER_NOTE = (
+DISCLAIMER_NOTE = (
     "Don't append a 'consult a licensed advisor' disclaimer -- that's already shown once elsewhere in the "
     "app; repeating it in every reply reads as evasive, not careful."
 )
+
+# ---------------------------------------------------------------- conversational order placement
+#
+# Foundation safety mechanic every order-placing feature in this module
+# reuses: parse a command into a concrete, priced leg (or list of legs
+# for a batch -- see Feature 1's expansion helpers), show the user
+# EXACTLY what will happen, and only call db.execute_order on an
+# explicit affirmative reply. Side/quantity/confirmation are all parsed
+# deterministically (plain regex/word matching below), never guessed by
+# the LLM -- same "never let the LLM spell out something that actually
+# matters" reasoning company_resolver.py's own docstring gives for
+# ticker resolution, extended here to the two other fields (how many
+# shares, which direction) that would be genuinely dangerous to
+# mis-hear, especially over voice (see Feature 7).
+#
+# Per-user pending-order state lives in this plain in-memory dict, not
+# a new table -- this app already assumes a single SQLite-file/single-
+# process deployment everywhere else (jobs.py's ThreadPoolExecutor
+# being the clearest precedent), so there's no multi-instance scenario
+# where one instance's pending order needs to be visible to another.
+# A pending order is deliberately ephemeral: lost on a process
+# restart just means the user re-issues the command, the same
+# "no harm done" property any other in-flight, unconfirmed HTTP
+# request already has. Each entry is
+# {"legs": [{"ticker", "side", "quantity", "price", "currency", "rationale"}, ...]}
+# -- always a list, even for a single order, so the batch feature
+# (Feature 1) and the single-order path share one confirm/execute
+# implementation instead of two parallel ones.
+_pending_orders: dict = {}
+
+_BUY_RE = re.compile(r"\bbuy\b", re.IGNORECASE)
+_SELL_RE = re.compile(r"\bsell\b", re.IGNORECASE)
+_QUANTITY_RE = re.compile(r"\b(\d+(?:\.\d+)?)\b")
+
+# Feature 1 (batching) -- a SMALL FIXED set of exact phrases, not
+# open-ended strategy language (see this module's own combined
+# docstring section and the spec this was built from: "start narrow").
+# Two independently-recognized surface phrasings resolve to the same
+# "buy_top_n" batch type since the feature's own goal statement and its
+# own build-list use two different example phrasings for the same idea.
+_SELL_RATED_RE = re.compile(r"\bsell\s+everything\s+rated\s+(buy|hold|sell)\b", re.IGNORECASE)
+_PUT_AMOUNT_TOP_N_RE = re.compile(
+    r"put\s+[₹$]?\s*([\d,]+(?:\.\d+)?)\s*(?:usd|dollars?|inr|rupees|₹|\$)?\s*into\s+(?:my\s+)?top\s+(\d+)\s+buy-?rated\s+watchlist\s+stocks?",
+    re.IGNORECASE,
+)
+_BUY_TOP_N_WITH_AMOUNT_RE = re.compile(
+    r"buy\s+across\s+(?:my\s+)?top\s+(\d+)\s+buy-?rated\s+watchlist\s+stocks?\s+(?:with|using)\s+[₹$]?\s*([\d,]+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+
+# Feature 3 (price alerts) -- "X drops below/rises above PRICE" is the
+# one narrow phrasing this recognizes (see classify_intent's own
+# create_alert examples). The auto-execute opt-in is a SEPARATE keyword
+# from side/direction on purpose -- see _parse_alert_command's own
+# docstring for why that's a deliberately harder bar to clear than a
+# plain alert.
+_ALERT_PRICE_RE = re.compile(r"(above|below)\s+[₹$]?\s*([\d,]+(?:\.\d+)?)", re.IGNORECASE)
+_AUTO_OPT_IN_RE = re.compile(r"\bautomatically\b|\bauto[\s-]?execute\b", re.IGNORECASE)
+
+# Deliberately exact-phrase matching (a whole normalized message, or a
+# normalized message starting with one of these phrases), not a
+# substring search -- "no way I'd sell more" must never be read as a
+# "no" to an unrelated pending order just because "no" occurs in it
+# somewhere. Whitespace-normalized and lowercased before comparison.
+_AFFIRMATIVE_PHRASES = ("yes", "y", "yeah", "yep", "yup", "confirm", "confirmed", "do it", "place it", "go ahead", "sure", "ok", "okay")
+_NEGATIVE_PHRASES = ("no", "n", "nope", "cancel", "nevermind", "never mind", "stop", "don't", "dont")
+
+
+def _parse_side(message: str) -> "str | None":
+    """BUY/SELL/None, deterministic word-boundary match -- whichever of
+    "buy"/"sell" appears FIRST in the message if (unusually) both are
+    present, since that's the one the user is actually acting on right
+    now (e.g. "I already sold once today, buy 5 more AAPL")."""
+    buy_match = _BUY_RE.search(message)
+    sell_match = _SELL_RE.search(message)
+    if buy_match and sell_match:
+        return "BUY" if buy_match.start() < sell_match.start() else "SELL"
+    if buy_match:
+        return "BUY"
+    if sell_match:
+        return "SELL"
+    return None
+
+
+def _parse_quantity(message: str) -> "float | None":
+    """The first standalone number in the message, or None if there
+    isn't one (or it's zero/negative) -- Feature 4 is what fills this
+    gap with a suggested quantity; this function's only job is
+    detecting whether the user already gave one. Tickers here are
+    always alphabetic (US/NSE symbols), so a bare number can't be
+    mistaken for one."""
+    match = _QUANTITY_RE.search(message)
+    if not match:
+        return None
+    quantity = float(match.group(1))
+    return quantity if quantity > 0 else None
+
+
+def _parse_confirmation(message: str) -> "str | None":
+    """"yes"/"no"/None for a reply to a pending-order confirmation
+    question. None (neither a clear yes nor a clear no) is a real,
+    expected outcome -- handle_chat_message() below treats that as
+    "the user moved on", dropping the stale pending order rather than
+    guessing which way an ambiguous reply meant."""
+    # Commas folded into whitespace (not just stripped from the ends)
+    # so "yes, place it" / "no, don't" still match "yes "/"no " below --
+    # a trailing-only strip would miss punctuation right after the
+    # leading word.
+    normalized = re.sub(r"[,.!?]+", " ", message.strip().lower())
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if any(normalized == p or normalized.startswith(p + " ") for p in _AFFIRMATIVE_PHRASES):
+        return "yes"
+    if any(normalized == p or normalized.startswith(p + " ") for p in _NEGATIVE_PHRASES):
+        return "no"
+    return None
+
+
+def _pending_order_ticker(pending: dict) -> "str | None":
+    """The ticker to carry over onto the assistant's chat_messages row
+    (see add_chat_message's `ticker` column) -- only meaningful for a
+    single-leg order; a batch has no one ticker to carry forward."""
+    legs = pending["legs"]
+    return legs[0]["ticker"] if len(legs) == 1 else None
+
+
+def _execute_pending_order(user_id: str) -> str:
+    """Calls db.execute_order for every leg of the user's pending order
+    (always present when this is called -- handle_chat_message only
+    calls it after confirming _pending_orders[user_id] exists), then
+    clears the pending state regardless of outcome -- a failed leg must
+    never leave a stale, already-shown proposal sitting around to be
+    silently re-confirmed by a later, unrelated "yes". Reports exactly
+    which legs filled and which didn't (Feature 1's own acceptance
+    requirement) rather than aborting the whole batch on one failure or
+    silently skipping the failure."""
+    pending = _pending_orders.pop(user_id, None)
+    if pending is None:
+        return "There's no pending order to confirm."
+
+    filled, failed = [], []
+    for leg in pending["legs"]:
+        try:
+            db.execute_order(
+                user_id, leg["ticker"], leg["side"], leg["quantity"], leg["price"], leg["currency"],
+                rationale=leg.get("rationale"),
+            )
+            filled.append(leg)
+        except ValueError as e:
+            failed.append((leg, str(e)))
+
+    if len(pending["legs"]) == 1:
+        if filled:
+            leg = filled[0]
+            symbol = currency_symbol(leg["currency"])
+            return f"Done -- {leg['side']} {leg['quantity']:g} {leg['ticker']} filled at {symbol}{leg['price']:,.2f}."
+        return f"Couldn't place that order: {failed[0][1]}"
+
+    lines = []
+    if filled:
+        lines.append("Filled: " + ", ".join(f"{l['side']} {l['quantity']:g} {l['ticker']}" for l in filled) + ".")
+    if failed:
+        lines.append("Failed: " + ", ".join(f"{l['ticker']} ({err})" for l, err in failed) + ".")
+    return " ".join(lines)
+
+
+def _parse_batch_command(message: str) -> "dict | None":
+    """Recognizes the small fixed set of batch phrasings this feature
+    supports -- None for anything else, including a single-ticker order
+    (that's the non-batch path _handle_place_order already has) or any
+    open-ended portfolio-strategy sentence this deliberately does NOT
+    try to parse."""
+    m = _SELL_RATED_RE.search(message)
+    if m:
+        return {"type": "sell_rated", "rating": m.group(1).capitalize()}
+
+    m = _PUT_AMOUNT_TOP_N_RE.search(message)
+    if m:
+        return {"type": "buy_top_n", "amount": float(m.group(1).replace(",", "")), "n": int(m.group(2))}
+
+    m = _BUY_TOP_N_WITH_AMOUNT_RE.search(message)
+    if m:
+        return {"type": "buy_top_n", "n": int(m.group(1)), "amount": float(m.group(2).replace(",", ""))}
+
+    return None
+
+
+def _expand_sell_rated_batch(user_id: str, rating: str) -> "tuple[list, list]":
+    """(legs, notes) for "sell everything rated {rating}" -- one SELL
+    leg per currently-held ticker whose latest completed rating matches
+    exactly, sized at the full held quantity. A holding that matches
+    the rating but whose live quote lookup fails is left OUT of legs
+    (never priced with a guess) and explained in notes instead --
+    same degrade-honestly discipline as the single-order path."""
+    legs, notes = [], []
+    for h in db.get_portfolio_holdings(user_id):
+        ticker = h["ticker"]
+        if db.get_latest_rating_for_ticker(user_id, ticker) != rating:
+            continue
+        try:
+            quote = get_quote(ticker)
+        except Exception:
+            notes.append(f"couldn't check {ticker}'s price, skipped")
+            continue
+        legs.append({
+            "ticker": ticker, "side": "SELL", "quantity": h["quantity"],
+            "price": quote["price"], "currency": quote.get("currency", "USD"),
+            "rationale": f"Batch: sell everything rated {rating}",
+        })
+    return legs, notes
+
+
+def _expand_buy_top_n_batch(user_id: str, n: int, amount: float) -> "tuple[list, list]":
+    """(legs, notes) for "buy across top N Buy-rated watchlist stocks"
+    (any of this feature's two recognized phrasings). "Top" means the
+    first N Buy-rated tickers in the watchlist's own existing order
+    (most-recently-added first, see db.get_watchlist) -- not a
+    re-ranking by upside/fair-value, which would need a fresh per-
+    ticker lookup this feature deliberately stays narrow enough to
+    avoid. `amount` is split evenly across however many qualifying
+    tickers were ACTUALLY found (which may be fewer than N -- noted,
+    not silently under-spent) and spent in each ticker's own native
+    currency, never converted -- same "never mix currencies" discipline
+    build_portfolio_view's own docstring already commits to."""
+    candidates = [
+        w["ticker"] for w in db.get_watchlist(user_id)
+        if db.get_latest_rating_for_ticker(user_id, w["ticker"]) == "Buy"
+    ][:n]
+    if not candidates:
+        return [], []
+
+    notes = []
+    if len(candidates) < n:
+        notes.append(f"only {len(candidates)} Buy-rated watchlist stock{'s' if len(candidates) != 1 else ''} found (asked for {n})")
+
+    per_leg_amount = amount / len(candidates)
+    legs = []
+    for ticker in candidates:
+        try:
+            quote = get_quote(ticker)
+        except Exception:
+            notes.append(f"couldn't check {ticker}'s price, skipped")
+            continue
+        price = quote["price"]
+        legs.append({
+            "ticker": ticker, "side": "BUY", "quantity": round(per_leg_amount / price, 4),
+            "price": price, "currency": quote.get("currency", "USD"),
+            "rationale": f"Batch: buy across top {n} Buy-rated watchlist stocks",
+        })
+    return legs, notes
+
+
+# Feature 4 (position sizing) -- a fixed, statable-in-one-sentence rule:
+# a percentage of current total portfolio value, scaled by the user's
+# own saved risk_tolerance (PATCH /v1/auth/risk-tolerance). Deliberately
+# simple/transparent, not a black box -- the confirmation turn always
+# names the exact percentage and risk level that produced the number,
+# same "one sentence" requirement the spec this was built from states
+# explicitly.
+_RISK_TOLERANCE_SIZING_PCT = {"Conservative": 0.02, "Moderate": 0.05, "Aggressive": 0.10}
+_DEFAULT_RISK_TOLERANCE = "Moderate"  # same fallback main.py's own GET /v1/auth/me already uses
+
+
+def suggest_quantity(user_id: str, ticker: str, price: float) -> "tuple[float, str] | None":
+    """(quantity, one-sentence sizing explanation) for a BUY with no
+    stated quantity, or None when there's genuinely nothing real to
+    size off of (an empty/unpriced portfolio) -- never a fabricated
+    fallback number, same degrade-honestly discipline as everywhere
+    else in this module. Public (not `_`-prefixed): also reused by
+    app/reasoning/price_alerts.py to size a BUY-side auto-execute price
+    alert at trigger time, the same sizing rule either way."""
+    user = db.get_user_by_id(user_id)
+    risk_tolerance = (user.get("risk_tolerance") if user else None) or _DEFAULT_RISK_TOLERANCE
+    pct = _RISK_TOLERANCE_SIZING_PCT.get(risk_tolerance, _RISK_TOLERANCE_SIZING_PCT[_DEFAULT_RISK_TOLERANCE])
+
+    total_value = build_portfolio_view(user_id)["summary"].get("total_market_value")
+    if not total_value:
+        return None
+
+    quantity = round((total_value * pct) / price, 4)
+    if quantity <= 0:
+        return None
+
+    return quantity, f"that's about {pct * 100:g}% of your portfolio, sized for {risk_tolerance}"
+
+
+def _propose_batch_order(user_id: str, batch: dict) -> str:
+    """Turn 1 of the batch confirm-then-execute flow -- expands the
+    recognized batch type into concrete priced legs and stores them as
+    this user's pending order, same _pending_orders shape (and same
+    _execute_pending_order path) a single order uses. The confirmation
+    always shows the FULL expanded list (this feature's own explicit
+    acceptance requirement) -- never a blanket "confirm the batch?" for
+    a list the user hasn't actually seen yet."""
+    if batch["type"] == "sell_rated":
+        legs, notes = _expand_sell_rated_batch(user_id, batch["rating"])
+        side_word, empty_message = "sell", f"You don't currently hold anything rated {batch['rating']}."
+    else:
+        legs, notes = _expand_buy_top_n_batch(user_id, batch["n"], batch["amount"])
+        side_word, empty_message = "buy", "Couldn't find any Buy-rated watchlist stocks to buy."
+
+    if not legs:
+        note_bit = (" (" + "; ".join(notes) + ")") if notes else ""
+        return empty_message + note_bit
+
+    _pending_orders[user_id] = {"legs": legs}
+
+    leg_list = ", ".join(f"{l['quantity']:g} {l['ticker']}" for l in legs)
+    note_bit = (" Note: " + "; ".join(notes) + ".") if notes else ""
+    return (
+        f"This will {side_word}: {leg_list}.{note_bit} "
+        "Confirm all? Reply \"yes\" to place all orders or \"no\" to cancel."
+    )
 
 
 def _format_history(history: list) -> str:
@@ -131,6 +470,10 @@ portfolio_fit - asking whether/how a specific stock fits, overlaps with, or dive
 full_report_request - explicitly asking for a full/deep/detailed research report, DCF, or valuation
 advice_request - asking where/how to invest, allocate, or spend money based on their own goals or situation (e.g. "where should I invest", "how should I spend $40k", "what should a beginner do") -- NOT asking about an existing holding's status
 stock_discovery_request - asking the assistant to find, discover, suggest, or recommend NEW specific stocks/companies it hasn't already named (e.g. "find me two new companies", "give me some stock ideas", "what should I buy next") -- NOT asking about a ticker already mentioned in this conversation, and NOT general allocation advice
+place_order - an actual instruction to buy or sell a stock right now (e.g. "buy 5 AAPL", "sell 10 TCS", "sell everything rated Sell") -- a trade command, NOT a question about whether/what to trade (that's advice_request or ticker_question)
+create_alert - setting up a standing price alert to check later (e.g. "alert me if AAPL drops below 180", "sell if TCS drops below 4000", "notify me when MSFT rises above 300") -- a WATCH for later, NOT an immediate buy/sell (that's place_order)
+list_alerts - asking what price alerts they currently have set (e.g. "what alerts do I have", "show my price alerts")
+daily_briefing - asking for a pulled-together summary/digest of portfolio performance, recent rating changes, AND upcoming events all at once (e.g. "give me my briefing", "what's my daily update", "catch me up") -- NOT a plain "how's my portfolio doing" (that's portfolio_status, which has no rating-change/upcoming-event digest)
 general - anything else, including generic finance chit-chat
 
 {ticker_note}
@@ -162,7 +505,7 @@ def classify_intent(message: str, history: list = None) -> dict:
     ticker = tickers[0] if tickers else _most_recent_ticker(history)
 
     try:
-        provider = HostedProvider(model=_CHAT_MODEL)
+        provider = HostedProvider(model=CHAT_MODEL)
         raw = provider.generate(_build_classify_prompt(message, ticker is not None, history), max_new_tokens=20)
         intent = _parse_intent(raw)
     except LLMProviderError:
@@ -211,17 +554,17 @@ def _handle_portfolio_status(user_id: str, message: str, history: list) -> str:
     portfolio_data = "\n".join(lines)
 
     prompt = (
-        f"{_PERSONA} Use ONLY the real data below -- never invent numbers. Answer the user's actual question in "
+        f"{PERSONA} Use ONLY the real data below -- never invent numbers. Answer the user's actual question in "
         "2-4 sentences: if they ask about diversification, reference the sector mix; if they ask what's going "
         "well/badly, reference the per-holding ratings and overall P&L; if the question is generic, summarize "
         "total value and P&L. If the message references something from earlier in the conversation (e.g. "
         "'that', 'it'), use the recent conversation below to understand what they mean. Never name a buy/sell "
-        f"call beyond restating the existing rating. {_DISCLAIMER_NOTE}\n\n"
+        f"call beyond restating the existing rating. {DISCLAIMER_NOTE}\n\n"
         f"PORTFOLIO DATA:\n{portfolio_data}\n\n"
         f"RECENT CONVERSATION:\n{_format_history(history)}\n\nMESSAGE: {message}"
     )
     try:
-        provider = HostedProvider(model=_CHAT_MODEL)
+        provider = HostedProvider(model=CHAT_MODEL)
         return provider.generate(prompt, max_new_tokens=200).strip()
     except LLMProviderError:
         return portfolio_data
@@ -264,18 +607,18 @@ def _handle_ticker_question(ticker: str, message: str, history: list) -> str:
     stock_data = "\n".join(lines)
 
     prompt = (
-        f"{_PERSONA} Use ONLY the real data below -- never invent numbers. Answer the user's actual question in "
+        f"{PERSONA} Use ONLY the real data below -- never invent numbers. Answer the user's actual question in "
         "2-4 sentences: if they ask for the source/methodology, explain this is FinSight's own algorithmic "
         "rating (computed from a DCF valuation plus financial-health and momentum/growth signals), not a "
         "third-party analyst call; if they ask why a flag applies, reference the flags below; if the question "
         "is generic, summarize the rating and news. If the message references something from earlier in the "
         "conversation, use the recent conversation below to understand what they mean. Never name a buy/sell "
-        f"call beyond restating the existing rating. {_DISCLAIMER_NOTE}\n\n"
+        f"call beyond restating the existing rating. {DISCLAIMER_NOTE}\n\n"
         f"STOCK DATA:\n{stock_data}\n\n"
         f"RECENT CONVERSATION:\n{_format_history(history)}\n\nMESSAGE: {message}"
     )
     try:
-        provider = HostedProvider(model=_CHAT_MODEL)
+        provider = HostedProvider(model=CHAT_MODEL)
         return provider.generate(prompt, max_new_tokens=200).strip()
     except LLMProviderError:
         return stock_data
@@ -339,18 +682,18 @@ def _handle_advice_request(user_id: str, message: str, history: list) -> str:
             )
 
     prompt = (
-        f"{_PERSONA} You're answering a request for investing/allocation guidance. Use ONLY the real context "
+        f"{PERSONA} You're answering a request for investing/allocation guidance. Use ONLY the real context "
         "below -- never invent numbers. Answer in 2-4 sentences, at the level of asset classes/sectors/"
         "allocation percentages, not a specific buy/sell call on an individual stock. If onboarding preferences "
         "are unset, give general starter guidance (e.g. diversified index funds first) but mention completing "
         "onboarding for guidance tailored to their risk tolerance. If the message references something from "
         "earlier in the conversation (e.g. 'that', 'the $40k thing'), use the recent conversation below to "
-        f"understand what they mean. {_DISCLAIMER_NOTE}\n\n"
+        f"understand what they mean. {DISCLAIMER_NOTE}\n\n"
         "CONTEXT:\n" + "\n".join(context_lines)
         + f"\n\nRECENT CONVERSATION:\n{_format_history(history)}\n\nMESSAGE: {message}"
     )
     try:
-        provider = HostedProvider(model=_CHAT_MODEL)
+        provider = HostedProvider(model=CHAT_MODEL)
         return provider.generate(prompt, max_new_tokens=200).strip()
     except LLMProviderError:
         return "I can give allocation-level guidance using your real portfolio and preferences, but couldn't generate a response just now -- try again in a moment."
@@ -374,6 +717,191 @@ def _handle_stock_discovery_request() -> str:
     )
 
 
+def _handle_place_order(user_id: str, ticker: str, message: str, history: list) -> str:
+    """Turn 1 of the confirm-then-execute flow: parse a single-ticker
+    order out of `message`, validate it against real data (a live
+    quote, and -- for a SELL -- the user's actual holding), and stash
+    it as this user's pending order. Returns the confirmation question
+    itself; NEVER calls db.execute_order (see handle_chat_message,
+    which is the only place a "yes" reply does that).
+
+    Ticker resolution is already done by classify_intent() (the same
+    resolve_companies()-first, history-carry-over-second mechanism
+    every other ticker-scoped intent in this module uses) -- this
+    function's own job is just the two fields classify_intent doesn't
+    resolve: side and quantity, both parsed deterministically above,
+    never guessed by the LLM.
+
+    A message with no ticker at all falls through to here (place_order
+    is deliberately not in _TICKER_SCOPED_INTENTS) so a batch command
+    like "sell everything rated Sell" can still be handled -- checked
+    FIRST, below, before `ticker` is ever consulted (a batch command
+    legitimately names no single ticker, and any carried-over ticker
+    from earlier conversation would be irrelevant to it anyway)."""
+    batch = _parse_batch_command(message)
+    if batch is not None:
+        return _propose_batch_order(user_id, batch)
+
+    if not ticker:
+        return "I couldn't tell which stock you mean -- try naming a ticker or company, e.g. \"buy 5 AAPL\"."
+
+    side = _parse_side(message)
+    if side is None:
+        return "I couldn't tell if that's a buy or a sell -- try \"buy 5 AAPL\" or \"sell 5 AAPL\"."
+
+    quantity = _parse_quantity(message)
+
+    # A SELL with no stated quantity still just asks -- Feature 4's
+    # suggestion only ever applies to a BUY (a "how much should I sell"
+    # default would be a much riskier guess than "how much should I
+    # buy", and "sell everything ..." is already the batch feature's
+    # own explicit phrasing for that case). Checked before the quote
+    # fetch below so a doomed SELL never spends a network call.
+    if quantity is None and side == "SELL":
+        return f"How many shares of {ticker} would you like to sell? (e.g. \"sell 5 {ticker}\")"
+
+    if side == "SELL":
+        holdings = {h["ticker"]: h["quantity"] for h in db.get_portfolio_holdings(user_id)}
+        held = holdings.get(ticker, 0.0)
+        if quantity > held:
+            if held == 0:
+                return f"You don't currently hold any {ticker}, so there's nothing to sell."
+            return f"You only hold {held:g} share{'s' if held != 1 else ''} of {ticker} -- can't sell {quantity:g}."
+
+    try:
+        quote = get_quote(ticker)
+    except Exception:
+        # Guardrail: degrade honestly rather than fabricate a price or
+        # silently drop the command -- same "None on failure, never a
+        # guess" discipline as the rest of this app (WACC floor/NaN
+        # handling/options pricer).
+        return f"I couldn't check {ticker}'s price right now -- try again in a moment."
+
+    price = quote["price"]
+    currency = quote.get("currency", "USD")
+    symbol = currency_symbol(currency)
+
+    sizing_note = None
+    if quantity is None:  # side == "BUY" -- SELL already returned above
+        suggestion = suggest_quantity(user_id, ticker, price)
+        if suggestion is None:
+            return f"How many shares of {ticker} would you like to buy? (e.g. \"buy 5 {ticker}\")"
+        quantity, sizing_note = suggestion
+
+    rationale = "User-initiated via chat" if sizing_note is None else f"User-initiated via chat, sized via suggestion ({sizing_note})"
+    _pending_orders[user_id] = {
+        "legs": [{"ticker": ticker, "side": side, "quantity": quantity, "price": price, "currency": currency, "rationale": rationale}],
+    }
+
+    if sizing_note is not None:
+        # Confirming or overriding the suggestion is still an explicit
+        # step every time -- this IS the same confirmation turn as the
+        # explicit-quantity path below, just with the suggested number
+        # and its one-sentence justification spelled out. A "yes" reply
+        # confirms it exactly like any other pending order; a reply
+        # with a different quantity (e.g. "buy 10 AAPL instead") isn't
+        # a yes/no, so handle_chat_message's own ambiguous-reply path
+        # drops this suggestion and re-parses that as a fresh command.
+        return (
+            f"Suggest {quantity:g} shares of {ticker} ({sizing_note}) at today's price of {symbol}{price:,.2f} -- "
+            "confirm, or tell me a different quantity."
+        )
+
+    return (
+        f"Confirm: {side} {quantity:g} {ticker} at today's price of {symbol}{price:,.2f}? "
+        "Reply \"yes\" to place the order or \"no\" to cancel."
+    )
+
+
+def _parse_alert_command(message: str) -> "dict | None":
+    """{"direction", "target_price", "side", "auto_execute"} for the
+    one narrow phrasing this recognizes ("X drops below/rises above
+    PRICE"), or None. `side` defaults to SELL when the message names
+    neither buy nor sell (e.g. "alert me if AAPL drops below 180" --
+    a passive, protective heads-up reads most naturally as a SELL-side
+    watch). `auto_execute` is True ONLY when BOTH an explicit side AND
+    a separately-worded auto opt-in ("automatically"/"auto-execute")
+    are present -- a deliberately harder bar to clear than a plain
+    alert, never the default reading of one ambiguous command (this
+    feature's own guardrail)."""
+    m = _ALERT_PRICE_RE.search(message)
+    if not m:
+        return None
+    direction = m.group(1).lower()
+    target_price = float(m.group(2).replace(",", ""))
+    side = _parse_side(message)
+    auto_execute = side is not None and bool(_AUTO_OPT_IN_RE.search(message))
+    return {"direction": direction, "target_price": target_price, "side": side or "SELL", "auto_execute": auto_execute}
+
+
+def _handle_create_alert(user_id: str, ticker: str, message: str, history: list) -> str:
+    """Registers a standing price alert and confirms it -- unlike
+    place_order, this is a low-stakes standing watch (not itself a
+    trade), so it takes effect immediately with no separate confirm
+    turn; the one genuinely risky case (auto_execute=1, a FUTURE
+    unattended trade) is instead gated by requiring the separately-
+    worded opt-in _parse_alert_command demands, not a second turn
+    here."""
+    if not ticker:
+        return "I couldn't tell which stock you mean -- try naming a ticker or company, e.g. \"alert me if AAPL drops below 180\"."
+
+    parsed = _parse_alert_command(message)
+    if parsed is None:
+        return f"I couldn't tell what price condition you mean -- try \"alert me if {ticker} drops below 180\"."
+
+    db.create_price_alert(
+        user_id, ticker, parsed["side"], parsed["direction"], parsed["target_price"], parsed["auto_execute"],
+    )
+
+    try:
+        currency = get_quote(ticker).get("currency", "USD")
+    except Exception:
+        currency = "USD"  # degrade -- the SET price still displays correctly, just without a live-confirmed symbol
+    symbol = currency_symbol(currency)
+
+    verb = "drops below" if parsed["direction"] == "below" else "rises above"
+    action_bit = f"automatically {parsed['side'].lower()}" if parsed["auto_execute"] else "let you know"
+    return f"Alert set: if {ticker} {verb} {symbol}{parsed['target_price']:,.2f}, I'll {action_bit} (simulated)."
+
+
+def _handle_list_alerts(user_id: str) -> str:
+    alerts = db.list_price_alerts(user_id)
+    if not alerts:
+        return "You don't have any active price alerts."
+
+    lines = ["Your active price alerts:"]
+    for a in alerts:
+        verb = "drops below" if a["direction"] == "below" else "rises above"
+        auto_bit = " (auto)" if a["auto_execute"] else ""
+        lines.append(f"- {a['ticker']} {verb} {a['target_price']:,.2f} -> {a['side']}{auto_bit}")
+    return "\n".join(lines)
+
+
+def _handle_daily_briefing(user_id: str) -> dict:
+    """{"text", "ticker"} for the "give me my briefing" intent --
+    handled OUTSIDE the normal _HANDLERS dispatch (see
+    handle_chat_message's own special-case branch) because, unlike
+    every other intent, its `ticker` has to come from the briefing's
+    OWN content (the one rating-changed ticker it names, if any), not
+    from classify_intent's pre-pass over the bare word "briefing".
+
+    Delegates the actual composition to
+    app/reasoning/daily_briefing.py's build_briefing -- imported here,
+    not at module level, since that module imports CHAT_MODEL/PERSONA/
+    etc. FROM this one; a module-level import back the other way would
+    be a circular import (same reasoning jobs.py's own factory
+    functions defer their heavy imports for, just here to break a
+    cycle rather than to skip an expensive one)."""
+    from app.reasoning.daily_briefing import build_briefing
+
+    briefing = build_briefing(user_id)
+    # Advances the same "since" cursor a sweep-sent briefing would --
+    # see db.set_last_briefing_at's own docstring for why an on-demand
+    # ask counts exactly the same as a sweep delivery.
+    db.set_last_briefing_at(user_id, time.time())
+    return briefing
+
+
 def _handle_general(message: str, history: list) -> str:
     """Short, caveated LLM answer with no specific data context -- no
     portfolio/ticker to key off for this message, so this deliberately
@@ -382,14 +910,14 @@ def _handle_general(message: str, history: list) -> str:
     as understood rather than ignored -- it has no new data to answer
     with regardless."""
     prompt = (
-        f"{_PERSONA} Answer the user's message in 1-3 sentences. You have no access to their portfolio or any "
+        f"{PERSONA} Answer the user's message in 1-3 sentences. You have no access to their portfolio or any "
         "specific stock data for this message -- if the question needs that, say so and suggest asking about a "
         "specific ticker or their portfolio instead. Use the recent conversation below only to understand "
-        f"references like 'that' or 'it'. Never give personalized investment advice. {_DISCLAIMER_NOTE}\n\n"
+        f"references like 'that' or 'it'. Never give personalized investment advice. {DISCLAIMER_NOTE}\n\n"
         f"RECENT CONVERSATION:\n{_format_history(history)}\n\nMESSAGE: {message}"
     )
     try:
-        provider = HostedProvider(model=_CHAT_MODEL)
+        provider = HostedProvider(model=CHAT_MODEL)
         return provider.generate(prompt, max_new_tokens=150).strip()
     except LLMProviderError:
         return "I can help with your portfolio or a specific ticker -- try asking about one of those."
@@ -402,6 +930,9 @@ _HANDLERS = {
     INTENT_FULL_REPORT_REQUEST: lambda user_id, ticker, message, history: _handle_full_report_request(ticker),
     INTENT_ADVICE_REQUEST: lambda user_id, ticker, message, history: _handle_advice_request(user_id, message, history),
     INTENT_STOCK_DISCOVERY_REQUEST: lambda user_id, ticker, message, history: _handle_stock_discovery_request(),
+    INTENT_PLACE_ORDER: lambda user_id, ticker, message, history: _handle_place_order(user_id, ticker, message, history),
+    INTENT_CREATE_ALERT: lambda user_id, ticker, message, history: _handle_create_alert(user_id, ticker, message, history),
+    INTENT_LIST_ALERTS: lambda user_id, ticker, message, history: _handle_list_alerts(user_id),
     INTENT_GENERAL: lambda user_id, ticker, message, history: _handle_general(message, history),
 }
 
@@ -414,11 +945,42 @@ def handle_chat_message(user_id: str, message: str, history: list = None) -> dic
     `history` is GET /v1/chat/history's own list shape (oldest first,
     from db.list_chat_messages) -- the caller's job to fetch it BEFORE
     persisting the current message, so it never includes the message
-    being classified right now."""
+    being classified right now.
+
+    Checks for a pending order (this user's own prior _handle_place_order
+    proposal) BEFORE running intent classification at all -- turn 2 of
+    the confirm-then-execute flow is a deterministic yes/no parse, never
+    an LLM classification, since misclassifying a confirmation reply
+    would be exactly the kind of mistake this whole flow exists to
+    prevent. A reply that's neither a clear yes nor a clear no drops the
+    stale pending order and falls through to normal classification for
+    THIS message -- the user moved on, and leaving the old proposal
+    alive risks it being accidentally confirmed later by an unrelated
+    "yes" to something else entirely."""
     history = history or []
+
+    pending = _pending_orders.get(user_id)
+    if pending is not None:
+        confirmation = _parse_confirmation(message)
+        if confirmation == "yes":
+            reply = _execute_pending_order(user_id)
+            return {"reply": reply, "intent": INTENT_PLACE_ORDER, "ticker": _pending_order_ticker(pending)}
+        if confirmation == "no":
+            _pending_orders.pop(user_id, None)
+            return {"reply": "Cancelled -- no order placed.", "intent": INTENT_PLACE_ORDER, "ticker": None}
+        _pending_orders.pop(user_id, None)
+
     classification = classify_intent(message, history)
     intent = classification["intent"]
     ticker = classification["ticker"]
+
+    if intent == INTENT_DAILY_BRIEFING:
+        # Special-cased ahead of the normal _HANDLERS dispatch -- see
+        # _handle_daily_briefing's own docstring for why its ticker
+        # can't come from classify_intent's pre-pass the way every
+        # other intent's does.
+        briefing = _handle_daily_briefing(user_id)
+        return {"reply": briefing["text"], "intent": intent, "ticker": briefing["ticker"]}
 
     reply = _HANDLERS[intent](user_id, ticker, message, history)
 
