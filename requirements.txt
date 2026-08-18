@@ -12,6 +12,17 @@ rapidfuzz
 reportlab
 python-dotenv
 scikit-learn
+# Secondary model for ml_valuation_classifier.py's model comparison --
+# optional (HAS_XGBOOST guard falls back to sklearn's
+# GradientBoostingClassifier if this is ever missing), but real when
+# present, not a stub.
+xgboost
+# SHAP/MLflow are only imported by scripts/train_ml_classifier.py (an
+# on-demand training script, not the live-serving path) -- see
+# app/valuation/ml_evaluation.py's own module docstring for why they're
+# kept out of ml_valuation_classifier.py's always-imported code.
+shap
+mlflow
 chromadb==0.4.24
 sentence-transformers==2.7.0
 torch

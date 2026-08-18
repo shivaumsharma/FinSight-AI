@@ -1,0 +1,51 @@
+name: sweep-cron
+
+# Replaces two in-process `while True: sleep(); ...` background
+# threads that used to run inside app/api/main.py's FastAPI process.
+# Cloud Run only allocates CPU to a container while it's actively
+# handling a request by default -- a thread that needs to wake up and
+# do work on its own, independent of any request, requires disabling
+# that (--cpu-throttling=false), which bills the whole container for
+# 24/7 wall-clock uptime instead of per-request. That's what actually
+# drove this project's Cloud Run bill up (see the two /v1/internal/
+# sweep/* endpoints in main.py) -- this workflow does the same two
+# jobs on the same cadence, for free, from GitHub's own runners
+# instead, so the backend never needs always-on CPU again.
+#
+# Requires one repo secret: FINSIGHT_API_KEY (the same value as the
+# deployed backend's API_KEY env var -- Settings -> Secrets and
+# variables -> Actions -> New repository secret).
+
+on:
+  schedule:
+    # Timeout sweep: every 5 minutes (was 60s in-process -- a hung job
+    # sitting a few minutes longer before being marked TIMEOUT is a
+    # trivial cost, not worth a tighter cron schedule).
+    - cron: "*/5 * * * *"
+    # Call-outcome sweep: every 6 hours, matching the old thread's own
+    # interval (checkpoints mature 7+ days out, so this was never
+    # time-sensitive).
+    - cron: "0 */6 * * *"
+  workflow_dispatch: {} # manual trigger, for testing this workflow itself
+
+env:
+  FINSIGHT_API_URL: https://finsight-api-949703746241.europe-west1.run.app
+
+jobs:
+  timeout-sweep:
+    if: github.event.schedule == '*/5 * * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /v1/internal/sweep/timeouts
+        run: |
+          curl -sf -X POST "$FINSIGHT_API_URL/v1/internal/sweep/timeouts" \
+            -H "X-API-Key: ${{ secrets.FINSIGHT_API_KEY }}"
+
+  call-outcome-sweep:
+    if: github.event.schedule == '0 */6 * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /v1/internal/sweep/call-outcomes
+        run: |
+          curl -sf -X POST "$FINSIGHT_API_URL/v1/internal/sweep/call-outcomes" \
+            -H "X-API-Key: ${{ secrets.FINSIGHT_API_KEY }}"
