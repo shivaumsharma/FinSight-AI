@@ -353,7 +353,13 @@ Answer:""".format(question=question)
         # proposes nothing" (see this function's own docstring), not an
         # unhandled ImportError.
         from app.core.llm_provider import get_llm_provider
-        raw = get_llm_provider().generate(prompt, max_new_tokens=8)
+        # 40, not 8: LLM_MODEL defaults to a gpt-oss reasoning model, whose
+        # hidden chain-of-thought (see HostedProvider.generate()'s
+        # reasoning_effort handling) still costs ~15-30 tokens out of this
+        # same budget even at "low" effort -- 8 was measured to reliably
+        # return empty content (the reasoning alone exhausted it) even
+        # though the visible answer itself is one short word.
+        raw = get_llm_provider().generate(prompt, max_new_tokens=40)
     except Exception:
         return None
 

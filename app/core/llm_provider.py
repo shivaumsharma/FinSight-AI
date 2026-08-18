@@ -157,18 +157,34 @@ class HostedProvider(LLMProvider):
 
     def generate(self, prompt: str, max_new_tokens: int = 700) -> str:
         last_error = None
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_new_tokens,
+            "temperature": 0,
+        }
+        if self.model.startswith("openai/gpt-oss"):
+            # gpt-oss is a reasoning model: unset, its hidden chain-of-thought
+            # (returned in a separate `reasoning` field, billed out of the
+            # same max_tokens budget) scales to fill whatever budget it's
+            # given rather than costing a fixed tax -- confirmed live: at
+            # default effort it burned all of a 200-token budget on
+            # reasoning alone and never reached the answer. "low" bounds it
+            # (~15-35 reasoning tokens on this codebase's short prompts)
+            # so callers with tight max_new_tokens (company_resolver.py's
+            # 8-40, chat_router.py's 20) still get real content back.
+            # Sending this field to a non-reasoning model (e.g. allam-2-7b)
+            # is a hard 400 "not supported with this model", not a no-op --
+            # confirmed live -- so it's gated to the one model family that
+            # accepts and needs it.
+            payload["reasoning_effort"] = "low"
 
         for attempt in range(self.max_retries + 1):
             try:
                 resp = requests.post(
                     f"{self.base_url}/chat/completions",
                     headers={"Authorization": f"Bearer {self.api_key}"},
-                    json={
-                        "model": self.model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": max_new_tokens,
-                        "temperature": 0,
-                    },
+                    json=payload,
                     timeout=self.timeout,
                 )
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:

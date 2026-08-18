@@ -9,11 +9,12 @@ times -- the underlying evidence doesn't change, only which model is
 interpreting it does, so this stays cheap and fast (three short LLM
 calls in parallel) rather than three full report pipelines.
 
-All 3 models are genuinely different underlying lineages (Meta, OpenAI
-open-weight, Alibaba/Qwen), all already reachable through the existing
-Groq-backed HostedProvider with zero new signup or API key -- confirmed
-against the live account's real /v1/models list, not assumed from
-training data (Groq's catalog changes; e.g. Mixtral is gone).
+All 3 models are genuinely different underlying lineages (SDAIA,
+OpenAI open-weight, Alibaba/Qwen), all already reachable through the
+existing Groq-backed HostedProvider with zero new signup or API key --
+confirmed against the live account's real /v1/models list, not assumed
+from training data (Groq's catalog changes; e.g. Mixtral and every
+Llama text model are gone).
 """
 
 import re
@@ -26,7 +27,15 @@ from app.reporting.report_data_builder import derive_recommendation
 from app.tools.valuation_tool import ValuationTool
 
 CONSENSUS_MODELS = [
-    {"label": "Llama 3.3 70B", "model": "llama-3.3-70b-versatile"},
+    # Llama 3.3 70B was here originally (Meta lineage) but Groq has fully
+    # removed it from the catalog -- every call 404'd, always degrading to
+    # "Insufficient Data -- This model was unreachable" (still an honest,
+    # visible failure per this module's own per-item isolation, not a
+    # silent one, but a genuinely dead entry regardless). ALLaM 2 7B
+    # (SDAIA lineage) is the closest remaining "genuinely different
+    # lineage" swap -- confirmed live against the account's current
+    # /v1/models list.
+    {"label": "ALLaM 2 7B", "model": "allam-2-7b"},
     {"label": "GPT-OSS 120B", "model": "openai/gpt-oss-120b"},
     {"label": "Qwen3.6 27B", "model": "qwen/qwen3.6-27b"},
 ]
