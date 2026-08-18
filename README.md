@@ -23,7 +23,7 @@ The platform combines an LLM tool-planning agent, a real DCF valuation engine, r
 
 Most "AI investing" tools are chatbots wrapped around a generic LLM's training data — confident-sounding, ungrounded, and unable to tell you why they said what they said. FinSight's premise is the opposite: every claim in a report should trace back to a live filing, a real quote, or an actual computed valuation, and the system should be honest about its own limitations (small training sets, a DCF's structural blind spots, a benchmark result that didn't come out as hoped) rather than hide them.
 
-The longer-term direction is a full voice-driven research copilot — "Hey FinSight, check my stocks" — with tap-to-talk transcription (shipped, see below) as the first step toward hands-free portfolio review and, eventually, spoken app navigation.
+The longer-term direction is a full voice-driven research copilot — "Hey FinSight, check my stocks." Tap-to-talk transcription, spoken replies, a hands-free continuous voice session, and voice-driven onboarding are shipped; full spoken app navigation is next.
 
 ---
 
@@ -39,7 +39,10 @@ The longer-term direction is a full voice-driven research copilot — "Hey FinSi
 - Institutional Consensus scoring against real analyst ratings, with a small-sample-size caveat
 - Concurrent multi-model "second opinion" — three independent LLMs vote on the same evidence
 - Simulated paper trading: watchlist, self-reported portfolio, order execution with real weighted-average-cost-basis accounting — no real money, ever
-- Voice input: tap-to-talk mic button, speech transcribed via Sarvam AI, auto-stops on silence
+- Voice input/output: tap-to-talk mic button (Sarvam AI Speech-to-Text, auto-stops on silence) plus opt-in spoken replies (Sarvam AI Text-to-Speech) and a hands-free continuous voice session on Chat and Home
+- Voice-driven onboarding: new users can answer the risk-tolerance/goals questionnaire by voice, classified against the expected answer set
+- A shared conversational assistant (multi-turn memory, portfolio-grounded answers) surfaced both as a full Chat page and a compact always-active widget on Home
+- Real Black-Scholes-Merton options pricing: Greeks (delta/gamma/theta/vega/rho) and implied volatility solved numerically against **live** option chains, alongside realized volatility — a separate, from-scratch quantitative model, not a third-party pricing API
 - Full auth system (PBKDF2, HMAC-signed share links), Progressive Web App with offline support and Web Push notifications
 - Point-in-time backtesting harness with explicit no-look-ahead controls, run across 1,000+ tickers
 
@@ -52,6 +55,9 @@ Ask a question, get back a 14-section institutional-style report — company ove
 
 ### Predictive & Quantitative Analytics
 A custom WACC/FCFF/DCF engine, a Logistic Regression vs. XGBoost valuation classifier (display-only, honestly gated on training-set size), and a 31-factor quantitative scorecard spanning financial, quality, valuation, market, risk, sentiment, and macro signals.
+
+### Options & Derivatives
+A from-scratch Black-Scholes-Merton pricer (`app/derivatives/options_pricer.py`) computes theoretical price and the five Greeks against every strike in a ticker's real, live option chain, near the money. Implied volatility is solved numerically per contract (Newton-Raphson with a bisection fallback) against the option's actual market price — not read off a third-party field — then cross-checked alongside realized volatility from historical returns. Degrades honestly: a quote priced below its own intrinsic value returns `null` Greeks rather than a fabricated number, and a ticker with no listed options market (most non-US listings) returns a clear "unavailable" state, not an error.
 
 ### Evaluation Framework
 Every report is scored, not just produced — grounding (40%), retrieval quality (20%), citation coverage (20%), and completeness (20%). A dedicated benchmark harness checks prompt/retrieval/model changes against a fixed baseline instead of eyeballing them. Full methodology and results — including the ones that didn't come out as hoped — in [EVALUATION.md](EVALUATION.md).
@@ -135,14 +141,15 @@ Autonomous_Financial_Research_Agent/
 │   ├── api/                    # FastAPI service — auth, jobs, voice, main
 │   ├── benchmarks/               # Fixed evaluation benchmark sets
 │   ├── core/                   # LLM provider abstraction, retry, cache, currency
-│   ├── data/                   # SEC EDGAR, NSE India, Sarvam, market data clients
+│   ├── data/                   # SEC EDGAR, NSE India, Sarvam STT/TTS, market data clients
+│   ├── derivatives/               # Black-Scholes options pricer, Greeks, implied vol
 │   ├── evaluation/               # Grounding / citation / retrieval scorers
 │   ├── nlp/                    # Sentiment summarization
 │   ├── planner/                 # LLM + rule-based tool planning
 │   ├── rag/                    # Chunking, embeddings, ChromaDB, report generation
 │   ├── reasoning/               # Market movers, model consensus, backtest stats
 │   ├── reporting/               # Report/PDF building, news, institutional ratings
-│   ├── tests/                  # 540+ tests across 34 files
+│   ├── tests/                  # 800+ tests across 49 files
 │   ├── tools/                  # Agent tools (market, valuation, RAG, sentiment, ...)
 │   ├── training/                # GRPO / RLVR fine-tuning pipeline
 │   ├── utils/
@@ -179,6 +186,7 @@ Autonomous_Financial_Research_Agent/
 - Reverse-engineered a live, undocumented NSE India filings API through a manual endpoint spike (not guesswork), correctly identifying which subdomains required browser-spoofed headers — verified end-to-end against the production deployment before shipping.
 - Diagnosed a 3-day silent CI outage by building a GitHub Actions failure-annotation mechanism rather than guessing at fixes, tracing it to a live-network test blocked by GitHub's own IP ranges.
 - Added a two-tier Redis caching layer (content-addressed for correctness-sensitive output, TTL-only for genuinely time-bound data) and measured real 500–1,700x cache-hit speedups — after catching a cross-contamination bug in the benchmark's own methodology first.
+- Built a Black-Scholes-Merton options pricer from scratch (no third-party pricing library) with a numerically-solved implied-volatility root-finder against live market quotes, not a pre-computed vendor field; verified against textbook reference values to 4 decimal places and, separately, against a real live option chain where theoretical price matched market price to the cent everywhere the solver converged.
 
 ---
 
@@ -281,15 +289,15 @@ cd web && npx vercel@latest --prod
 
 ## Testing & Quality
 
-540+ test functions across 34 files, covering the recommendation engine, valuation pipeline, auth, RAG retrieval, the job queue's concurrency behavior, every external API client (SEC EDGAR, NSE India, Sarvam, Finnhub), and the full HTTP API surface — run via `pytest app/tests/`. CI runs on every push via GitHub Actions, with pytest failures re-emitted as annotations so a break is diagnosable from the Checks API without needing repo sign-in.
+800+ test functions across 49 files, covering the recommendation engine, valuation pipeline, options pricer (Black-Scholes reference values, put-call parity, implied-vol round-trip), auth, RAG retrieval, the job queue's concurrency behavior, every external API client (SEC EDGAR, NSE India, Sarvam, Finnhub), and the full HTTP API surface — run via `pytest app/tests/`. CI runs on every push via GitHub Actions, with pytest failures re-emitted as annotations so a break is diagnosable from the Checks API without needing repo sign-in.
 
 ---
 
 ## Roadmap
 
-**Completed:** financial statement normalization, DCF/FCFF/WACC engines, live SEC EDGAR + NSE India sourcing, ChromaDB retrieval, query intent classification, FinBERT sentiment, agentic LLM+rule-based tool planning, self-evaluation scoring, a benchmarked LangGraph orchestration alternative, Redis caching, full auth + PWA + Web Push, a simulated paper-trading platform, a 31-signal Alpha Factors scorecard, voice input.
+**Completed:** financial statement normalization, DCF/FCFF/WACC engines, live SEC EDGAR + NSE India sourcing, ChromaDB retrieval, query intent classification, FinBERT sentiment, agentic LLM+rule-based tool planning, self-evaluation scoring, a benchmarked LangGraph orchestration alternative, Redis caching, full auth + PWA + Web Push, a simulated paper-trading platform, a 31-signal Alpha Factors scorecard, a Black-Scholes options-pricing/Greeks engine, two-way voice (input + spoken replies), voice-driven onboarding, and a shared multi-turn conversational assistant on both Chat and Home.
 
-**Planned:** hybrid retrieval (vector + BM25), multi-quarter financial reasoning, an automated evaluation dashboard, portfolio-level analysis, a trained RLVR checkpoint, voice-driven app navigation ("check my watchlist"), Postgres migration, request-level rate limiting, a committed CD pipeline.
+**Planned:** hybrid retrieval (vector + BM25), multi-quarter financial reasoning, an automated evaluation dashboard, portfolio-level analysis, a trained RLVR checkpoint, further voice-driven app navigation, Postgres migration, request-level rate limiting, a committed CD pipeline.
 
 ---
 
