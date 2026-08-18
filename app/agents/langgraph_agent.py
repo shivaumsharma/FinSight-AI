@@ -196,7 +196,7 @@ class LangGraphResearchAgent:
         # measures orchestration overhead, not LLM inference time.
         self.graph = build_graph(checkpointer=checkpointer, tools=tools, planner=planner)
 
-    def run(self, question: str) -> ResearchContext:
+    def run(self, question: str, risk_tolerance: str = "Moderate") -> ResearchContext:
 
         companies = resolve_companies(question)
 
@@ -206,6 +206,7 @@ class LangGraphResearchAgent:
         context = ResearchContext(
             ticker=companies[0],
             question=question,
+            risk_tolerance=risk_tolerance,
         )
 
         if is_comparison_question(question) and len(companies) >= 2:

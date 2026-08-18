@@ -63,8 +63,23 @@ jobs:
       # test_sarvam_realtime_client.py itself. No torch/chromadb
       # dependency (it's a small HTTP/WebSocket client SDK), so it's
       # cheap to add here like every other entry in this list.
+      #
+      # xgboost/shap: same gap a fourth time. xgboost backs
+      # ml_valuation_classifier.py's _LabelEncodedXGB (only defined
+      # when HAS_XGBOOST is True) -- without it, unpickling the
+      # committed valuation_classifier.joblib artifact raises
+      # AttributeError at collection/fixture time for every test that
+      # loads it (test_alpha_factors.py, test_valuation_tool.py,
+      # test_ml_valuation_classifier.py), not just tests that train a
+      # new model. shap is a deferred import inside
+      # ml_evaluation.shap_importance_table() specifically (not a
+      # module-level import, so a plain grep for "^import shap" misses
+      # it) -- needed by test_ml_evaluation.py's SHAP-importance test.
+      # mlflow is NOT added here: confirmed only imported by
+      # scripts/train_ml_classifier.py (an on-demand training script),
+      # which nothing under app/tests/ imports.
       - name: Install test dependencies
-        run: pip install pandas numpy langgraph==1.2.9 redis fastapi httpx yfinance rapidfuzz python-dotenv pywebpush joblib scikit-learn python-multipart pypdf sarvamai -r requirements-dev.txt
+        run: pip install pandas numpy langgraph==1.2.9 redis fastapi httpx yfinance rapidfuzz python-dotenv pywebpush joblib scikit-learn python-multipart pypdf sarvamai xgboost shap -r requirements-dev.txt
 
       # test_finbert.py and test_rag.py are manual smoke tests (see
       # their own docstrings) -- they need the full model stack and
