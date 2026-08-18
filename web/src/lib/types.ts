@@ -606,7 +606,10 @@ export interface OrderResult {
   new_holding_quantity: number;
 }
 
-// GET /v1/orders' item shape -- one row of order history.
+// GET /v1/orders' item shape -- one row of order history. rationale is
+// null for an order placed with no proposal behind it (e.g. this same
+// form, or a bare "buy 5 AAPL" chat command) -- never a fabricated
+// reason, see app/api/db.py's execute_order docstring.
 export interface Order {
   order_id: string;
   ticker: string;
@@ -615,6 +618,7 @@ export interface Order {
   execution_price: number;
   currency: string;
   executed_at: number;
+  rationale: string | null;
 }
 
 export interface PortfolioSummary {
