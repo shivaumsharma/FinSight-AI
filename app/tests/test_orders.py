@@ -105,6 +105,23 @@ def test_execute_order_sell_with_no_existing_holding_raises_value_error(temp_db)
         temp_db.execute_order(user_id, "AAPL", "SELL", 1, 100.0, "USD")
 
 
+def test_execute_order_stores_a_supplied_rationale(temp_db):
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    result = temp_db.execute_order(user_id, "AAPL", "BUY", 10, 100.0, "USD", rationale="rating changed to Sell on 2026-08-20")
+
+    assert result["rationale"] == "rating changed to Sell on 2026-08-20"
+    orders = temp_db.list_orders(user_id)
+    assert orders[0]["rationale"] == "rating changed to Sell on 2026-08-20"
+
+
+def test_execute_order_defaults_rationale_to_none(temp_db):
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    result = temp_db.execute_order(user_id, "AAPL", "BUY", 10, 100.0, "USD")
+
+    assert result["rationale"] is None
+    assert temp_db.list_orders(user_id)[0]["rationale"] is None
+
+
 def test_list_orders_returns_most_recent_first(temp_db):
     user_id = temp_db.create_user("a@example.com", "h", "s")
     temp_db.execute_order(user_id, "AAPL", "BUY", 10, 100.0, "USD")
@@ -135,6 +152,9 @@ def test_place_buy_order_returns_the_fill_and_updates_portfolio(client, monkeypa
     assert body["execution_price"] == 150.0
     assert body["currency"] == "USD"
     assert body["new_holding_quantity"] == 4
+    # Placed directly through the REST endpoint (the UI order form), not
+    # a chat proposal -- no rationale to report, and none fabricated.
+    assert body["rationale"] is None
 
     portfolio = client.get("/v1/portfolio", headers=auth_headers).json()
     assert portfolio["holdings"][0]["ticker"] == "AAPL"

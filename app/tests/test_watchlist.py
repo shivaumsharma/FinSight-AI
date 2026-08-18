@@ -19,6 +19,7 @@ from app.api.main import app
 from app.core import llm_provider as lp
 from app.core.research_context import ResearchContext
 from app.data.market_data import TickerNotFoundError
+from app.reporting import corporate_actions_feed as caf
 
 
 class _StubAgent:
@@ -615,7 +616,7 @@ def test_market_sentiment_requires_a_session(client):
 
 def test_corporate_actions_feed_all_scope_unions_watchlist_and_portfolio(client, monkeypatch, auth_headers):
     monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
-    monkeypatch.setattr(main, "get_company_name", lambda ticker: f"{ticker} Inc")
+    monkeypatch.setattr(caf, "get_company_name", lambda ticker: f"{ticker} Inc")
     client.post("/v1/watchlist", json={"ticker": "AAPL"}, headers=auth_headers)
     client.post("/v1/portfolio", json={"ticker": "MSFT", "quantity": 1, "avg_cost": 100}, headers=auth_headers)
 
@@ -626,7 +627,7 @@ def test_corporate_actions_feed_all_scope_unions_watchlist_and_portfolio(client,
         }
         return dates[ticker]
 
-    monkeypatch.setattr(main, "get_corporate_actions", fake_actions)
+    monkeypatch.setattr(caf, "get_corporate_actions", fake_actions)
 
     resp = client.get("/v1/corporate-actions/feed", headers=auth_headers)
     assert resp.status_code == 200
@@ -644,11 +645,11 @@ def test_corporate_actions_feed_all_scope_unions_watchlist_and_portfolio(client,
 
 def test_corporate_actions_feed_portfolio_scope_excludes_watchlist_only_tickers(client, monkeypatch, auth_headers):
     monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
-    monkeypatch.setattr(main, "get_company_name", lambda ticker: None)
+    monkeypatch.setattr(caf, "get_company_name", lambda ticker: None)
     client.post("/v1/watchlist", json={"ticker": "AAPL"}, headers=auth_headers)
     client.post("/v1/portfolio", json={"ticker": "MSFT", "quantity": 1, "avg_cost": 100}, headers=auth_headers)
     monkeypatch.setattr(
-        main, "get_corporate_actions",
+        caf, "get_corporate_actions",
         lambda ticker: {"next_earnings_date": "2026-09-15", "next_ex_dividend_date": None, "last_dividend_amount": None, "last_split": None},
     )
 
@@ -663,11 +664,11 @@ def test_corporate_actions_feed_portfolio_scope_excludes_watchlist_only_tickers(
 
 def test_corporate_actions_feed_dedupes_a_ticker_on_both_lists(client, monkeypatch, auth_headers):
     monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
-    monkeypatch.setattr(main, "get_company_name", lambda ticker: None)
+    monkeypatch.setattr(caf, "get_company_name", lambda ticker: None)
     client.post("/v1/watchlist", json={"ticker": "AAPL"}, headers=auth_headers)
     client.post("/v1/portfolio", json={"ticker": "AAPL", "quantity": 1, "avg_cost": 100}, headers=auth_headers)
     monkeypatch.setattr(
-        main, "get_corporate_actions",
+        caf, "get_corporate_actions",
         lambda ticker: {"next_earnings_date": "2026-09-15", "next_ex_dividend_date": None, "last_dividend_amount": None, "last_split": None},
     )
 
@@ -678,10 +679,10 @@ def test_corporate_actions_feed_dedupes_a_ticker_on_both_lists(client, monkeypat
 
 def test_corporate_actions_feed_skips_tickers_with_no_upcoming_events(client, monkeypatch, auth_headers):
     monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
-    monkeypatch.setattr(main, "get_company_name", lambda ticker: None)
+    monkeypatch.setattr(caf, "get_company_name", lambda ticker: None)
     client.post("/v1/watchlist", json={"ticker": "AAPL"}, headers=auth_headers)
     monkeypatch.setattr(
-        main, "get_corporate_actions",
+        caf, "get_corporate_actions",
         lambda ticker: {"next_earnings_date": None, "next_ex_dividend_date": None, "last_dividend_amount": None, "last_split": None},
     )
 
@@ -691,7 +692,7 @@ def test_corporate_actions_feed_skips_tickers_with_no_upcoming_events(client, mo
 
 def test_corporate_actions_feed_isolates_one_bad_ticker(client, monkeypatch, auth_headers):
     monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
-    monkeypatch.setattr(main, "get_company_name", lambda ticker: None)
+    monkeypatch.setattr(caf, "get_company_name", lambda ticker: None)
     client.post("/v1/watchlist", json={"ticker": "AAPL"}, headers=auth_headers)
     client.post("/v1/watchlist", json={"ticker": "BAD"}, headers=auth_headers)
 
@@ -700,7 +701,7 @@ def test_corporate_actions_feed_isolates_one_bad_ticker(client, monkeypatch, aut
             raise Exception("yfinance hiccup")
         return {"next_earnings_date": "2026-09-15", "next_ex_dividend_date": None, "last_dividend_amount": None, "last_split": None}
 
-    monkeypatch.setattr(main, "get_corporate_actions", flaky_actions)
+    monkeypatch.setattr(caf, "get_corporate_actions", flaky_actions)
 
     resp = client.get("/v1/corporate-actions/feed", headers=auth_headers)
     assert resp.status_code == 200
