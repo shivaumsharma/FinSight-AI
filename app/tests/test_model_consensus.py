@@ -119,7 +119,7 @@ def test_get_model_opinions_isolates_one_models_outage(monkeypatch):
     opinions = mc.get_model_opinions(_report_data(), "AAPL")
     by_model = {o["model"]: o for o in opinions}
     assert by_model["openai/gpt-oss-120b"]["rating"] == "Insufficient Data"
-    assert by_model["llama-3.3-70b-versatile"]["rating"] == "Hold"
+    assert by_model["allam-2-7b"]["rating"] == "Hold"
     assert by_model["qwen/qwen3.6-27b"]["rating"] == "Hold"
 
 
