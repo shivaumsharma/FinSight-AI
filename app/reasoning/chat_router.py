@@ -63,8 +63,15 @@ _INTENT_RE = re.compile(r"INTENT:\s*(\w+)", re.IGNORECASE)
 # A small, fast model is enough for a 5-way classification and a short
 # generic reply -- same model_consensus.py precedent of picking a
 # cheap model for a short, low-stakes call rather than the biggest
-# available one.
-_CHAT_MODEL = "llama-3.3-70b-versatile"
+# available one. allam-2-7b specifically (not a gpt-oss/reasoning
+# model): it answers directly with no hidden chain-of-thought tax, so
+# it reliably fits this file's tight max_new_tokens budgets (20-200) --
+# confirmed live against Groq's current catalog after llama-3.3-70b
+# was fully removed (was 404ing every call here, degrading every
+# message to INTENT_GENERAL by design -- see classify_intent's
+# docstring -- which made this file look like it worked while actually
+# never classifying anything).
+_CHAT_MODEL = "allam-2-7b"
 
 # How many recent messages (not turns -- individual user+assistant rows)
 # to fold into a prompt as conversation memory. Small on purpose: this
