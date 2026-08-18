@@ -32,6 +32,7 @@ same treatment as the Monte Carlo layer.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -92,7 +93,7 @@ if HAS_XGBOOST:
             return self._model.feature_importances_
 
 
-def _build_secondary_model():
+def build_secondary_model():
     if HAS_XGBOOST:
         return _LabelEncodedXGB(
             n_estimators=200, max_depth=3, learning_rate=0.05,
@@ -108,7 +109,7 @@ def _secondary_model_name() -> str:
     return "xgboost" if HAS_XGBOOST else "gradient_boosting"
 
 
-def _build_logreg():
+def build_logreg():
     return Pipeline([("scale", StandardScaler()), ("clf", LogisticRegression(max_iter=1000))])
 
 
@@ -124,10 +125,16 @@ def cross_validate_models(df: pd.DataFrame, n_splits: int = 5) -> Dict[str, Any]
     X = df[FEATURE_COLUMNS].astype("float64").to_numpy()
     y = df["realized_label"].astype(str).to_numpy()
 
-    n_splits = max(min(n_splits, df["realized_label"].value_counts().min()), 2)
+    # int(...) matters, not just style -- when the smallest class's
+    # count is what actually binds (small/imbalanced datasets, which
+    # this one still is), Python's min()/max() return that value
+    # as-is rather than casting it, leaving a bare numpy.int64 in a
+    # dict this module later json.dumps -- which raises. Only surfaced
+    # once a class dropped under the n_splits=5 default, not before.
+    n_splits = int(max(min(n_splits, df["realized_label"].value_counts().min()), 2))
     cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
 
-    models = {"logistic_regression": _build_logreg(), _secondary_model_name(): _build_secondary_model()}
+    models = {"logistic_regression": build_logreg(), _secondary_model_name(): build_secondary_model()}
 
     results = {}
     for name, model in models.items():
@@ -155,8 +162,8 @@ def train_and_evaluate(df: pd.DataFrame, test_size: float = 0.25):
     report = {}
     fitted_models = {}
 
-    for name, model in [("logistic_regression", _build_logreg()),
-                         (_secondary_model_name(), _build_secondary_model())]:
+    for name, model in [("logistic_regression", build_logreg()),
+                         (_secondary_model_name(), build_secondary_model())]:
         model.fit(X_train, y_train)
         preds = model.predict(X_test)
 
@@ -171,7 +178,7 @@ def train_and_evaluate(df: pd.DataFrame, test_size: float = 0.25):
         }
         fitted_models[name] = model
 
-    return report, fitted_models
+    return report, fitted_models, X_test, y_test
 
 
 def feature_importance_table(model, model_name: str) -> pd.DataFrame:
@@ -190,7 +197,7 @@ def feature_importance_table(model, model_name: str) -> pd.DataFrame:
 
 def train_final_model_on_all_data(df: pd.DataFrame, best_model_name: str):
     X, y = df[FEATURE_COLUMNS], df["realized_label"]
-    model = _build_logreg() if best_model_name == "logistic_regression" else _build_secondary_model()
+    model = build_logreg() if best_model_name == "logistic_regression" else build_secondary_model()
     model.fit(X, y)
     joblib.dump({"model": model, "model_name": best_model_name, "feature_columns": FEATURE_COLUMNS}, MODEL_PATH)
     return model
@@ -222,9 +229,27 @@ def predict_verdict(feature_row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
-def train(data_path: str) -> Dict[str, Any]:
-    """Full train+evaluate+save pipeline. Returns the metrics dict
-    that also gets written to METRICS_PATH."""
+@dataclass
+class TrainingArtifacts:
+    """
+    Everything train() produces beyond the JSON-serializable metrics
+    dict -- the fitted best-model estimator plus its held-out test
+    split and the full labeled DataFrame, for callers that want to go
+    deeper than the summary metrics (SHAP importance, calibration
+    curves, feature-group ablations -- see ml_evaluation.py). Kept out
+    of the `metrics` dict itself so METRICS_PATH stays plain JSON.
+    """
+    metrics: Dict[str, Any]
+    best_model_name: str
+    best_model: Any
+    X_test: pd.DataFrame
+    y_test: np.ndarray
+    df: pd.DataFrame
+
+
+def train(data_path: str) -> TrainingArtifacts:
+    """Full train+evaluate+save pipeline. metrics (on the returned
+    TrainingArtifacts) is also written to METRICS_PATH."""
     df = load_training_data(data_path)
     n_rows = len(df)
 
@@ -237,7 +262,7 @@ def train(data_path: str) -> Dict[str, Any]:
         )
 
     cv_results = cross_validate_models(df)
-    test_report, fitted_models = train_and_evaluate(df)
+    test_report, fitted_models, X_test, y_test = train_and_evaluate(df)
 
     best_name = max(test_report, key=lambda k: test_report[k]["test_f1_macro"])
     importances = feature_importance_table(fitted_models[best_name], best_name)
@@ -259,4 +284,11 @@ def train(data_path: str) -> Dict[str, Any]:
     with open(METRICS_PATH, "w") as f:
         json.dump(metrics, f, indent=2)
 
-    return metrics
+    return TrainingArtifacts(
+        metrics=metrics,
+        best_model_name=best_name,
+        best_model=fitted_models[best_name],
+        X_test=pd.DataFrame(X_test, columns=FEATURE_COLUMNS),
+        y_test=y_test,
+        df=df,
+    )
