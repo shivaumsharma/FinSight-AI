@@ -89,6 +89,13 @@ async def relay_for_wake_word(browser_ws: WebSocket, language_code: str = "en-IN
             encoding="linear16",
             sample_rate="16000",
             endpointing="vad",
+            # "fast" over the default "balanced": a wake-word check only
+            # needs a quick, good-enough transcript to substring-match
+            # against four fixed phrases, not best-possible accuracy --
+            # trading a little WER for lower latency is the right call
+            # here specifically (unlike the batch command transcription
+            # in VoiceInputButton.tsx, which stays on Sarvam's default).
+            stream_type="fast",
         ) as sarvam_ws:
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(_pump_browser_audio(browser_ws, sarvam_ws))
@@ -112,7 +119,15 @@ async def _pump_sarvam_transcripts(sarvam_ws, browser_ws: WebSocket) -> None:
     """Sarvam -> browser: watch every transcript for the wake phrase."""
     async for message in sarvam_ws:
         event = getattr(message, "event", None)
-        if event in ("transcript.partial", "transcript.final"):
+        if event == "session.begin":
+            # The browser's own WebSocket to us opens well before Sarvam's
+            # session is actually up -- flipping the UI to "listening" on
+            # that first handshake (rather than this) meant a user could
+            # say the wake phrase into a connection that wasn't actually
+            # capturing yet, which read as the whole feature being slow
+            # to respond. This is the real "ready" signal.
+            await browser_ws.send_json({"event": "ready"})
+        elif event in ("transcript.partial", "transcript.final"):
             text = getattr(message, "text", "") or ""
             if _contains_wake_phrase(text):
                 await browser_ws.send_json({"event": "wake_detected", "text": text})

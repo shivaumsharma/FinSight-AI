@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useResearch } from "@/lib/useResearch";
 import ReportView from "@/components/ReportView";
@@ -21,6 +21,9 @@ import ScoreboardHomeCard from "@/components/ScoreboardHomeCard";
 import SentimentGauge from "@/components/SentimentGauge";
 import VoiceInputButton from "@/components/VoiceInputButton";
 import HomeAssistant from "@/components/HomeAssistant";
+import VoiceAgentToggle from "@/components/VoiceAgentToggle";
+import { useConversationalAssistant } from "@/lib/useConversationalAssistant";
+import { useWakeWordListener } from "@/lib/useWakeWordListener";
 
 const QUICK_TICKERS = ["AAPL", "NVDA", "TSLA", "MSFT"];
 
@@ -104,6 +107,38 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
   const { status, jobId, result, errorMessage, latencySeconds, fromCache, progress, submit, loadJob, reset } = useResearch();
   const searchParams = useSearchParams();
 
+  // Lifted up from HomeAssistant so the "Hey FinSight" control can live
+  // in the page header (VoiceAgentToggle below) instead of buried in
+  // that card -- both it and HomeAssistant need the same assistant
+  // session (`a`) and "has this page visit had any interaction yet"
+  // flag, so one instance here, passed down, rather than two.
+  const assistant = useConversationalAssistant();
+  const [justInteracted, setJustInteracted] = useState(false);
+
+  // Detecting the phrase only hands off to the EXISTING tap-to-start
+  // session loop for the actual command -- same reasoning as the
+  // backend relay's own docstring: keep the new, riskier code (a
+  // persistent mic stream + WebSocket) doing as little as possible,
+  // and reuse the already-hardened batch pipeline for everything else.
+  const wakeWord = useWakeWordListener(() => {
+    setJustInteracted(true);
+    wakeWord.pause();
+    void assistant.startSession();
+  });
+
+  // Resume listening for the NEXT wake phrase once the triggered
+  // session ends -- but only if the listener is still meant to be
+  // running (the user might have tapped "stop" mid-session, or a mic
+  // error might have already torn it down).
+  const prevSessionActiveRef = useRef(false);
+  useEffect(() => {
+    if (prevSessionActiveRef.current && !assistant.sessionActive && wakeWord.state === "listening") {
+      wakeWord.resume();
+    }
+    prevSessionActiveRef.current = assistant.sessionActive;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assistant.sessionActive]);
+
   // Cross-page navigation target: the /reports page links here as
   // /?job=<id> when you click a past report, since useResearch's state
   // lives in this component instance, not anywhere global -- the URL
@@ -150,6 +185,7 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
         <div className="flex items-center justify-between">
           <span className="font-mono text-[10px] font-bold tracking-wide text-dim">FINSIGHT</span>
           <div className="flex items-center gap-3">
+            <VoiceAgentToggle wakeWord={wakeWord} />
             <button
               type="button"
               onClick={() => setShowSearch(true)}
@@ -259,7 +295,12 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
         {/* Conversational assistant -- active the instant the app
             opens, not buried behind the separate Chat tab. Same
             hook/session-loop as the full-page /chat view. */}
-        <HomeAssistant userName={greetingName(email, displayName)} />
+        <HomeAssistant
+          userName={greetingName(email, displayName)}
+          a={assistant}
+          justInteracted={justInteracted}
+          setJustInteracted={setJustInteracted}
+        />
 
         <ScoreboardHomeCard />
 

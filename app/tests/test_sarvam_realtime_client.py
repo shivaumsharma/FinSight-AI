@@ -77,6 +77,15 @@ class _FakeSarvamSocket:
             yield m
 
 
+def test_pump_sarvam_transcripts_forwards_session_begin_as_ready():
+    messages = [SimpleNamespace(event="session.begin", request_id="abc123")]
+    browser_ws = _FakeBrowserWs()
+
+    _run(src._pump_sarvam_transcripts(_FakeSarvamSocket(messages), browser_ws))
+
+    assert browser_ws.sent == [{"event": "ready"}]
+
+
 def test_pump_sarvam_transcripts_forwards_wake_detection():
     messages = [
         SimpleNamespace(event="transcript.partial", text="hows my portfolio"),
