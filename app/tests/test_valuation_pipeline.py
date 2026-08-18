@@ -18,7 +18,11 @@ for the full calibration evidence (a stark, unambiguous gap across the
 import pandas as pd
 import pytest
 
-from app.valuation.valuation_pipeline import ValuationPipeline, MIN_EQUITY_TO_ENTERPRISE_VALUE_RATIO
+from app.valuation.valuation_pipeline import (
+    ValuationPipeline,
+    MIN_EQUITY_TO_ENTERPRISE_VALUE_RATIO,
+    RISK_TOLERANCE_WACC_ADJUSTMENT_PCT,
+)
 
 
 def _financial_df(total_debt, cash):
@@ -82,3 +86,84 @@ def test_valuation_unavailable_when_market_cap_is_none():
     assert result["enterprise_value"] is None
     assert result["equity_value"] is None
     assert "market capitalization" in result["dcf_unavailable_reason"].lower()
+
+
+# ---------------------------------------------------------------- risk_tolerance -> WACC/intrinsic value
+#
+# See RISK_TOLERANCE_WACC_ADJUSTMENT_PCT's own comment in
+# valuation_pipeline.py: a user's saved risk_tolerance shifts
+# self.risk_free_rate (added, not replaced) before WACCEngine computes
+# cost of equity, so it should move WACC -- and therefore intrinsic
+# value -- in a specific, testable direction: Conservative UP (more
+# cautious => lower intrinsic value), Aggressive DOWN (more optimistic
+# => higher intrinsic value), Moderate unchanged (the DB's own default,
+# a deliberate no-op for the common case).
+
+def _risk_tolerance_financial_df():
+    # Deliberately well inside every other guard in this file (modest
+    # leverage, positive base FCFF, computable WACC) so the only thing
+    # that can possibly move between the three risk_tolerance runs below
+    # is the risk_free_rate adjustment itself, not some unrelated guard
+    # tripping differently across runs.
+    index = pd.to_datetime(["2022-12-31", "2023-12-31", "2024-12-31"])
+    return pd.DataFrame({
+        "revenue": [100, 110, 121], "ebit": [20, 22, 24], "net_income": [15, 16, 17],
+        "cash_from_operations": [18, 19, 20], "capex": [5, 5, 5],
+        "total_debt": [50, 52, 55], "tax_expense": [3, 3, 3], "pretax_income": [18, 19, 20],
+        "depreciation": [4, 4, 4], "current_assets": [30, 32, 34], "current_liabilities": [20, 21, 22],
+        "cash": [40, 41, 42], "shares_outstanding": [1000, 1000, 1000], "interest_expense": [-2, -2, -2],
+        "total_equity": [80, 85, 90],
+    }, index=index)
+
+
+def _run_with_risk_tolerance(risk_tolerance=None):
+    df = _risk_tolerance_financial_df()
+    kwargs = dict(financial_df=df, market_cap=5000, beta=1.1, ticker="RISKTEST")
+    if risk_tolerance is not None:
+        kwargs["risk_tolerance"] = risk_tolerance
+    return ValuationPipeline(**kwargs).run_valuation()
+
+
+def test_moderate_risk_tolerance_matches_no_parameter_call_exactly():
+    # The no-regression check: a caller that doesn't pass risk_tolerance
+    # at all (every caller before this feature existed) must get
+    # byte-for-byte the same result as a caller that explicitly passes
+    # "Moderate" -- both correspond to a 0.0 risk_free_rate adjustment.
+    assert RISK_TOLERANCE_WACC_ADJUSTMENT_PCT["Moderate"] == 0.0
+
+    result_default = _run_with_risk_tolerance(None)
+    result_moderate = _run_with_risk_tolerance("Moderate")
+
+    assert result_default["dcf_available"] is True
+    assert result_default["wacc"] == result_moderate["wacc"]
+    assert result_default["raw_wacc"] == result_moderate["raw_wacc"]
+    assert result_default["enterprise_value"] == result_moderate["enterprise_value"]
+    assert result_default["equity_value"] == result_moderate["equity_value"]
+
+
+def test_conservative_vs_moderate_vs_aggressive_move_wacc_and_value_in_expected_direction():
+    conservative = _run_with_risk_tolerance("Conservative")
+    moderate = _run_with_risk_tolerance("Moderate")
+    aggressive = _run_with_risk_tolerance("Aggressive")
+
+    for result in (conservative, moderate, aggressive):
+        assert result["dcf_available"] is True
+
+    # Conservative = higher discount rate (higher raw_wacc) = more
+    # cautious = LOWER intrinsic value (equity_value, a direct proxy for
+    # intrinsic value per share here since shares_outstanding is fixed
+    # across all three runs).
+    assert conservative["raw_wacc"] > moderate["raw_wacc"] > aggressive["raw_wacc"]
+    assert conservative["equity_value"] < moderate["equity_value"] < aggressive["equity_value"]
+
+    # The move should be exactly the configured adjustment (0.015 either
+    # direction), not some other coincidental drift -- WACC is a
+    # market-value-weighted blend of cost of equity and cost of debt
+    # (see WACCEngine.calculate_wacc), and only the cost-of-equity leg
+    # moves here, so the raw_wacc delta is the risk_free_rate delta
+    # scaled down by the equity weight (equity_value / total_value) < 1,
+    # not the full 1.5pp -- assert the direction and a sane upper bound
+    # instead of an exact figure that would double as a second
+    # implementation of WACCEngine's own math.
+    adjustment = RISK_TOLERANCE_WACC_ADJUSTMENT_PCT["Conservative"] - RISK_TOLERANCE_WACC_ADJUSTMENT_PCT["Aggressive"]
+    assert 0 < (conservative["raw_wacc"] - aggressive["raw_wacc"]) <= adjustment + 1e-9

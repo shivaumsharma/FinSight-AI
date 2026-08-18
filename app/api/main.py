@@ -50,6 +50,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, field_validator
 
 from app.api import auth, db, errors, jobs
+from app.api.serialization import financial_df_from_json
 from app.core.company_resolver import get_company_name, resolve_companies, suggest_companies
 from app.data import sarvam_client, sarvam_realtime_client, sarvam_tts_client
 from app.data.market_data import (
@@ -72,6 +73,9 @@ from app.reasoning.onboarding_voice import classify_onboarding_answer
 from app.reasoning.real_estate_guidance import get_real_estate_guidance
 from app.reporting.news_client import fetch_company_news, fetch_market_news
 from app.reporting.portfolio_summary import build_portfolio_view
+from app.valuation import what_if_dcf
+from app.valuation.fcff_engine import FCFFEngine
+from app.valuation.what_if_dcf import compute_what_if
 
 TIMEOUT_SWEEP_INTERVAL_SECONDS = 60
 CALL_OUTCOME_SWEEP_INTERVAL_SECONDS = 6 * 3600
@@ -473,9 +477,12 @@ class RiskToleranceRequest(BaseModel):
 
 @app.patch("/v1/auth/risk-tolerance")
 def update_risk_tolerance(body: RiskToleranceRequest, current_user: str = Depends(auth.get_current_user)):
-    # Persisted preference only -- not yet applied to the research
-    # pipeline's own WACC/discount assumptions or recommendation logic
-    # (a separate, larger feature). Real and saved, not decorative.
+    # Persisted preference, and applied: the next research job this user
+    # submits reads it back (see jobs.py's _run_job -> ResearchAgent.run(
+    # risk_tolerance=...) -> ValuationTool -> ValuationPipeline's
+    # RISK_TOLERANCE_WACC_ADJUSTMENT_PCT) to shift the DCF's discount
+    # rate. An already-running or already-completed job is unaffected --
+    # this only changes what a FUTURE submission sees.
     db.set_risk_tolerance(current_user, body.risk_tolerance)
     return {"status": "ok", "risk_tolerance": body.risk_tolerance}
 
@@ -881,6 +888,16 @@ def get_research(job_id: str, current_user: str = Depends(auth.get_current_user)
     if job["status"] == db.STATUS_ERROR:
         response["error_code"] = job["error_code"]
         response["error_message"] = job["error_message"]
+    if job["status"] == db.STATUS_RUNNING:
+        # Real per-step signal for the hand_rolled orchestrator (see
+        # jobs.get_job_progress's own docstring) -- None whenever there's
+        # nothing real to report yet (job still in early setup before
+        # ResearchAgent.run() reaches its planning stage) or the job is
+        # running under langgraph (out of scope for this pass, see
+        # jobs._run_job). The frontend must treat None the same as a
+        # "queued" job: fall back to its simulated-timer estimate, never
+        # treat it as an error.
+        response["progress"] = jobs.get_job_progress(job_id)
     return response
 
 
@@ -926,6 +943,114 @@ def model_compare(job_id: str, current_user: str = Depends(auth.get_current_user
     ticker = job["result"].get("ticker", "")
     opinions = get_model_opinions(report_data, ticker)
     return {"models": opinions, "consensus": compute_consensus(opinions)}
+
+
+class WhatIfRequest(BaseModel):
+    # Percentage-POINT units (e.g. 6.4 meaning 6.4%) -- matches this
+    # codebase's existing slider-unit convention, see what_if_dcf.py's
+    # own comments and streamlit_app.py's whatif_growth_pct/etc.
+    # sliders. Omitted fields are defaulted server-side (see below),
+    # not left unset -- the response always needs to report the actual
+    # bounds/defaults for the frontend to seed its sliders on first load.
+    growth_rate_pct: Optional[float] = None
+    wacc_pct: Optional[float] = None
+    terminal_growth_pct: Optional[float] = None
+
+
+@app.post("/v1/research/{job_id}/what-if")
+def what_if(job_id: str, body: WhatIfRequest, current_user: str = Depends(auth.get_current_user)):
+    """On-demand DCF assumption explorer -- ports streamlit_app.py's
+    "What-If: Adjust DCF Assumptions" sliders panel to the API (the
+    Next.js frontend is a separate process, so it can't call
+    app/valuation/what_if_dcf.py's compute_what_if() in-process the way
+    streamlit_app.py does). Cheap, single-shot DCF recompute (no LLM
+    call, no Monte Carlo loop), so safe to call on every slider move.
+
+    `available: False` is NOT an error -- it's the expected, common
+    response whenever DCF wasn't computable for this company at all
+    (mirrors compute_what_if's own "base FCFF can't be computed" case
+    and streamlit_app.py's own try/except around building `whatif`)."""
+    job = db.get_job(job_id)
+    if job is None:
+        raise errors.job_not_found(job_id)
+    if job["user_id"] != current_user:
+        raise errors.forbidden(job_id)
+    if job["status"] != db.STATUS_DONE or not job["result"]:
+        raise errors.job_not_done(job_id, job["status"])
+
+    result_data = job["result"]
+    financial_df = financial_df_from_json(result_data.get("normalized_financials"))
+    raw_wacc = result_data.get("raw_wacc")
+    if financial_df is None or financial_df.empty or raw_wacc is None:
+        return {"available": False}
+
+    try:
+        shares = financial_df["shares_outstanding"].dropna().iloc[-1]
+        total_debt = financial_df["total_debt"].dropna().iloc[-1]
+        cash = financial_df["cash"].dropna().iloc[-1]
+    except (KeyError, IndexError):
+        return {"available": False}
+
+    report_data = result_data.get("report_data", {})
+    current_price = report_data.get("market_earnings_snapshot", {}).get("current_price")
+    relative_score = report_data.get("recommendation", {}).get("relative_score")
+    currency = report_data.get("currency") or "USD"
+
+    if not shares or not current_price:
+        return {"available": False}
+
+    growth_default_pct = min(
+        max(FCFFEngine(financial_df).calculate_revenue_cagr() * 100, what_if_dcf.GROWTH_RATE_MIN * 100),
+        what_if_dcf.GROWTH_RATE_MAX * 100,
+    )
+    wacc_default_pct = raw_wacc * 100
+    terminal_min, terminal_max = what_if_dcf.TERMINAL_GROWTH_BOUNDS_BY_CURRENCY.get(
+        currency, what_if_dcf.TERMINAL_GROWTH_BOUNDS_BY_CURRENCY["USD"]
+    )
+    terminal_default_pct = what_if_dcf.TERMINAL_GROWTH_RATE_BY_CURRENCY.get(
+        currency, what_if_dcf.TERMINAL_GROWTH_RATE_BY_CURRENCY["USD"]
+    ) * 100
+
+    growth_rate_pct = body.growth_rate_pct if body.growth_rate_pct is not None else growth_default_pct
+    wacc_pct = body.wacc_pct if body.wacc_pct is not None else wacc_default_pct
+    terminal_growth_pct = body.terminal_growth_pct if body.terminal_growth_pct is not None else terminal_default_pct
+
+    computed = compute_what_if(
+        financial_df=financial_df,
+        total_debt=total_debt,
+        cash=cash,
+        shares_outstanding=shares,
+        current_price=current_price,
+        growth_rate=growth_rate_pct / 100,
+        wacc=wacc_pct / 100,
+        terminal_growth_rate=terminal_growth_pct / 100,
+        relative_score=relative_score,
+    )
+    if computed is None:
+        return {"available": False}
+
+    return {
+        "available": True,
+        "bounds": {
+            "growth_rate_pct": {"min": what_if_dcf.GROWTH_RATE_MIN * 100, "max": what_if_dcf.GROWTH_RATE_MAX * 100},
+            "wacc_pct": {
+                "min": wacc_default_pct - what_if_dcf.WACC_OFFSET * 100,
+                "max": wacc_default_pct + what_if_dcf.WACC_OFFSET * 100,
+            },
+            "terminal_growth_pct": {"min": terminal_min * 100, "max": terminal_max * 100},
+        },
+        "defaults": {
+            "growth_rate_pct": growth_default_pct,
+            "wacc_pct": wacc_default_pct,
+            "terminal_growth_pct": terminal_default_pct,
+        },
+        "used": {
+            "growth_rate_pct": growth_rate_pct,
+            "wacc_pct": wacc_pct,
+            "terminal_growth_pct": terminal_growth_pct,
+        },
+        "result": computed,
+    }
 
 
 @app.get("/v1/research/{job_id}/pdf")
