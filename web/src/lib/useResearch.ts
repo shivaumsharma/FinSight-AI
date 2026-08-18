@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ApiErrorBody, JobResponse, ResearchResult } from "./types";
+import type { ApiErrorBody, JobProgress, JobResponse, ResearchResult } from "./types";
 
 const POLL_INTERVAL_MS = 3000;
 const LAST_REPORT_KEY = "finsight_last_report";
@@ -20,6 +20,12 @@ interface State {
   // "offline, showing your last report" banner instead of presenting
   // stale data as if it were fresh.
   fromCache: boolean;
+  // Real per-step progress from the polled JobResponse (see
+  // JobProgress's own comment in types.ts) -- null while queued, once
+  // done/error, or whenever the backend itself has no real signal to
+  // report yet (early setup, or the langgraph orchestrator). Same
+  // lifecycle as jobId: reset alongside it, updated on every poll tick.
+  progress: JobProgress | null;
 }
 
 const IDLE_STATE: State = {
@@ -29,6 +35,7 @@ const IDLE_STATE: State = {
   errorMessage: null,
   latencySeconds: null,
   fromCache: false,
+  progress: null,
 };
 
 function persistLastReport(jobId: string, result: ResearchResult) {
@@ -61,7 +68,7 @@ export function useResearch() {
       if (!raw) return;
       const { jobId, result } = JSON.parse(raw);
       if (jobId && result) {
-        setState({ status: "done", jobId, result, errorMessage: null, latencySeconds: null, fromCache: true });
+        setState({ status: "done", jobId, result, errorMessage: null, latencySeconds: null, fromCache: true, progress: null });
       }
     } catch {
       // Malformed/missing cache entry -- stay idle, same as a normal
@@ -124,6 +131,7 @@ export function useResearch() {
           result: data.result!,
           latencySeconds: (Date.now() - start) / 1000,
           fromCache: false,
+          progress: null,
         }));
         return;
       }
@@ -133,10 +141,15 @@ export function useResearch() {
           data.error_code === "TICKER_NOT_FOUND"
             ? `Couldn't find market data for this company: ${data.error_message || ""} The company may be delisted, foreign-listed, or the name didn't resolve to a real ticker -- please check the spelling and try again.`
             : data.error_message || "Something went wrong while researching this.";
-        setState((s) => ({ ...s, status: "error", errorMessage: message }));
+        setState((s) => ({ ...s, status: "error", errorMessage: message, progress: null }));
         return;
       }
-      // status is "queued" or "running" -- keep polling
+      // status is "queued" or "running" -- keep polling. data.progress is
+      // only ever populated once status === "running" (see main.py's GET
+      // /v1/research/{job_id}), undefined/null otherwise -- normalized to
+      // null here so ResearchProgress.tsx has one falsy shape to check,
+      // not "undefined vs null" depending on which status this tick was.
+      setState((s) => ({ ...s, progress: data.progress ?? null }));
     }
   }, []);
 
@@ -165,6 +178,7 @@ export function useResearch() {
         errorMessage: null,
         latencySeconds: null,
         fromCache: false,
+        progress: null,
       });
     }
   }, []);
