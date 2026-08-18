@@ -37,7 +37,7 @@ FIELD_OPTIONS: dict[str, tuple[str, ...]] = {
 _ANSWER_RE = re.compile(r"ANSWER:\s*(.+)", re.IGNORECASE)
 
 # allam-2-7b, not a gpt-oss/reasoning model: same reasoning as
-# chat_router.py's _CHAT_MODEL -- no hidden chain-of-thought tax, so it
+# chat_router.py's CHAT_MODEL -- no hidden chain-of-thought tax, so it
 # reliably fits this module's tight 20-token budget. Was previously
 # pinned to llama-3.3-70b-versatile, which Groq has fully removed.
 _MODEL = "allam-2-7b"

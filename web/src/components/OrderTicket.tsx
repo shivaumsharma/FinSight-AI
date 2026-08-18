@@ -199,16 +199,19 @@ export default function OrderTicket() {
           {orders.map((o) => (
             <div
               key={o.order_id}
-              className="flex items-center justify-between rounded-lg border border-border-subtle bg-card/60 px-3 py-1.5"
+              className="flex flex-col gap-0.5 rounded-lg border border-border-subtle bg-card/60 px-3 py-1.5"
             >
-              <span className="font-mono text-[11px] text-text">
-                <span className={`font-bold ${o.side === "BUY" ? "text-accent" : "text-danger"}`}>{o.side}</span>{" "}
-                {o.quantity} {o.ticker}
-              </span>
-              <span className="font-mono text-[10px] text-dim">
-                {currencySymbol(o.currency)}
-                {o.execution_price.toFixed(2)}
-              </span>
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[11px] text-text">
+                  <span className={`font-bold ${o.side === "BUY" ? "text-accent" : "text-danger"}`}>{o.side}</span>{" "}
+                  {o.quantity} {o.ticker}
+                </span>
+                <span className="font-mono text-[10px] text-dim">
+                  {currencySymbol(o.currency)}
+                  {o.execution_price.toFixed(2)}
+                </span>
+              </div>
+              {o.rationale && <p className="font-mono text-[9.5px] text-dim">{o.rationale}</p>}
             </div>
           ))}
         </div>
