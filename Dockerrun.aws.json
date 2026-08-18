@@ -1,0 +1,19 @@
+{
+  "AWSEBDockerrunVersion": "1",
+  "Image": {
+    "Name": "__ECR_IMAGE_URI__",
+    "Update": "true"
+  },
+  "Ports": [
+    {
+      "ContainerPort": 8000,
+      "HostPort": 80
+    }
+  ],
+  "Volumes": [
+    {
+      "HostDirectory": "/var/app/data",
+      "ContainerDirectory": "/data"
+    }
+  ]
+}
