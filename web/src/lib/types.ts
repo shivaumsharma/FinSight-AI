@@ -161,6 +161,45 @@ export interface ResearchResult {
   llm_usage?: Record<string, number> | null;
 }
 
+// POST /v1/research/{job_id}/what-if's response shape -- ports
+// streamlit_app.py's "What-If: Adjust DCF Assumptions" sliders panel
+// (app/valuation/what_if_dcf.py) to the API. `available` is the
+// discriminant: when false, DCF simply isn't computable for this
+// company (an expected, common case, not a failure) and no other
+// field is guaranteed present. All *_pct fields are percentage-POINT
+// units (e.g. 6.4 meaning 6.4%), matching the slider convention
+// app/valuation/what_if_dcf.py's own comments describe.
+export interface WhatIfResult {
+  intrinsic_value: number;
+  upside_percent: number;
+  dcf_score: number;
+  relative_score: number | null;
+  composite_score: number | null;
+  rating: "Buy" | "Hold" | "Sell" | "Insufficient Data";
+  wacc_used: number;
+  wacc_floored: boolean;
+}
+
+export interface WhatIfResponse {
+  available: boolean;
+  bounds?: {
+    growth_rate_pct: { min: number; max: number };
+    wacc_pct: { min: number; max: number };
+    terminal_growth_pct: { min: number; max: number };
+  };
+  defaults?: {
+    growth_rate_pct: number;
+    wacc_pct: number;
+    terminal_growth_pct: number;
+  };
+  used?: {
+    growth_rate_pct: number;
+    wacc_pct: number;
+    terminal_growth_pct: number;
+  };
+  result?: WhatIfResult;
+}
+
 // POST /v1/research/{job_id}/model-compare's response shape -- an
 // on-demand second opinion from 3 independent models re-interpreting
 // the SAME already-computed evidence (not a re-run of the pipeline).
@@ -355,6 +394,22 @@ export interface OptionsAnalysis {
 
 export type JobStatus = "queued" | "running" | "done" | "error";
 
+// GET /v1/research/{job_id}'s real per-step progress signal, present
+// only while status === "running" AND only for the hand_rolled
+// orchestrator (see app/api/jobs.py's get_job_progress/_job_progress
+// and main.py's own comment on this field) -- null whenever there's no
+// real signal yet (job still in early setup, or running under
+// langgraph, which keeps ResearchProgress.tsx's old simulated timer
+// instead). plan is the REAL, dynamic tool list the planner chose for
+// THIS question (see ResearchAgent.run()'s "__plan__:" sentinel), not
+// a fixed list -- current is null only in the brief window between the
+// plan sentinel firing and the first tool actually starting.
+export interface JobProgress {
+  plan: string[];
+  completed: string[];
+  current: string | null;
+}
+
 export interface JobResponse {
   job_id: string;
   status: JobStatus;
@@ -363,6 +418,7 @@ export interface JobResponse {
   result?: ResearchResult;
   error_code?: string;
   error_message?: string;
+  progress?: JobProgress | null;
 }
 
 export interface ApiErrorBody {
