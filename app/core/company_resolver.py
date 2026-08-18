@@ -353,11 +353,21 @@ Answer:""".format(question=question)
         # proposes nothing" (see this function's own docstring), not an
         # unhandled ImportError.
         from app.core.llm_provider import get_llm_provider
-        raw = get_llm_provider().generate(prompt, max_new_tokens=8)
+        # 80, not 8: LLM_MODEL defaults to a gpt-oss reasoning model, whose
+        # hidden chain-of-thought (see HostedProvider.generate()'s
+        # reasoning_effort handling) still costs real tokens out of this
+        # same budget even at "low" effort -- measured live up to 47
+        # reasoning tokens for a real question here ("should i buy bajaj
+        # auto"), which 8 (or even 40) was too tight for and returned
+        # empty content every time.
+        raw = get_llm_provider().generate(prompt, max_new_tokens=80)
     except Exception:
         return None
 
-    first_line = raw.strip().splitlines()[0].strip().strip('."\' ')
+    lines = raw.strip().splitlines()
+    if not lines:
+        return None
+    first_line = lines[0].strip().strip('."\' ')
     # Strip a leading filler word ("Yes Apple" -> "Apple") -- these
     # dilute the fuzzy-match score enough to sometimes tip a tie
     # between the real company and an unrelated same-named one.
