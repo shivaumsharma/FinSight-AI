@@ -78,13 +78,20 @@ class LLMPlanner:
     def create_plan(self, question: str) -> List[str]:
 
         try:
-            # 150, not 60: LLM_MODEL defaults to a gpt-oss reasoning model
+            # 300, not 60: LLM_MODEL defaults to a gpt-oss reasoning model
             # whose hidden chain-of-thought (see HostedProvider.generate())
             # eats into this same budget before the JSON answer -- measured
-            # live at ~30-35 reasoning tokens even at "low" effort for a
-            # multi-tool question, which a 60-token budget didn't leave
-            # enough room after for the actual JSON.
-            raw = self.generator.generate(self._build_prompt(question), max_new_tokens=150)
+            # live, repeatedly, against this exact prompt: even at "low"
+            # effort, reasoning length is genuinely non-deterministic run
+            # to run at temperature=0 (seen ranging ~38-135 tokens for the
+            # same comparison-style question), so this needs real headroom
+            # above the worst case observed (157 total completion tokens),
+            # not just the typical case -- a truncated LLM half degrades
+            # silently to the deterministic rule-based-only plan below
+            # (still correct, just missing whatever extra tools the LLM
+            # would have added), so it's worth spending the extra tokens to
+            # actually get that signal most of the time.
+            raw = self.generator.generate(self._build_prompt(question), max_new_tokens=300)
             llm_plan = self._parse_plan(raw)
         except Exception:
             llm_plan = []

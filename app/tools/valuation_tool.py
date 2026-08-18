@@ -80,6 +80,7 @@ class ValuationTool(BaseTool):
             beta=context.beta,
             ticker=context.ticker,
             currency=(context.company_info or {}).get("currency"),
+            risk_tolerance=context.risk_tolerance,
         )
 
         results = pipeline.run_valuation()

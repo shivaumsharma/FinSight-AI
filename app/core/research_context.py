@@ -43,6 +43,17 @@ class ResearchContext:
 
     request_time: datetime = field(default_factory=datetime.utcnow)
 
+    # The requesting user's saved risk_tolerance ("Conservative"/
+    # "Moderate"/"Aggressive", see app/api/db.py's users.risk_tolerance)
+    # -- set by ResearchAgent.run()/LangGraphResearchAgent.run() from
+    # whatever the caller (app/api/jobs.py's _run_job) passed in. Read by
+    # ValuationTool to shift the DCF's discount rate (see
+    # app/valuation/valuation_pipeline.py's RISK_TOLERANCE_WACC_ADJUSTMENT_PCT).
+    # Defaults to "Moderate" -- the DB's own default and a deliberate
+    # zero-adjustment no-op, so a context built without this explicitly
+    # set behaves exactly as it did before this field existed.
+    risk_tolerance: str = "Moderate"
+
     # ==========================================================
     # Company Information
     # ==========================================================
