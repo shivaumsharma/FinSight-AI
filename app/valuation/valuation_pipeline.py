@@ -72,6 +72,20 @@ RISK_FREE_RATE_BY_CURRENCY = {"USD": 0.04, "INR": 0.07}
 MARKET_RISK_PREMIUM_BY_CURRENCY = {"USD": 0.06, "INR": 0.07}
 TERMINAL_GROWTH_RATE_BY_CURRENCY = {"USD": DEFAULT_TERMINAL_GROWTH_RATE, "INR": 0.05}
 
+# A user's saved risk_tolerance (app/api/db.py's users.risk_tolerance,
+# see PATCH /v1/auth/risk-tolerance) nudges the discount rate applied
+# to THEIR OWN valuation runs, on top of the currency-driven risk-free
+# rate above -- added to self.risk_free_rate (never replaces it) before
+# it's handed to WACCEngine, so WACCEngine's own MIN_WACC_TERMINAL_SPREAD
+# floor still protects the adjusted value exactly the way it already
+# protects the unadjusted one. Conservative pushes the discount rate UP
+# (more cautious, lower intrinsic value); Aggressive pushes it DOWN
+# (more optimistic, higher intrinsic value); Moderate is a deliberate
+# zero -- the DB's own default, so a Moderate user (and every existing
+# caller that doesn't pass risk_tolerance at all) sees byte-for-byte the
+# same output as before this feature existed.
+RISK_TOLERANCE_WACC_ADJUSTMENT_PCT = {"Conservative": 0.015, "Moderate": 0.0, "Aggressive": -0.015}
+
 # equity_value = enterprise_value - net_debt (DCFEngine.calculate_equity_value).
 # For a heavily-levered company, net_debt can sit close to (or above)
 # enterprise_value, making equity_value a small, unstable DIFFERENCE
@@ -107,7 +121,7 @@ SENSITIVITY_WACC_OFFSETS = [-0.02, -0.01, 0.0, 0.01, 0.02]
 
 
 class ValuationPipeline:
-  def __init__(self,financial_df,market_cap,beta,ticker=None,currency=None):
+  def __init__(self,financial_df,market_cap,beta,ticker=None,currency=None,risk_tolerance="Moderate"):
     self.financial_df=(financial_df)
     self.market_cap=(market_cap)
     self.beta=(beta)
@@ -123,7 +137,16 @@ class ValuationPipeline:
     # an unmapped currency degrades to today's behavior instead of
     # breaking valuation entirely.
     self.currency = currency or "USD"
+    self.risk_tolerance = risk_tolerance or "Moderate"
     self.risk_free_rate = RISK_FREE_RATE_BY_CURRENCY.get(self.currency, RISK_FREE_RATE_BY_CURRENCY["USD"])
+    # Applied as an ADDITION to the currency-driven risk-free rate above,
+    # not a replacement -- see RISK_TOLERANCE_WACC_ADJUSTMENT_PCT's own
+    # comment. Defaults to "Moderate" (0.0 adjustment), so any existing
+    # caller that doesn't pass risk_tolerance sees byte-for-byte the same
+    # self.risk_free_rate as before this parameter existed. An
+    # unrecognized value also falls back to 0.0 rather than raising,
+    # same degrade-gracefully convention as the currency lookups above.
+    self.risk_free_rate += RISK_TOLERANCE_WACC_ADJUSTMENT_PCT.get(self.risk_tolerance, 0.0)
     self.market_risk_premium = MARKET_RISK_PREMIUM_BY_CURRENCY.get(self.currency, MARKET_RISK_PREMIUM_BY_CURRENCY["USD"])
     self.terminal_growth_rate = TERMINAL_GROWTH_RATE_BY_CURRENCY.get(self.currency, DEFAULT_TERMINAL_GROWTH_RATE)
     self.currency_symbol = currency_symbol(self.currency)
@@ -139,6 +162,12 @@ class ValuationPipeline:
     return make_key(
         "valuation", self.ticker or "unknown", financials_fingerprint,
         rounded_market_cap, round(self.beta or 0, 2), self.currency,
+        # risk_tolerance included -- without it, a Conservative user's
+        # cached result (a different risk_free_rate/WACC/intrinsic_value)
+        # would be silently served back to an Aggressive user asking
+        # about the same ticker within VALUATION_CACHE_TTL_SECONDS, since
+        # every other component of this key is identical between them.
+        self.risk_tolerance,
     )
 
   def run_valuation(self):

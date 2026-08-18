@@ -5,6 +5,7 @@ import BacktestBadge from "./BacktestBadge";
 import ModelCompare from "./ModelCompare";
 import RatingBadge, { ratingColorClass } from "./RatingBadge";
 import Tabs from "./Tabs";
+import WhatIfPanel from "./WhatIfPanel";
 import type { ResearchResult, SignalQuality } from "@/lib/types";
 
 function ShareButton({ jobId }: { jobId: string }) {
@@ -455,6 +456,10 @@ export default function ReportView({
                         />
                       </div>
                     </div>
+                  )}
+
+                  {valuation["DCF Available"] && (
+                    <WhatIfPanel endpoint={`/api/research/${jobId}/what-if`} symbol={symbol} />
                   )}
                 </div>
               ),
