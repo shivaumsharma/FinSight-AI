@@ -101,7 +101,7 @@ function PipelinePreview() {
 function ResearchPage({ email, displayName }: { email: string | null; displayName: string | null }) {
   const [query, setQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
-  const { status, jobId, result, errorMessage, latencySeconds, fromCache, submit, loadJob, reset } = useResearch();
+  const { status, jobId, result, errorMessage, latencySeconds, fromCache, progress, submit, loadJob, reset } = useResearch();
   const searchParams = useSearchParams();
 
   // Cross-page navigation target: the /reports page links here as
@@ -224,7 +224,7 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
           </button>
         </form>
 
-        {isBusy && <ResearchProgress question={query} />}
+        {isBusy && <ResearchProgress question={query} progress={progress} />}
 
         {!isBusy && status !== "done" && status !== "error" && <PipelinePreview />}
 
