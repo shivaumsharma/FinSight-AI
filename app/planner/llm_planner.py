@@ -78,7 +78,13 @@ class LLMPlanner:
     def create_plan(self, question: str) -> List[str]:
 
         try:
-            raw = self.generator.generate(self._build_prompt(question), max_new_tokens=60)
+            # 150, not 60: LLM_MODEL defaults to a gpt-oss reasoning model
+            # whose hidden chain-of-thought (see HostedProvider.generate())
+            # eats into this same budget before the JSON answer -- measured
+            # live at ~30-35 reasoning tokens even at "low" effort for a
+            # multi-tool question, which a 60-token budget didn't leave
+            # enough room after for the actual JSON.
+            raw = self.generator.generate(self._build_prompt(question), max_new_tokens=150)
             llm_plan = self._parse_plan(raw)
         except Exception:
             llm_plan = []
