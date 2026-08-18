@@ -1,0 +1,54 @@
+name: deploy-aws
+
+# Builds the backend image and deploys it to Elastic Beanstalk -- only runs
+# once infra/ has been applied AND the AWS_DEPLOY_ROLE_ARN repo variable is
+# set (from `terraform output github_actions_role_arn`, see infra/README.md).
+# Missing/empty is expected and this whole workflow just no-ops until then --
+# same gating pattern DigiNyaya's ci.yml already uses.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    if: vars.AWS_DEPLOY_ROLE_ARN != ''
+    permissions:
+      id-token: write # required for AWS OIDC role assumption
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'eu-north-1' }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr-login
+
+      - name: Build & push backend image to ECR
+        id: ecr_image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          IMAGE_URI="$ECR_REGISTRY/finsight-backend:${{ github.sha }}"
+          docker build -t "$IMAGE_URI" .
+          docker push "$IMAGE_URI"
+          echo "uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+
+      - name: Render Dockerrun.aws.json with the freshly-pushed image
+        run: |
+          sed "s|__ECR_IMAGE_URI__|${{ steps.ecr_image.outputs.uri }}|" \
+            Dockerrun.aws.json > Dockerrun.aws.json.rendered
+          mv Dockerrun.aws.json.rendered Dockerrun.aws.json
+
+      - uses: einaregilsson/beanstalk-deploy@v22
+        with:
+          application_name: ${{ vars.EB_APPLICATION_NAME || 'finsight' }}
+          environment_name: ${{ vars.EB_ENVIRONMENT_NAME || 'finsight-backend-prod' }}
+          version_label: ${{ github.sha }}
+          region: ${{ vars.AWS_REGION || 'eu-north-1' }}
+          deployment_package: Dockerrun.aws.json
