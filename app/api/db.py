@@ -164,6 +164,11 @@ def init_db() -> None:
             ("investment_horizon", "TEXT"),
             ("interested_in_crypto", "INTEGER"),
             ("interested_in_real_estate", "INTEGER"),
+            # Feature 5 -- NULL means "never briefed" (see
+            # get_rating_alerts_seen_since's own docstring for how the
+            # daily briefing uses this as its "since" cursor for what
+            # counts as a new rating change to mention).
+            ("last_briefing_at", "REAL"),
         ):
             try:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {column} {ddl_type}")
@@ -286,6 +291,16 @@ def init_db() -> None:
             )
             """
         )
+        # Nullable "why" for a trade -- see execute_order()'s own
+        # docstring. Same nullable-with-no-backfill migration pattern as
+        # portfolio_holdings.buy_date above: every order placed before
+        # this column existed just reads back as rationale=None, not a
+        # fabricated "user-initiated" guess for history it doesn't
+        # actually have.
+        try:
+            conn.execute("ALTER TABLE orders ADD COLUMN rationale TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists
         # One flat per-user log, not a separate conversations/threading
         # table -- see chat_router.py's own docstring for why a single
         # continuous history is enough for this feature's scope.
@@ -347,6 +362,60 @@ def init_db() -> None:
             )
             """
         )
+        # Feature 2 (proactive rating-change suggestions) -- one row per
+        # (user, ticker) they've already been notified about, so a
+        # rating that hasn't changed since the last sweep doesn't
+        # re-trigger a proposal on every run. last_notified_rating is
+        # the rating AS OF the last proposal sent (not necessarily the
+        # ticker's current rating) -- the sweep compares this against a
+        # fresh get_latest_rating_for_ticker() call each run, and only
+        # a genuine difference is a "change" worth notifying about
+        # again. Also reused by Feature 5's daily briefing to find
+        # "rating changes since the last briefing" without a second,
+        # parallel tracking table.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS rating_alerts_seen (
+                user_id TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                last_notified_rating TEXT NOT NULL,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (user_id, ticker)
+            )
+            """
+        )
+        # Feature 3 (price-triggered alerts) -- a standing "check this in
+        # the background" condition, NOT itself a trade. `side` (BUY or
+        # SELL) is what gets proposed/auto-executed once triggered, kept
+        # separate from `direction` (the actual trigger condition on
+        # price -- "above" or "below" target_price) since the two are
+        # independent: a stop-loss SELL and a buy-the-dip BUY can both be
+        # a "below" alert, and either side could in principle watch for
+        # "above" too. auto_execute defaults to 0 (INTEGER, sqlite has no
+        # native bool) -- see the chat-command parser for why flipping it
+        # to 1 requires a separately-worded opt-in, never the default
+        # reading of an ambiguous command. triggered_at is NULL until the
+        # sweep fires it exactly once (see get_active_price_alerts/
+        # mark_price_alert_triggered below) -- an alert never re-fires
+        # after that, the same one-shot semantics rating_alerts_seen
+        # gives a rating change, just modeled as a nullable timestamp
+        # here instead of a "last seen value" since a price alert has no
+        # useful "next" state to compare against once it's fired.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS price_alerts (
+                alert_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                side TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                target_price REAL NOT NULL,
+                auto_execute INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL,
+                triggered_at REAL
+            )
+            """
+        )
 
 
 # ---------------------------------------------------------------- users/sessions
@@ -386,9 +455,30 @@ def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
     return dict(row) if row is not None else None
 
 
+def get_all_user_ids() -> list:
+    """Every registered user_id -- for a sweep that has to walk every
+    user (Feature 2's rating-change sweep, Feature 3's alert sweep),
+    the same "no scoping to the requesting user, this genuinely runs
+    for everyone" shape get_all_distinct_watchlist_tickers already
+    uses, just at the user level instead of the ticker level."""
+    with _connect() as conn:
+        rows = conn.execute("SELECT user_id FROM users").fetchall()
+    return [r[0] for r in rows]
+
+
 def set_risk_tolerance(user_id: str, risk_tolerance: str) -> None:
     with _connect() as conn:
         conn.execute("UPDATE users SET risk_tolerance=? WHERE user_id=?", (risk_tolerance, user_id))
+
+
+def set_last_briefing_at(user_id: str, when: float) -> None:
+    """Feature 5's own "since" cursor -- advanced on EVERY successfully
+    delivered briefing, on-demand or sweep-triggered alike, so asking
+    twice in a row doesn't repeat the same already-mentioned rating
+    change, and the daily sweep won't immediately re-notify a user who
+    just asked on-demand minutes ago."""
+    with _connect() as conn:
+        conn.execute("UPDATE users SET last_briefing_at=? WHERE user_id=?", (when, user_id))
 
 
 def set_onboarding_preferences(
@@ -801,6 +891,118 @@ def get_latest_rating_for_ticker(user_id: str, ticker: str) -> Optional[str]:
     return row[0] if row is not None else None
 
 
+# ---------------------------------------------------------------- rating-change alerts (Feature 2)
+
+def get_rating_alert_seen(user_id: str, ticker: str) -> Optional[str]:
+    """The rating this user was last notified about for this ticker, or
+    None if they never have been -- a None here means ANY current
+    rating counts as a genuine change worth a first proposal."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT last_notified_rating FROM rating_alerts_seen WHERE user_id=? AND ticker=?",
+            (user_id, ticker),
+        ).fetchone()
+    return row[0] if row is not None else None
+
+
+def set_rating_alert_seen(user_id: str, ticker: str, rating: str) -> None:
+    """Upsert -- same ON CONFLICT DO UPDATE idempotency shape as
+    upsert_portfolio_holding, so calling this again for the same
+    (user_id, ticker) just advances last_notified_rating/updated_at
+    instead of erroring or duplicating a row."""
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO rating_alerts_seen (user_id, ticker, last_notified_rating, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, ticker) DO UPDATE SET
+                last_notified_rating=excluded.last_notified_rating,
+                updated_at=excluded.updated_at
+            """,
+            (user_id, ticker, rating, time.time()),
+        )
+
+
+def get_rating_alerts_seen_since(user_id: str, since: float) -> list:
+    """Every (ticker, rating) this user was notified about at or after
+    `since` (a unix timestamp) -- Feature 5's daily briefing uses this
+    to list "rating changes since the last briefing" without a second,
+    parallel tracking table (see this table's own creation comment)."""
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT ticker, last_notified_rating, updated_at FROM rating_alerts_seen WHERE user_id=? AND updated_at>=?",
+            (user_id, since),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------- price alerts (Feature 3)
+
+def create_price_alert(
+    user_id: str, ticker: str, side: str, direction: str, target_price: float, auto_execute: bool = False
+) -> str:
+    if side not in ("BUY", "SELL"):
+        raise ValueError(f"Invalid alert side: {side!r}")
+    if direction not in ("above", "below"):
+        raise ValueError(f"Invalid alert direction: {direction!r}")
+
+    alert_id = str(uuid.uuid4())
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO price_alerts (alert_id, user_id, ticker, side, direction, target_price, auto_execute, created_at, triggered_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            """,
+            (alert_id, user_id, ticker, side, direction, target_price, int(auto_execute), time.time()),
+        )
+    return alert_id
+
+
+def list_price_alerts(user_id: str, active_only: bool = True) -> list:
+    """Most-recently-created first -- active_only=True (the default,
+    what "what alerts do I have" and GET /v1/alerts both want) excludes
+    anything already triggered, since a fired alert is no longer a
+    standing watch the user needs to see."""
+    query = "SELECT alert_id, ticker, side, direction, target_price, auto_execute, created_at, triggered_at FROM price_alerts WHERE user_id=?"
+    params = [user_id]
+    if active_only:
+        query += " AND triggered_at IS NULL"
+    query += " ORDER BY created_at DESC"
+
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(query, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_active_price_alerts() -> list:
+    """Every untriggered alert across ALL users -- the sweep's own
+    input, same global-scope shape get_all_user_ids/
+    get_all_distinct_watchlist_tickers already use for a sweep that
+    genuinely has to walk everyone, not just the requesting user."""
+    with _connect() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT alert_id, user_id, ticker, side, direction, target_price, auto_execute FROM price_alerts WHERE triggered_at IS NULL"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_price_alert_triggered(alert_id: str) -> None:
+    """One-shot -- see this table's own creation comment for why this
+    is a nullable timestamp rather than a re-armable flag. Only takes
+    effect if still untriggered (same "already-final state wins"
+    WHERE-clause guard db.mark_done uses for a job) -- a late/duplicate
+    sweep call for an already-fired alert is a silent no-op, not a
+    second trigger."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE price_alerts SET triggered_at=? WHERE alert_id=? AND triggered_at IS NULL",
+            (time.time(), alert_id),
+        )
+
+
 def get_all_distinct_watchlist_tickers() -> list:
     """Every ticker on ANY user's watchlist, deduplicated -- part of
     Market Movers' "tracked universe" (the other part is the static
@@ -919,7 +1121,8 @@ def get_portfolio_holdings(user_id: str) -> list:
 # ---------------------------------------------------------------- simulated orders (paper trading)
 
 def execute_order(
-    user_id: str, ticker: str, side: str, quantity: float, execution_price: float, currency: str
+    user_id: str, ticker: str, side: str, quantity: float, execution_price: float, currency: str,
+    rationale: Optional[str] = None,
 ) -> dict:
     """Simulated market-order fill -- instant and complete at
     `execution_price` (the live quote main.py's endpoint fetches right
@@ -942,6 +1145,13 @@ def execute_order(
     account, so short positions aren't modeled. Callers (main.py)
     translate that into a 400, same as every other user-input
     validation error in this app.
+
+    `rationale` is an optional, caller-supplied, VERBATIM string --
+    never generated by an LLM here (see chat_router.py's order-intent
+    handlers for the actual callers: "rating changed to Sell on ...",
+    "price alert at $180 triggered", etc.). None for an order placed
+    with no proposal behind it (e.g. the OrderTicket/TradeBar UI form)
+    -- a missing reason is honest; a fabricated one wouldn't be.
     """
     if side not in ("BUY", "SELL"):
         raise ValueError(f"Invalid order side: {side!r}")
@@ -983,10 +1193,10 @@ def execute_order(
 
         conn.execute(
             """
-            INSERT INTO orders (order_id, user_id, ticker, side, quantity, execution_price, currency, executed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO orders (order_id, user_id, ticker, side, quantity, execution_price, currency, executed_at, rationale)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (order_id, user_id, ticker, side, quantity, execution_price, currency, now),
+            (order_id, user_id, ticker, side, quantity, execution_price, currency, now, rationale),
         )
 
     return {
@@ -998,6 +1208,7 @@ def execute_order(
         "currency": currency,
         "executed_at": now,
         "new_holding_quantity": new_quantity,
+        "rationale": rationale,
     }
 
 
@@ -1006,7 +1217,7 @@ def list_orders(user_id: str, limit: int = 20) -> list:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
-            SELECT order_id, ticker, side, quantity, execution_price, currency, executed_at
+            SELECT order_id, ticker, side, quantity, execution_price, currency, executed_at, rationale
             FROM orders WHERE user_id=? ORDER BY executed_at DESC LIMIT ?
             """,
             (user_id, limit),

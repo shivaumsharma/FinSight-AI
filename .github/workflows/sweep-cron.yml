@@ -26,6 +26,19 @@ on:
     # interval (checkpoints mature 7+ days out, so this was never
     # time-sensitive).
     - cron: "0 */6 * * *"
+    # Rating-change sweep (Feature 2): every 15 minutes -- a genuine
+    # rating flip only happens when a user's own research report
+    # completes, so this isn't remotely as time-sensitive as the
+    # timeout sweep, but a proactive suggestion sitting unsent for
+    # hours would defeat the point of it being proactive.
+    - cron: "*/15 * * * *"
+    # Daily-briefing sweep (Feature 5): once a day. The endpoint itself
+    # re-checks each user's own last_briefing_at (20h min interval, see
+    # app/reasoning/daily_briefing.py) before sending anything, so this
+    # cron time is just "roughly once a day," not a hard guarantee --
+    # 13:00 UTC is arbitrary (no user-timezone concept exists in this
+    # app yet to pick a real "morning" per user).
+    - cron: "0 13 * * *"
   workflow_dispatch: {} # manual trigger, for testing this workflow itself
 
 env:
@@ -48,4 +61,36 @@ jobs:
       - name: POST /v1/internal/sweep/call-outcomes
         run: |
           curl -sf -X POST "$FINSIGHT_API_URL/v1/internal/sweep/call-outcomes" \
+            -H "X-API-Key: ${{ secrets.FINSIGHT_API_KEY }}"
+
+  rating-change-sweep:
+    if: github.event.schedule == '*/15 * * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /v1/internal/sweep/rating-changes
+        run: |
+          curl -sf -X POST "$FINSIGHT_API_URL/v1/internal/sweep/rating-changes" \
+            -H "X-API-Key: ${{ secrets.FINSIGHT_API_KEY }}"
+
+  price-alert-sweep:
+    # Reuses the timeout sweep's own every-5-minutes trigger (Feature 3)
+    # rather than adding a third distinct cron line -- a price can cross
+    # an alert's threshold at any moment during trading hours, so this
+    # genuinely wants the tightest cadence already in this workflow, not
+    # a new one.
+    if: github.event.schedule == '*/5 * * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /v1/internal/sweep/price-alerts
+        run: |
+          curl -sf -X POST "$FINSIGHT_API_URL/v1/internal/sweep/price-alerts" \
+            -H "X-API-Key: ${{ secrets.FINSIGHT_API_KEY }}"
+
+  daily-briefing-sweep:
+    if: github.event.schedule == '0 13 * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /v1/internal/sweep/daily-briefings
+        run: |
+          curl -sf -X POST "$FINSIGHT_API_URL/v1/internal/sweep/daily-briefings" \
             -H "X-API-Key: ${{ secrets.FINSIGHT_API_KEY }}"
