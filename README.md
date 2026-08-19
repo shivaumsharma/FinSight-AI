@@ -125,8 +125,8 @@ Every tool reads from and writes to one shared `ResearchContext` object. The pla
 | Orchestration | Hand-rolled controller, plus a LangGraph port kept alongside it as a documented, benchmarked alternative — see [EVALUATION.md](EVALUATION.md) |
 | Caching | Redis — content-addressed for valuation/narrative output, TTL-only for statement fetches; degrades to a no-op if unreachable |
 | Report output | reportlab (downloadable PDF) |
-| Deployment | Google Cloud Run (API) + Vercel (frontend); Streamlit Community Cloud / Hugging Face Spaces (research demo); Railway supported as an alternative |
-| Testing / CI | pytest (540+ test functions, 34 files), GitHub Actions with failure-annotation diagnostics |
+| Deployment | AWS Elastic Beanstalk (API, Terraform-defined, EC2 applied and healthy; CloudFront/HTTPS pending AWS account verification) + Vercel (frontend); Google Cloud Run supported but currently down (GCP project billing disabled); Streamlit Community Cloud / Hugging Face Spaces (research demo); Railway supported as an alternative |
+| Testing / CI | pytest (989 test functions, 59 files), GitHub Actions with failure-annotation diagnostics |
 
 ---
 
@@ -149,7 +149,7 @@ Autonomous_Financial_Research_Agent/
 │   ├── rag/                    # Chunking, embeddings, ChromaDB, report generation
 │   ├── reasoning/               # Market movers, model consensus, backtest stats
 │   ├── reporting/               # Report/PDF building, news, institutional ratings
-│   ├── tests/                  # 800+ tests across 49 files
+│   ├── tests/                  # 989 tests across 59 files
 │   ├── tools/                  # Agent tools (market, valuation, RAG, sentiment, ...)
 │   ├── training/                # GRPO / RLVR fine-tuning pipeline
 │   ├── utils/
@@ -245,7 +245,7 @@ See `.env.example` and `web/.env.example` for the full list of required/optional
 
 ## Deployment
 
-Production runs the FastAPI service on **Google Cloud Run** and the Next.js frontend on **Vercel**; the research demo runs separately on **Hugging Face Spaces** (the local model set exceeds Streamlit Community Cloud's free-tier memory limit). Railway remains fully supported as an alternative single-service deploy for the API.
+The FastAPI backend previously ran on **Google Cloud Run**, but that GCP project currently has billing disabled (no payment method attached), so the Cloud Run service is down. `infra/` defines an equivalent **AWS Elastic Beanstalk** stack via Terraform as the replacement — see `infra/README.md` for current status. The EC2/EB environment itself is applied and healthy; the CloudFront distribution in front of it (needed for HTTPS, since Single-Instance EB has no load balancer to terminate TLS) is still blocked on a one-time AWS account verification requirement (a support case is open). The Next.js frontend deploys to **Vercel**; the research demo runs separately on **Hugging Face Spaces** (the local model set exceeds Streamlit Community Cloud's free-tier memory limit). Railway remains fully supported as an alternative single-service deploy for the API. The Cloud Run setup steps below are kept for reference since the same Dockerfile-based flow applies to any of these targets.
 
 **Research demo (Hugging Face Spaces):**
 1. Create a Space at [huggingface.co/new-space](https://huggingface.co/new-space) — SDK: **Streamlit**, Hardware: **CPU basic (free)**.
@@ -289,7 +289,7 @@ cd web && npx vercel@latest --prod
 
 ## Testing & Quality
 
-800+ test functions across 49 files, covering the recommendation engine, valuation pipeline, options pricer (Black-Scholes reference values, put-call parity, implied-vol round-trip), auth, RAG retrieval, the job queue's concurrency behavior, every external API client (SEC EDGAR, NSE India, Sarvam, Finnhub), and the full HTTP API surface — run via `pytest app/tests/`. CI runs on every push via GitHub Actions, with pytest failures re-emitted as annotations so a break is diagnosable from the Checks API without needing repo sign-in.
+989 test functions across 59 files, covering the recommendation engine, valuation pipeline, options pricer (Black-Scholes reference values, put-call parity, implied-vol round-trip), auth, RAG retrieval, the job queue's concurrency behavior, every external API client (SEC EDGAR, NSE India, Sarvam, Finnhub), and the full HTTP API surface — run via `pytest app/tests/`. CI runs on every push via GitHub Actions, with pytest failures re-emitted as annotations so a break is diagnosable from the Checks API without needing repo sign-in.
 
 ---
 

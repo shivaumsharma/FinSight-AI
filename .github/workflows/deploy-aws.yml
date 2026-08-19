@@ -45,10 +45,24 @@ jobs:
             Dockerrun.aws.json > Dockerrun.aws.json.rendered
           mv Dockerrun.aws.json.rendered Dockerrun.aws.json
 
-      - uses: einaregilsson/beanstalk-deploy@v22
+      # AWS's own official action, not the more popular third-party
+      # einaregilsson/beanstalk-deploy -- that one has a known, unfixed
+      # bug with OIDC-issued temporary credentials (fails with "AWS
+      # Access Key not specified!" even though configure-aws-credentials
+      # above already exported them; see
+      # github.com/einaregilsson/beanstalk-deploy/issues/65 and #80).
+      # Confirmed live: this is exactly what broke the first real deploy
+      # attempt here. The official action reads credentials through the
+      # normal AWS SDK chain (the same env vars), which actually works.
+      - uses: aws-actions/aws-elasticbeanstalk-deploy@v1
         with:
-          application_name: ${{ vars.EB_APPLICATION_NAME || 'finsight' }}
-          environment_name: ${{ vars.EB_ENVIRONMENT_NAME || 'finsight-backend-prod' }}
-          version_label: ${{ github.sha }}
-          region: ${{ vars.AWS_REGION || 'eu-north-1' }}
-          deployment_package: Dockerrun.aws.json
+          aws-region: ${{ vars.AWS_REGION || 'eu-north-1' }}
+          application-name: ${{ vars.EB_APPLICATION_NAME || 'finsight' }}
+          environment-name: ${{ vars.EB_ENVIRONMENT_NAME || 'finsight-backend-prod' }}
+          version-label: ${{ github.sha }}
+          deployment-package-path: Dockerrun.aws.json
+          # Both already exist (created by infra/'s Terraform) -- never
+          # let this action create a second, untracked copy alongside
+          # them if a typo'd name ever mismatches.
+          create-environment-if-not-exists: false
+          create-application-if-not-exists: false

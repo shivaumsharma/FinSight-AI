@@ -32,9 +32,13 @@ resource "aws_ssm_parameter" "pdf_share_secret" {
 }
 
 resource "aws_ssm_parameter" "sarvam_api_key" {
-  name  = "/finsight/${var.environment}/SARVAM_API_KEY"
-  type  = "SecureString"
-  value = var.sarvam_api_key
+  name = "/finsight/${var.environment}/SARVAM_API_KEY"
+  type = "SecureString"
+  # SSM rejects an empty-string value outright (ValidationException) --
+  # substitute a harmless placeholder when unset, same as the app's own
+  # existing "empty/missing SARVAM_API_KEY" degrade path (voice features
+  # just fail gracefully either way, see app/api/main.py).
+  value = var.sarvam_api_key != "" ? var.sarvam_api_key : "not-configured"
 }
 
 # --- EB EC2 instance profile: what the running backend container can do ---
