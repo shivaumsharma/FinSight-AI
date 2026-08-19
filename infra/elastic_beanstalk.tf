@@ -95,7 +95,18 @@ resource "aws_elastic_beanstalk_environment" "backend" {
   setting {
     namespace = "aws:elasticbeanstalk:application:environment"
     name      = "VAPID_PRIVATE_KEY"
-    value     = aws_ssm_parameter.vapid_private_key.value
+    # EB's Docker platform packs every env var into ONE combined
+    # comma-separated "EnvironmentVariables" CloudFormation parameter
+    # internally -- a value containing a REAL newline breaks its parsing
+    # of that combined list. Re-escaping back to literal "\n" here (HCL
+    # already turned the tfvars value's "\n" into a real newline by this
+    # point) survives that, and app/api/auth.py's own
+    # VAPID_PRIVATE_KEY_PEM.replace("\\n", "\n") already exists
+    # specifically to unescape exactly this shape at runtime -- same
+    # "most platform env-var UIs can't hold a real multi-line value"
+    # reasoning that comment already documents, this EB platform is just
+    # another instance of it.
+    value = replace(aws_ssm_parameter.vapid_private_key.value, "\n", "\\n")
   }
 
   setting {
