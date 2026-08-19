@@ -18,6 +18,18 @@ resource "aws_iam_role_policy_attachment" "eb_service" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkEnhancedHealth"
 }
 
+# Confirmed live: an environment update failed with "You do not have
+# permission to perform the 'ec2:DescribeSubnets' action" -- that's EB's
+# OWN service role acting on the environment's behalf (not the GitHub
+# Actions deploy role, which is a separate IAM identity), managing the
+# underlying CloudFormation stack's EC2/networking resources. AWS's own
+# docs pair this with AWSElasticBeanstalkEnhancedHealth for exactly this
+# reason; only the health policy was attached before.
+resource "aws_iam_role_policy_attachment" "eb_service_core" {
+  role       = aws_iam_role.eb_service.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkService"
+}
+
 resource "aws_elastic_beanstalk_application" "finsight" {
   name        = "finsight"
   description = "FinSight AI backend (FastAPI, single-container Docker)"
