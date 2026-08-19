@@ -52,6 +52,26 @@ resource "aws_elastic_beanstalk_environment" "backend" {
     value     = var.eb_instance_type
   }
 
+  # The platform default root volume (8GB gp3) is almost certainly too
+  # small: the backend's ECR image is ~1.28GB compressed, and torch/
+  # transformers/chromadb/sentence-transformers/mlflow layers expand well
+  # past that once pulled and extracted, on top of the base OS + Docker
+  # engine's own footprint -- confirmed live as the actual next failure
+  # once the earlier ec2:DescribeSubnets permission issue was resolved
+  # ("Instance deployment failed to download the Docker image"). 20GB
+  # stays comfortably inside the 30GB EBS gp3 free-tier allowance.
+  setting {
+    namespace = "aws:autoscaling:launchconfiguration"
+    name      = "RootVolumeType"
+    value     = "gp3"
+  }
+
+  setting {
+    namespace = "aws:autoscaling:launchconfiguration"
+    name      = "RootVolumeSize"
+    value     = "20"
+  }
+
   setting {
     namespace = "aws:autoscaling:launchconfiguration"
     name      = "SecurityGroups"
