@@ -167,18 +167,31 @@ data "aws_iam_policy_document" "github_actions_deploy" {
     ]
   }
   statement {
-    # beanstalk-deploy (the GitHub Action) also needs to create/read an S3
-    # object (the app version bundle) in EB's own managed bucket, and to
-    # read S3/CloudFormation/autoscaling state while it polls for the
-    # deploy to finish -- narrower than this is fiddly to get right and
-    # this role can only ever touch finsight-* EB resources regardless.
-    sid = "ElasticBeanstalkDeploySupport"
+    # Full S3 admin, but scoped to ONLY the one bucket EB itself manages
+    # (elasticbeanstalk-{region}-{account}), not account-wide -- confirmed
+    # live this needs more than just CreateBucket/PutObject: the deploy
+    # action also configures the bucket's ownership controls, encryption,
+    # versioning, and public-access-block settings on first creation
+    # (caught one narrow AccessDenied at a time: CreateBucket, then
+    # PutBucketOwnershipControls, ...). Granting the full action set on
+    # this single non-sensitive bucket (it only ever holds deployment
+    # ZIP/JSON bundles) up front avoids hunting down each one
+    # individually -- the blast radius is one bucket, not the account.
+    sid = "ElasticBeanstalkDeployBucket"
+    actions = ["s3:*"]
+    resources = [
+      "arn:aws:s3:::elasticbeanstalk-${var.aws_region}-${data.aws_caller_identity.current.account_id}",
+      "arn:aws:s3:::elasticbeanstalk-${var.aws_region}-${data.aws_caller_identity.current.account_id}/*",
+    ]
+  }
+  statement {
+    # Read-only account/region-wide state the deploy action polls while
+    # waiting for the environment update to finish -- these are all
+    # Describe*/List*-shape calls, not resource-scoped by AWS's own IAM
+    # model for these actions, so "*" here is the actual available
+    # granularity, not a shortcut around scoping.
+    sid = "ElasticBeanstalkDeployPolling"
     actions = [
-      # CreateBucket -- confirmed live: EB's own managed deployment
-      # bucket (elasticbeanstalk-{region}-{account}) isn't guaranteed to
-      # already exist, and the deploy action tries to create it itself
-      # on first use rather than assuming AWS auto-provisions it.
-      "s3:CreateBucket", "s3:PutObject", "s3:GetObject", "s3:ListBucket",
       "cloudformation:DescribeStacks", "cloudformation:DescribeStackResources",
       "autoscaling:DescribeAutoScalingGroups", "autoscaling:DescribeScalingActivities",
       "ec2:DescribeInstances", "elasticloadbalancing:DescribeLoadBalancers",
