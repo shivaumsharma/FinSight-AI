@@ -174,7 +174,11 @@ data "aws_iam_policy_document" "github_actions_deploy" {
     # this role can only ever touch finsight-* EB resources regardless.
     sid = "ElasticBeanstalkDeploySupport"
     actions = [
-      "s3:PutObject", "s3:GetObject", "s3:ListBucket",
+      # CreateBucket -- confirmed live: EB's own managed deployment
+      # bucket (elasticbeanstalk-{region}-{account}) isn't guaranteed to
+      # already exist, and the deploy action tries to create it itself
+      # on first use rather than assuming AWS auto-provisions it.
+      "s3:CreateBucket", "s3:PutObject", "s3:GetObject", "s3:ListBucket",
       "cloudformation:DescribeStacks", "cloudformation:DescribeStackResources",
       "autoscaling:DescribeAutoScalingGroups", "autoscaling:DescribeScalingActivities",
       "ec2:DescribeInstances", "elasticloadbalancing:DescribeLoadBalancers",
