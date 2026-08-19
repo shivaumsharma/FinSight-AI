@@ -81,6 +81,27 @@ data "aws_iam_policy_document" "eb_instance_scoped" {
       aws_ssm_parameter.sarvam_api_key.arn,
     ]
   }
+  statement {
+    # Confirmed live: even after the EB SERVICE role (elastic_beanstalk.tf's
+    # eb_service, a separate IAM identity) got AWSElasticBeanstalkService,
+    # the exact same "ec2:DescribeSubnets" AccessDenied kept happening --
+    # this call is actually made BY the EB host agent running ON the
+    # instance itself, using the INSTANCE role, not the service role.
+    # Neither AWSElasticBeanstalkWebTier nor
+    # AWSElasticBeanstalkMulticontainerDocker (checked both directly)
+    # includes it. EC2 Describe* actions don't support resource-level
+    # scoping in IAM at all -- "*" is the only valid resource for these,
+    # not a shortcut around scoping. A small bundle of the other
+    # networking/instance describes the host agent commonly needs
+    # alongside it, granted together to avoid a further one-at-a-time
+    # hunt.
+    sid = "Ec2DescribeForHostAgent"
+    actions = [
+      "ec2:DescribeSubnets", "ec2:DescribeSecurityGroups", "ec2:DescribeVpcs",
+      "ec2:DescribeInstances", "ec2:DescribeAvailabilityZones", "ec2:DescribeTags",
+    ]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_role_policy" "eb_instance_scoped" {
