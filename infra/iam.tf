@@ -147,9 +147,24 @@ data "aws_iam_policy_document" "github_actions_deploy" {
     resources = [aws_ecr_repository.backend.arn]
   }
   statement {
-    sid       = "ElasticBeanstalkDeploy"
-    actions   = ["elasticbeanstalk:*"]
-    resources = ["arn:aws:elasticbeanstalk:${var.aws_region}:${data.aws_caller_identity.current.account_id}:application/finsight*"]
+    # A real deploy touches several DIFFERENT EB resource *types*, not
+    # just "application" -- confirmed live: the first real deploy
+    # attempt was denied on CreateApplicationVersion specifically
+    # because "application/finsight*" doesn't match an
+    # "applicationversion/..." ARN at all (different resource-type
+    # segment, not just a naming difference). platform/solutionstack
+    # are AWS-managed shared resources (not finsight-specific), needed
+    # read-only to resolve the Docker platform this environment runs.
+    sid     = "ElasticBeanstalkDeploy"
+    actions = ["elasticbeanstalk:*"]
+    resources = [
+      "arn:aws:elasticbeanstalk:${var.aws_region}:${data.aws_caller_identity.current.account_id}:application/finsight*",
+      "arn:aws:elasticbeanstalk:${var.aws_region}:${data.aws_caller_identity.current.account_id}:applicationversion/finsight*",
+      "arn:aws:elasticbeanstalk:${var.aws_region}:${data.aws_caller_identity.current.account_id}:environment/finsight*",
+      "arn:aws:elasticbeanstalk:${var.aws_region}:${data.aws_caller_identity.current.account_id}:configurationtemplate/finsight*",
+      "arn:aws:elasticbeanstalk:${var.aws_region}::platform/*",
+      "arn:aws:elasticbeanstalk:${var.aws_region}::solutionstack/*",
+    ]
   }
   statement {
     # beanstalk-deploy (the GitHub Action) also needs to create/read an S3
