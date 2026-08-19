@@ -192,7 +192,14 @@ data "aws_iam_policy_document" "github_actions_deploy" {
     # granularity, not a shortcut around scoping.
     sid = "ElasticBeanstalkDeployPolling"
     actions = [
-      "cloudformation:DescribeStacks", "cloudformation:DescribeStackResources",
+      # cloudformation:Describe*/Get*/List* -- broadened past just
+      # DescribeStacks/DescribeStackResources after confirmed live that
+      # the deploy action also calls GetTemplate while polling an
+      # in-progress environment update (EB manages each environment as
+      # a CloudFormation stack internally). Read-only, so granting the
+      # full read family up front avoids a fourth round of hunting down
+      # one more Describe/Get call individually.
+      "cloudformation:Describe*", "cloudformation:Get*", "cloudformation:List*",
       "autoscaling:DescribeAutoScalingGroups", "autoscaling:DescribeScalingActivities",
       "ec2:DescribeInstances", "elasticloadbalancing:DescribeLoadBalancers",
     ]
