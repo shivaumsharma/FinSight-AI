@@ -7,6 +7,51 @@ import { formatShortDate } from "@/lib/format";
 import { currencySymbol } from "@/lib/currency";
 import type { CompanySuggestion, WatchlistItem } from "@/lib/types";
 
+// Static, clearly-labeled sample rows shown only when a user's real
+// watchlist is empty -- gives new users a sense of what the feature
+// looks like populated, instead of a blank input on first login.
+// Fake price/rating data, never sent to the backend; tapping one still
+// navigates to that ticker's real /stock page since the ticker itself
+// is real.
+const DEMO_ITEMS: WatchlistItem[] = [
+  {
+    ticker: "AAPL",
+    price: 233.14,
+    change_pct: 1.42,
+    currency: "USD",
+    rating: "Buy",
+    added_at: 0,
+    next_earnings_date: null,
+    next_ex_dividend_date: null,
+    last_dividend_amount: null,
+    last_split: null,
+  },
+  {
+    ticker: "NVDA",
+    price: 178.9,
+    change_pct: -0.86,
+    currency: "USD",
+    rating: "Hold",
+    added_at: 0,
+    next_earnings_date: null,
+    next_ex_dividend_date: null,
+    last_dividend_amount: null,
+    last_split: null,
+  },
+  {
+    ticker: "TSLA",
+    price: 312.55,
+    change_pct: 2.07,
+    currency: "USD",
+    rating: "Sell",
+    added_at: 0,
+    next_earnings_date: null,
+    next_ex_dividend_date: null,
+    last_dividend_amount: null,
+    last_split: null,
+  },
+];
+
 // Always renders, even with zero items -- the add-ticker input is the
 // primary way a user grows this list, so it needs to stay visible
 // rather than disappearing until something's already on it.
@@ -94,60 +139,74 @@ export default function Watchlist() {
     refresh();
   }
 
+  function renderItem(item: WatchlistItem, isDemo: boolean) {
+    const corporateActions = [
+      item.next_earnings_date && `Earnings ${formatShortDate(item.next_earnings_date)}`,
+      item.next_ex_dividend_date && `Ex-div ${formatShortDate(item.next_ex_dividend_date)}`,
+    ].filter(Boolean);
+
+    return (
+      <div
+        key={item.ticker}
+        className={`rounded-lg border px-3.5 py-2.5 ${isDemo ? "border-dashed border-border-subtle bg-card/50" : "border-border bg-card"}`}
+      >
+        <div className="flex items-center justify-between">
+          <Link href={`/stock/${item.ticker}`} className="flex flex-1 items-center justify-between gap-2 min-w-0">
+            <div className="flex items-center gap-2.5">
+              <span className="font-mono text-sm font-bold text-text hover:text-accent">{item.ticker}</span>
+              {item.rating ? (
+                <RatingBadge rating={item.rating} size="sm" />
+              ) : (
+                <span className="font-mono text-[10px] text-dim">not yet researched</span>
+              )}
+            </div>
+            {item.price !== null && (
+              <div className="text-right">
+                <div className="font-mono text-sm text-text">
+                  {currencySymbol(item.currency)}
+                  {item.price.toFixed(2)}
+                </div>
+                {item.change_pct !== null && (
+                  <div className={`font-mono text-[10px] ${item.change_pct >= 0 ? "text-accent" : "text-danger"}`}>
+                    {item.change_pct >= 0 ? "+" : ""}
+                    {item.change_pct.toFixed(2)}%
+                  </div>
+                )}
+              </div>
+            )}
+          </Link>
+          {!isDemo && (
+            <button
+              type="button"
+              onClick={() => handleRemove(item.ticker)}
+              title="Remove from watchlist"
+              className="ml-3 font-mono text-xs text-dim hover:text-danger"
+            >
+              &times;
+            </button>
+          )}
+        </div>
+        {corporateActions.length > 0 && (
+          <p className="mt-1.5 font-mono text-[10px] text-dim">{corporateActions.join(" · ")}</p>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="mt-6">
       <p className="font-mono text-[10px] tracking-wide text-dim">WATCHLIST</p>
 
       {items && items.length > 0 && (
-        <div className="mt-2 flex flex-col gap-2">
-          {items.map((item) => {
-            const corporateActions = [
-              item.next_earnings_date && `Earnings ${formatShortDate(item.next_earnings_date)}`,
-              item.next_ex_dividend_date && `Ex-div ${formatShortDate(item.next_ex_dividend_date)}`,
-            ].filter(Boolean);
+        <div className="mt-2 flex flex-col gap-2">{items.map((item) => renderItem(item, false))}</div>
+      )}
 
-            return (
-              <div key={item.ticker} className="rounded-lg border border-border bg-card px-3.5 py-2.5">
-                <div className="flex items-center justify-between">
-                  <Link href={`/stock/${item.ticker}`} className="flex flex-1 items-center justify-between gap-2 min-w-0">
-                    <div className="flex items-center gap-2.5">
-                      <span className="font-mono text-sm font-bold text-text hover:text-accent">{item.ticker}</span>
-                      {item.rating ? (
-                        <RatingBadge rating={item.rating} size="sm" />
-                      ) : (
-                        <span className="font-mono text-[10px] text-dim">not yet researched</span>
-                      )}
-                    </div>
-                    {item.price !== null && (
-                      <div className="text-right">
-                        <div className="font-mono text-sm text-text">
-                          {currencySymbol(item.currency)}
-                          {item.price.toFixed(2)}
-                        </div>
-                        {item.change_pct !== null && (
-                          <div className={`font-mono text-[10px] ${item.change_pct >= 0 ? "text-accent" : "text-danger"}`}>
-                            {item.change_pct >= 0 ? "+" : ""}
-                            {item.change_pct.toFixed(2)}%
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => handleRemove(item.ticker)}
-                    title="Remove from watchlist"
-                    className="ml-3 font-mono text-xs text-dim hover:text-danger"
-                  >
-                    &times;
-                  </button>
-                </div>
-                {corporateActions.length > 0 && (
-                  <p className="mt-1.5 font-mono text-[10px] text-dim">{corporateActions.join(" · ")}</p>
-                )}
-              </div>
-            );
-          })}
+      {items && items.length === 0 && (
+        <div className="mt-2">
+          <p className="font-mono text-[10px] text-dim">
+            Empty for now -- here&apos;s what it looks like once you add a stock:
+          </p>
+          <div className="mt-2 flex flex-col gap-2 opacity-70">{DEMO_ITEMS.map((item) => renderItem(item, true))}</div>
         </div>
       )}
 
