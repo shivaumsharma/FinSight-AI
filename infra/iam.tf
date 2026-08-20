@@ -94,11 +94,18 @@ data "aws_iam_policy_document" "eb_instance_scoped" {
     # not a shortcut around scoping. A small bundle of the other
     # networking/instance describes the host agent commonly needs
     # alongside it, granted together to avoid a further one-at-a-time
-    # hunt.
+    # hunt. ec2:DescribeLaunchTemplateVersions added after another
+    # live AccessDenied on it specifically -- the natural companion to
+    # DescribeLaunchTemplates (see github_actions_deploy's own
+    # ElasticBeanstalkDeployPolling statement in this same file):
+    # Single-Instance EB manages instance replacement via a launch
+    # template, and its host agent needs to read both the template AND
+    # its versions, not just one.
     sid = "Ec2DescribeForHostAgent"
     actions = [
       "ec2:DescribeSubnets", "ec2:DescribeSecurityGroups", "ec2:DescribeVpcs",
       "ec2:DescribeInstances", "ec2:DescribeAvailabilityZones", "ec2:DescribeTags",
+      "ec2:DescribeLaunchTemplates", "ec2:DescribeLaunchTemplateVersions",
     ]
     resources = ["*"]
   }
@@ -222,7 +229,19 @@ data "aws_iam_policy_document" "github_actions_deploy" {
       # one more Describe/Get call individually.
       "cloudformation:Describe*", "cloudformation:Get*", "cloudformation:List*",
       "autoscaling:DescribeAutoScalingGroups", "autoscaling:DescribeScalingActivities",
-      "ec2:DescribeInstances", "elasticloadbalancing:DescribeLoadBalancers",
+      "ec2:DescribeInstances", "ec2:DescribeLaunchTemplates", "ec2:DescribeLaunchTemplateVersions",
+      "elasticloadbalancing:DescribeLoadBalancers",
+      # Confirmed live: a real app-version deploy (not just a config/env-var
+      # update) failed here with "not authorized to perform:
+      # autoscaling:SuspendProcesses" -- EB pauses the underlying ASG's own
+      # scaling activity while it replaces the Single-Instance environment's
+      # one instance, then resumes it once the new version is healthy.
+      # Granted together (SuspendProcesses alone would just trade this
+      # error for the same one on ResumeProcesses at the end of the same
+      # deploy). Can't be scoped to the specific ASG's ARN in this
+      # Terraform config -- that ASG is created dynamically by EB's own
+      # internal CloudFormation stack per environment, not by this state.
+      "autoscaling:SuspendProcesses", "autoscaling:ResumeProcesses",
     ]
     resources = ["*"]
   }
