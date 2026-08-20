@@ -1769,7 +1769,7 @@ def test_wake_listen_token_returns_a_token_the_ws_endpoint_accepts(client, auth_
     resp = client.get("/v1/voice/wake-listen-token", headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
-    assert data["expires_in"] == auth.WAKE_LISTEN_TOKEN_TTL_SECONDS
+    assert data["expires_in"] == auth.REALTIME_VOICE_TOKEN_TTL_SECONDS
     assert auth.verify_wake_listen_token(data["token"]) is not None
 
 
@@ -1799,7 +1799,12 @@ def test_wake_listen_closes_on_an_invalid_wake_token(client):
 
 
 def test_wake_listen_closes_on_an_expired_wake_token(client, monkeypatch):
-    monkeypatch.setattr(auth, "WAKE_LISTEN_TOKEN_TTL_SECONDS", -1)  # mint it already-expired
+    # REALTIME_VOICE_TOKEN_TTL_SECONDS, not the WAKE_LISTEN_TOKEN_TTL_SECONDS
+    # alias -- sign_realtime_voice_token (which sign_wake_listen_token now
+    # delegates to) reads the former at call time; the latter is only a
+    # one-time snapshot taken at module import, so patching it has no
+    # effect on anything minted after that.
+    monkeypatch.setattr(auth, "REALTIME_VOICE_TOKEN_TTL_SECONDS", -1)  # mint it already-expired
     token = _signup_wake_token(client, email="expired_wake_token@example.com")
 
     with client.websocket_connect("/v1/voice/wake-listen") as ws:
@@ -1838,6 +1843,111 @@ def test_wake_listen_reports_a_relay_failure_to_the_client(client, monkeypatch):
     monkeypatch.setattr(main.sarvam_realtime_client, "relay_for_wake_word", _failing_relay)
 
     with client.websocket_connect("/v1/voice/wake-listen") as ws:
+        ws.send_json({"wake_token": token})
+        error_message = ws.receive_json()
+        assert error_message["event"] == "error"
+        assert "simulated" in error_message["message"]
+        with pytest.raises(WebSocketDisconnect):
+            ws.receive_text()
+
+
+# ------------------------------------------------- Purpose-scoped token replay prevention
+# Phase 4 of the voice-assistant overhaul plan: a token minted for one
+# realtime-voice WebSocket purpose must never verify for another,
+# even though wake-listen and conversation-listen share the same
+# signing mechanism and secret.
+
+def test_wake_token_is_rejected_by_the_conversation_endpoint(client):
+    token = _signup_wake_token(client, email="cross_purpose_wake@example.com")
+    with client.websocket_connect("/v1/voice/conversation-listen") as ws:
+        ws.send_json({"wake_token": token})
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            ws.receive_text()
+        assert exc_info.value.code == 4401
+
+
+def test_conversation_token_is_rejected_by_the_wake_listen_endpoint(client):
+    token = _signup_conversation_token(client, email="cross_purpose_conversation@example.com")
+    with client.websocket_connect("/v1/voice/wake-listen") as ws:
+        ws.send_json({"wake_token": token})
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            ws.receive_text()
+        assert exc_info.value.code == 4401
+
+
+def test_sign_realtime_voice_token_round_trips_per_purpose():
+    token = auth.sign_realtime_voice_token("some-user-id", auth.PURPOSE_CONVERSATION)
+    assert auth.verify_realtime_voice_token(token, auth.PURPOSE_CONVERSATION) == "some-user-id"
+    assert auth.verify_realtime_voice_token(token, auth.PURPOSE_WAKE_WORD) is None
+
+
+# ------------------------------------------- GET /v1/voice/conversation-listen-token
+
+def test_conversation_listen_token_requires_auth(client):
+    resp = client.get("/v1/voice/conversation-listen-token")
+    assert resp.status_code == 401
+
+
+def test_conversation_listen_token_returns_a_token_the_ws_endpoint_accepts(client, auth_headers):
+    resp = client.get("/v1/voice/conversation-listen-token", headers=auth_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["expires_in"] == auth.REALTIME_VOICE_TOKEN_TTL_SECONDS
+    assert auth.verify_realtime_voice_token(data["token"], auth.PURPOSE_CONVERSATION) is not None
+
+
+# ------------------------------------------------- WS /v1/voice/conversation-listen
+
+def _signup_conversation_token(client, email="conversation_listen_user@example.com", password="correcthorsebattery"):
+    headers = _signup(client, email=email, password=password)
+    resp = client.get("/v1/voice/conversation-listen-token", headers=headers)
+    assert resp.status_code == 200, resp.text
+    return resp.json()["token"]
+
+
+def test_conversation_listen_closes_on_malformed_first_message(client):
+    with client.websocket_connect("/v1/voice/conversation-listen") as ws:
+        ws.send_text("not json")
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            ws.receive_text()
+        assert exc_info.value.code == 4001
+
+
+def test_conversation_listen_closes_on_an_invalid_token(client):
+    with client.websocket_connect("/v1/voice/conversation-listen") as ws:
+        ws.send_json({"wake_token": "not-a-real-token"})
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            ws.receive_text()
+        assert exc_info.value.code == 4401
+
+
+def test_conversation_listen_relays_for_a_valid_token(client, monkeypatch):
+    token = _signup_conversation_token(client)
+    captured = {}
+
+    async def _fake_relay(browser_ws, language_code="en-IN"):
+        captured["called"] = True
+
+    monkeypatch.setattr(main.sarvam_realtime_client, "relay_for_conversation", _fake_relay)
+
+    with client.websocket_connect("/v1/voice/conversation-listen") as ws:
+        ws.send_json({"wake_token": token})
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            ws.receive_text()
+        assert exc_info.value.code == 1000
+
+    assert captured.get("called") is True
+
+
+def test_conversation_listen_reports_a_relay_failure_to_the_client(client, monkeypatch):
+    token = _signup_conversation_token(client, email="conversation_listen_failure@example.com")
+
+    async def _failing_relay(browser_ws, language_code="en-IN"):
+        raise sarvam_realtime_client.SarvamRealtimeError("Sarvam realtime connection failed: simulated")
+
+    monkeypatch.setattr(main.sarvam_realtime_client, "relay_for_conversation", _failing_relay)
+
+    with client.websocket_connect("/v1/voice/conversation-listen") as ws:
         ws.send_json({"wake_token": token})
         error_message = ws.receive_json()
         assert error_message["event"] == "error"
