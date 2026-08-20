@@ -42,7 +42,7 @@ on:
   workflow_dispatch: {} # manual trigger, for testing this workflow itself
 
 env:
-  FINSIGHT_API_URL: https://finsight-api-949703746241.europe-west1.run.app
+  FINSIGHT_API_URL: https://s7cuvrl8j5.execute-api.eu-north-1.amazonaws.com
 
 jobs:
   timeout-sweep:
