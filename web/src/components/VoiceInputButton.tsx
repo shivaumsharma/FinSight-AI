@@ -346,14 +346,31 @@ const VoiceInputButton = forwardRef<VoiceInputHandle, {
     try {
       const formData = new FormData();
       formData.set("file", blob, "recording.wav");
-      const resp = await fetch("/api/voice/transcribe", { method: "POST", body: formData });
+      // AbortSignal.timeout, not a bare fetch -- confirmed live: this
+      // request has NO timeout otherwise, and if the backend is ever
+      // slow or unresponsive (a real thing that happened during a live
+      // AWS deploy issue), the UI hangs on "THINKING..." forever with
+      // no recovery at all -- the exact same class of stuck-forever bug
+      // MAX_RECORDING_MS's own watchdog fixes for the recording phase,
+      // just one step later in the pipeline. 35s, not 25s: comfortably
+      // past Sarvam's own documented 30s synchronous STT cap (see
+      // app/data/sarvam_client.py) so a merely-slow-but-working
+      // transcription isn't cut off right as it would have succeeded.
+      const resp = await fetch("/api/voice/transcribe", {
+        method: "POST",
+        body: formData,
+        signal: AbortSignal.timeout(35_000),
+      });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.message || "Voice transcription failed. Please try again or type your question.");
       onTranscript(data.transcript);
       setState("idle");
     } catch (e) {
       setState("error");
-      setErrorMessage(e instanceof Error ? e.message : "Voice transcription failed. Please try again or type your question.");
+      const timedOut = e instanceof Error && e.name === "TimeoutError";
+      setErrorMessage(timedOut
+        ? "Voice transcription timed out. Please try again or type your question."
+        : e instanceof Error ? e.message : "Voice transcription failed. Please try again or type your question.");
     }
   }
 
