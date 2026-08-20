@@ -1031,6 +1031,96 @@ def test_handle_create_alert_degrades_currency_symbol_on_quote_failure(monkeypat
     assert "$180.00" in result  # still confirms, just with the USD fallback symbol
 
 
+def test_handle_watchlist_add_with_no_ticker():
+    result = cr._handle_watchlist_add("u1", None)
+    assert "couldn't tell which stock" in result
+
+
+def test_handle_watchlist_add_happy_path_persists_and_confirms(temp_db, monkeypatch):
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    monkeypatch.setattr(cr, "get_quote", lambda ticker: {"price": 190.0, "currency": "USD"})
+
+    result = cr._handle_watchlist_add(user_id, "AAPL")
+
+    assert result == "Added AAPL to your watchlist -- trading at $190.00 right now."
+    assert {item["ticker"] for item in temp_db.get_watchlist(user_id)} == {"AAPL"}
+
+
+def test_handle_watchlist_add_already_present(temp_db, monkeypatch):
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    temp_db.add_watchlist_item(user_id, "AAPL")
+    monkeypatch.setattr(cr, "get_quote", lambda ticker: {"price": 190.0, "currency": "USD"})
+
+    result = cr._handle_watchlist_add(user_id, "AAPL")
+
+    assert result == "AAPL is already on your watchlist."
+
+
+def test_handle_watchlist_add_degrades_on_quote_failure(temp_db, monkeypatch):
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    monkeypatch.setattr(cr, "get_quote", lambda ticker: (_ for _ in ()).throw(Exception("down")))
+
+    result = cr._handle_watchlist_add(user_id, "AAPL")
+
+    assert result == "Added AAPL to your watchlist."  # still confirms, just without a price
+    assert {item["ticker"] for item in temp_db.get_watchlist(user_id)} == {"AAPL"}
+
+
+def test_handle_watchlist_remove_with_no_ticker():
+    result = cr._handle_watchlist_remove("u1", None)
+    assert "couldn't tell which stock" in result
+
+
+def test_handle_watchlist_remove_happy_path(temp_db):
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    temp_db.add_watchlist_item(user_id, "AAPL")
+
+    result = cr._handle_watchlist_remove(user_id, "AAPL")
+
+    assert result == "Removed AAPL from your watchlist."
+    assert temp_db.get_watchlist(user_id) == []
+
+
+def test_handle_watchlist_remove_not_present(temp_db):
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+
+    result = cr._handle_watchlist_remove(user_id, "AAPL")
+
+    assert result == "AAPL wasn't on your watchlist."
+
+
+def test_handle_chat_message_routes_watchlist_add_intent(temp_db, monkeypatch):
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    monkeypatch.setattr(cr, "resolve_companies", lambda q: ["BAJFINANCE.NS"])
+    monkeypatch.setattr(cr, "HostedProvider", type("P", (), {
+        "__init__": lambda self, model=None, **kw: None,
+        "generate": lambda self, prompt, max_new_tokens=150: "INTENT: watchlist_add",
+    }))
+    monkeypatch.setattr(cr, "get_quote", lambda ticker: {"price": 4200.0, "currency": "INR"})
+
+    result = cr.handle_chat_message(user_id, "add Bajaj Finance to my watchlist")
+
+    assert result["intent"] == "watchlist_add"
+    assert "Added BAJFINANCE.NS to your watchlist" in result["reply"]
+    assert {item["ticker"] for item in temp_db.get_watchlist(user_id)} == {"BAJFINANCE.NS"}
+
+
+def test_handle_chat_message_routes_watchlist_remove_intent(temp_db, monkeypatch):
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    temp_db.add_watchlist_item(user_id, "AAPL")
+    monkeypatch.setattr(cr, "resolve_companies", lambda q: ["AAPL"])
+    monkeypatch.setattr(cr, "HostedProvider", type("P", (), {
+        "__init__": lambda self, model=None, **kw: None,
+        "generate": lambda self, prompt, max_new_tokens=150: "INTENT: watchlist_remove",
+    }))
+
+    result = cr.handle_chat_message(user_id, "remove AAPL from my watchlist")
+
+    assert result["intent"] == "watchlist_remove"
+    assert result["reply"] == "Removed AAPL from your watchlist."
+    assert temp_db.get_watchlist(user_id) == []
+
+
 def test_handle_list_alerts_with_none(temp_db):
     assert "don't have any active price alerts" in cr._handle_list_alerts("u1")
 

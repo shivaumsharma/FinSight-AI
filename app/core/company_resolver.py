@@ -500,6 +500,19 @@ def resolve_companies(question: str) -> List[str]:
     for token in _TICKER_TOKEN.findall(question):
         if token in index["tickers"] and token not in found:
             found.append(token)
+        # Confirmed live via voice chat: a bare NSE symbol typed/spoken
+        # without its ".NS" suffix ("watch TCS for me") previously
+        # resolved to nothing at all -- _NSE_TICKER_TOKEN below only
+        # matches an EXPLICIT ".NS" suffix, and _is_bare_short_acronym
+        # further down deliberately excludes short all-caps tokens like
+        # "TCS" from the fuzzy company-name path too (to avoid "DCF"/
+        # "ROI" false-matching some obscure company). Nobody actually
+        # says or types the suffix out loud, so a bare token also gets
+        # one direct exact-match attempt against the NSE index here,
+        # symmetric with the SEC check just above.
+        nse_token = f"{token}.NS"
+        if nse_token in nse_index["tickers"] and nse_token not in found:
+            found.append(nse_token)
 
     for token in _NSE_TICKER_TOKEN.findall(question):
         upper_token = token.upper()
