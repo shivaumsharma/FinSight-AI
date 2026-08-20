@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { VoiceInputHandle, VoiceState } from "@/components/VoiceInputButton";
 import type { ChatMessage } from "@/lib/types";
+import { splitSentences } from "@/lib/splitSentences";
 
 const VOICE_MODE_STORAGE_KEY = "finsight-voice-mode";
 const MAX_MIC_ERROR_RETRIES = 2;
@@ -43,10 +44,27 @@ export function useConversationalAssistant() {
   const audioUrlRef = useRef<string | null>(null);
   // The pending synthesizeAndSpeak() promise's own resolve -- stored so
   // stopSpeaking() can settle it when playback is cut short externally
-  // (barge-in), not just when audio.onended fires naturally. Without
-  // this, an interrupted session's await never resolves and the mic
-  // never re-arms.
+  // (barge-in), not just when the whole sentence pipeline finishes
+  // naturally. Without this, an interrupted session's await never
+  // resolves and the mic never re-arms.
   const speakResolveRef = useRef<(() => void) | null>(null);
+  // Bumped on every stopSpeaking() call (natural end or external
+  // interrupt alike) -- the sentence-pipelining loop below checks this
+  // before every step and bails immediately if it's stale, so a
+  // barge-in mid-reply can't have an old pipeline keep fetching/queuing
+  // sentences after the user has already moved on.
+  const speakSessionRef = useRef(0);
+  // In-flight /api/voice/synthesize fetches, one per sentence currently
+  // being synthesized -- stopSpeaking() aborts every one of these so a
+  // barge-in doesn't keep burning Sarvam TTS calls for audio that will
+  // never play.
+  const pendingSynthesisRef = useRef<Set<AbortController>>(new Set());
+  // Resolves the CURRENTLY PLAYING sentence's own wait -- stopSpeaking()
+  // calls this too (alongside pausing the <audio> element) so an
+  // external interrupt unblocks the pipeline loop immediately. pause()
+  // alone never fires 'ended', so without this the loop would otherwise
+  // hang forever waiting on an event that isn't coming.
+  const sentenceDoneResolveRef = useRef<(() => void) | null>(null);
   // Consecutive failed-transcription count within the current session --
   // found live: VoiceInputButton's onTranscript only fires on SUCCESS,
   // so a failed transcribe() call (network blip, Sarvam hiccup) never
@@ -73,11 +91,18 @@ export function useConversationalAssistant() {
   }, []);
 
   function stopSpeaking() {
+    speakSessionRef.current += 1; // invalidate any in-flight pipeline work, see its own comment above
     audioRef.current?.pause();
     audioRef.current = null;
     if (audioUrlRef.current) {
       URL.revokeObjectURL(audioUrlRef.current);
       audioUrlRef.current = null;
+    }
+    for (const controller of pendingSynthesisRef.current) controller.abort();
+    pendingSynthesisRef.current.clear();
+    if (sentenceDoneResolveRef.current) {
+      sentenceDoneResolveRef.current();
+      sentenceDoneResolveRef.current = null;
     }
     setSpeaking(false);
     // Settle synthesizeAndSpeak()'s pending await if there is one --
@@ -88,6 +113,72 @@ export function useConversationalAssistant() {
       speakResolveRef.current();
       speakResolveRef.current = null;
     }
+  }
+
+  // Fetches one sentence's audio -- AbortSignal.any combines a real
+  // timeout (same 20s convention as every other synthesize caller) with
+  // stopSpeaking()'s own abort-on-interrupt above, so a barge-in cancels
+  // the actual network request instead of just ignoring its result.
+  async function fetchSentenceAudio(sentence: string): Promise<Blob | null> {
+    const controller = new AbortController();
+    pendingSynthesisRef.current.add(controller);
+    try {
+      const resp = await fetch("/api/voice/synthesize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: sentence }),
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]),
+      });
+      if (!resp.ok) return null;
+      return await resp.blob();
+    } catch {
+      return null; // network failure or abort -- caller skips this sentence, same non-blocking philosophy as the rest of this file
+    } finally {
+      pendingSynthesisRef.current.delete(controller);
+    }
+  }
+
+  // Plays one sentence's audio to completion (or until stopSpeaking()
+  // cuts it short via sentenceDoneResolveRef). Never rejects -- a
+  // playback error degrades the same way a failed fetch does, by moving
+  // on rather than breaking the whole reply over one bad clip.
+  function playSentenceAudio(blob: Blob): Promise<void> {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(blob);
+      audioUrlRef.current = url;
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      const finish = () => {
+        URL.revokeObjectURL(url);
+        if (audioUrlRef.current === url) audioUrlRef.current = null;
+        sentenceDoneResolveRef.current = null;
+        resolve();
+      };
+      sentenceDoneResolveRef.current = finish;
+      audio.onended = finish;
+      audio.onerror = finish;
+      audio.play().catch(finish);
+    });
+  }
+
+  // Synthesizes and plays each sentence with lookahead=1: the instant
+  // sentence i's audio is ready, sentence i+1's synthesis starts in the
+  // background WHILE sentence i plays, instead of waiting for the
+  // entire reply to become one clip before any of it is audible. Checks
+  // speakSessionRef before every step so a mid-reply barge-in (which
+  // bumps it via stopSpeaking()) stops this loop from queuing any more
+  // work immediately, not just after the current sentence finishes.
+  async function runSentencePipeline(sentences: string[], mySession: number) {
+    let nextAudio = fetchSentenceAudio(sentences[0]);
+    for (let i = 0; i < sentences.length; i++) {
+      if (speakSessionRef.current !== mySession) return;
+      const blob = await nextAudio;
+      if (speakSessionRef.current !== mySession) return;
+      if (i + 1 < sentences.length) nextAudio = fetchSentenceAudio(sentences[i + 1]);
+      if (blob) await playSentenceAudio(blob);
+      if (speakSessionRef.current !== mySession) return;
+    }
+    if (speakSessionRef.current === mySession) stopSpeaking(); // natural end of the whole reply -- resolves synthesizeAndSpeak()'s own await
   }
 
   function toggleVoiceMode() {
@@ -133,48 +224,26 @@ export function useConversationalAssistant() {
     }
   }
 
-  // Returns only once playback has genuinely finished (ended, errored,
-  // or play() itself was rejected/blocked) -- the session loop awaits
+  // Returns only once the whole reply has genuinely finished speaking
+  // (naturally, or cut short by a barge-in) -- the session loop awaits
   // this before re-arming the mic, so listening never starts while a
-  // reply is still audibly playing.
+  // reply is still audibly playing. Internally pipelines sentence-by-
+  // sentence (see runSentencePipeline above) rather than waiting for
+  // the entire reply to synthesize as one clip before anything plays --
+  // a single-sentence reply (most short confirmations) behaves
+  // identically to the old one-shot version, since there's only one
+  // sentence to pipeline.
   async function synthesizeAndSpeak(text: string): Promise<void> {
     stopSpeaking();
-    try {
-      // AbortSignal.timeout -- without it, a hung/slow backend leaves
-      // this await pending forever, which blocks sendMessage()'s own
-      // mic re-arm (voiceInputRef.current?.start() below it) for the
-      // rest of the session. Same fix as VoiceInputButton.tsx's own
-      // transcribe() call and OnboardingForm.tsx's speak(), just for
-      // this third caller of the same synthesize endpoint.
-      const resp = await fetch("/api/voice/synthesize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-        signal: AbortSignal.timeout(20_000),
-      });
-      // Silent no-op on failure -- the text reply is already on screen
-      // and fully usable; a broken TTS call should never block or
-      // visibly disrupt the actual conversation, same non-blocking
-      // convention as every other best-effort feature in this app
-      // (news fetch, sector lookup, etc).
-      if (!resp.ok) return;
-      const blob = await resp.blob();
-      const url = URL.createObjectURL(blob);
-      audioUrlRef.current = url;
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      setSpeaking(true);
-      await new Promise<void>((resolve) => {
-        speakResolveRef.current = resolve;
-        audio.onended = () => stopSpeaking();
-        audio.onerror = () => stopSpeaking();
-        audio.play().catch(() => stopSpeaking());
-      });
-    } catch {
-      // fall through to the cleanup below regardless
-    } finally {
-      stopSpeaking();
-    }
+    const mySession = speakSessionRef.current;
+    const sentences = splitSentences(text);
+    if (sentences.length === 0) return; // nothing to speak -- same silent no-op as the old empty/failed-fetch case
+
+    setSpeaking(true);
+    await new Promise<void>((resolve) => {
+      speakResolveRef.current = resolve;
+      void runSentencePipeline(sentences, mySession);
+    });
   }
 
   async function sendMessage(message: string) {

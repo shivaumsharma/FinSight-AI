@@ -52,13 +52,16 @@ INTENT_STOCK_DISCOVERY_REQUEST = "stock_discovery_request"
 INTENT_PLACE_ORDER = "place_order"
 INTENT_CREATE_ALERT = "create_alert"
 INTENT_LIST_ALERTS = "list_alerts"
+INTENT_WATCHLIST_ADD = "watchlist_add"
+INTENT_WATCHLIST_REMOVE = "watchlist_remove"
 INTENT_DAILY_BRIEFING = "daily_briefing"
 INTENT_GENERAL = "general"
 
 _VALID_INTENTS = {
     INTENT_PORTFOLIO_STATUS, INTENT_TICKER_QUESTION, INTENT_PORTFOLIO_FIT,
     INTENT_FULL_REPORT_REQUEST, INTENT_ADVICE_REQUEST, INTENT_STOCK_DISCOVERY_REQUEST,
-    INTENT_PLACE_ORDER, INTENT_CREATE_ALERT, INTENT_LIST_ALERTS, INTENT_DAILY_BRIEFING, INTENT_GENERAL,
+    INTENT_PLACE_ORDER, INTENT_CREATE_ALERT, INTENT_LIST_ALERTS,
+    INTENT_WATCHLIST_ADD, INTENT_WATCHLIST_REMOVE, INTENT_DAILY_BRIEFING, INTENT_GENERAL,
 }
 # Intents that need a ticker to mean anything -- a message classified
 # into one of these with no ticker detected degrades to INTENT_GENERAL
@@ -71,6 +74,7 @@ _VALID_INTENTS = {
 # every alert regardless of ticker, same as portfolio_status.
 _TICKER_SCOPED_INTENTS = {
     INTENT_TICKER_QUESTION, INTENT_PORTFOLIO_FIT, INTENT_FULL_REPORT_REQUEST, INTENT_CREATE_ALERT,
+    INTENT_WATCHLIST_ADD, INTENT_WATCHLIST_REMOVE,
 }
 
 _INTENT_RE = re.compile(r"INTENT:\s*(\w+)", re.IGNORECASE)
@@ -510,6 +514,8 @@ stock_discovery_request - asking the assistant to find, discover, suggest, or re
 place_order - an actual instruction to buy or sell a stock right now (e.g. "buy 5 AAPL", "sell 10 TCS", "sell everything rated Sell") -- a trade command, NOT a question about whether/what to trade (that's advice_request or ticker_question)
 create_alert - setting up a standing price alert to check later (e.g. "alert me if AAPL drops below 180", "sell if TCS drops below 4000", "notify me when MSFT rises above 300") -- a WATCH for later, NOT an immediate buy/sell (that's place_order)
 list_alerts - asking what price alerts they currently have set (e.g. "what alerts do I have", "show my price alerts")
+watchlist_add - adding a specific stock/company to their watchlist to track it going forward, with NO price condition and NO buy/sell instruction (e.g. "add Bajaj Finance to my watchlist", "put TCS on my watchlist", "start tracking AAPL", "watchlist NVDA") -- a passive tracking request, NOT a price alert (that's create_alert, which always names a trigger price like "below 180"), NOT a trade (that's place_order), and NOT asking for the stock's current status (that's ticker_question)
+watchlist_remove - removing a specific stock/company from their watchlist (e.g. "remove TCS from my watchlist", "stop tracking AAPL", "take Bajaj Finance off my watchlist")
 daily_briefing - asking for a pulled-together summary/digest of portfolio performance, recent rating changes, AND upcoming events all at once (e.g. "give me my briefing", "what's my daily update", "catch me up") -- NOT a plain "how's my portfolio doing" (that's portfolio_status, which has no rating-change/upcoming-event digest)
 general - anything else, including generic finance chit-chat, greetings, small talk, or a message unrelated to the categories above
 
@@ -901,6 +907,47 @@ def _handle_create_alert(user_id: str, ticker: str, message: str, history: list)
     return f"Alert set: if {ticker} {verb} {symbol}{parsed['target_price']:,.2f}, I'll {action_bit} (simulated)."
 
 
+def _handle_watchlist_add(user_id: str, ticker: str) -> str:
+    """Adds a ticker to the watchlist and confirms it -- same single-
+    turn, no-confirmation shape as _handle_create_alert above (a
+    reversible, non-monetary action, not a trade). The get_quote()
+    call below is enrichment only, never a gate: the ticker reaching
+    this handler already passed resolve_companies() inside
+    classify_intent(), and db.add_watchlist_item is INSERT OR IGNORE
+    with no dependency on live market data, so a quote hiccup should
+    never block a legitimate add -- same reasoning _handle_create_alert
+    already applies to its own currency-symbol lookup."""
+    if not ticker:
+        return "I couldn't tell which stock you mean -- try naming a ticker or company, e.g. \"add AAPL to my watchlist\"."
+
+    already_present = ticker in {item["ticker"] for item in db.get_watchlist(user_id)}
+    db.add_watchlist_item(user_id, ticker)
+
+    if already_present:
+        return f"{ticker} is already on your watchlist."
+
+    try:
+        quote = get_quote(ticker)
+        symbol = currency_symbol(quote.get("currency", "USD"))
+        return f"Added {ticker} to your watchlist -- trading at {symbol}{quote['price']:,.2f} right now."
+    except Exception:
+        return f"Added {ticker} to your watchlist."  # degrade -- the add itself already succeeded above
+
+
+def _handle_watchlist_remove(user_id: str, ticker: str) -> str:
+    """Removes a ticker from the watchlist and confirms it. No quote
+    lookup needed -- removal carries no price to report."""
+    if not ticker:
+        return "I couldn't tell which stock you mean -- try naming a ticker or company, e.g. \"remove AAPL from my watchlist\"."
+
+    was_present = ticker in {item["ticker"] for item in db.get_watchlist(user_id)}
+    db.remove_watchlist_item(user_id, ticker)
+
+    if not was_present:
+        return f"{ticker} wasn't on your watchlist."
+    return f"Removed {ticker} from your watchlist."
+
+
 def _handle_list_alerts(user_id: str) -> str:
     alerts = db.list_price_alerts(user_id)
     if not alerts:
@@ -970,6 +1017,8 @@ _HANDLERS = {
     INTENT_PLACE_ORDER: lambda user_id, ticker, message, history: _handle_place_order(user_id, ticker, message, history),
     INTENT_CREATE_ALERT: lambda user_id, ticker, message, history: _handle_create_alert(user_id, ticker, message, history),
     INTENT_LIST_ALERTS: lambda user_id, ticker, message, history: _handle_list_alerts(user_id),
+    INTENT_WATCHLIST_ADD: lambda user_id, ticker, message, history: _handle_watchlist_add(user_id, ticker),
+    INTENT_WATCHLIST_REMOVE: lambda user_id, ticker, message, history: _handle_watchlist_remove(user_id, ticker),
     INTENT_GENERAL: lambda user_id, ticker, message, history: _handle_general(message, history),
 }
 
