@@ -140,10 +140,17 @@ export function useConversationalAssistant() {
   async function synthesizeAndSpeak(text: string): Promise<void> {
     stopSpeaking();
     try {
+      // AbortSignal.timeout -- without it, a hung/slow backend leaves
+      // this await pending forever, which blocks sendMessage()'s own
+      // mic re-arm (voiceInputRef.current?.start() below it) for the
+      // rest of the session. Same fix as VoiceInputButton.tsx's own
+      // transcribe() call and OnboardingForm.tsx's speak(), just for
+      // this third caller of the same synthesize endpoint.
       const resp = await fetch("/api/voice/synthesize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
+        signal: AbortSignal.timeout(20_000),
       });
       // Silent no-op on failure -- the text reply is already on screen
       // and fully usable; a broken TTS call should never block or
@@ -184,10 +191,19 @@ export function useConversationalAssistant() {
     setMessages((prev) => [...prev, optimisticUser]);
 
     try {
+      // AbortSignal.timeout -- same reasoning as synthesizeAndSpeak()'s
+      // own fix above, applied to the actual chat call itself: without
+      // it, a hung backend leaves `sending` true forever, and the mic
+      // re-arm at the bottom of this function never runs, stranding a
+      // hands-free session with no way to continue except manually
+      // ending it. 45s, not 20s -- this call runs real classification
+      // AND reply-generation LLM calls back to back (see chat_router.py),
+      // not just one short call like synthesize/classify-answer above.
       const resp = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message }),
+        signal: AbortSignal.timeout(45_000),
       });
       if (!resp.ok) throw new Error("chat request failed");
       const data = await resp.json();
