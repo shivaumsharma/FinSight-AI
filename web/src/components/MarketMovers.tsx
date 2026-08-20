@@ -3,48 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import SectionSkeleton from "./SectionSkeleton";
+import AddToWatchlistButton from "./AddToWatchlistButton";
 import { currencySymbol } from "@/lib/currency";
 import type { MarketMoversData, MoverItem } from "@/lib/types";
-
-function BookmarkIcon({ filled }: { filled: boolean }) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth={1.8}>
-      <path d="M6 3.5h12a.5.5 0 0 1 .5.5v17l-6.5-4-6.5 4V4a.5.5 0 0 1 .5-.5z" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function AddToWatchlistButton({ ticker }: { ticker: string }) {
-  const [state, setState] = useState<"idle" | "adding" | "added" | "error">("idle");
-
-  async function handleAdd() {
-    setState("adding");
-    try {
-      const resp = await fetch("/api/watchlist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticker }),
-      });
-      if (!resp.ok) throw new Error("watchlist add failed");
-      setState("added");
-    } catch {
-      setState("error");
-      setTimeout(() => setState("idle"), 2000);
-    }
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={handleAdd}
-      disabled={state === "adding" || state === "added"}
-      title={state === "added" ? "On watchlist" : "Add to watchlist"}
-      className={`shrink-0 ${state === "added" ? "text-accent" : "text-dim hover:text-accent"} ${state === "error" ? "text-danger" : ""}`}
-    >
-      <BookmarkIcon filled={state === "added"} />
-    </button>
-  );
-}
 
 function MoverRow({ item }: { item: MoverItem }) {
   return (
@@ -95,20 +56,23 @@ export default function MarketMovers() {
     <div className="mt-6">
       <div className="flex items-center justify-between">
         <p className="font-mono text-[10px] tracking-wide text-dim">TOP MOVERS (TRACKED UNIVERSE)</p>
-        <div className="flex gap-1 rounded-lg border border-border bg-card p-0.5">
-          {(["gainers", "losers"] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setTab(t)}
-              className={`rounded px-2.5 py-1 font-mono text-[10px] font-bold ${
-                tab === t ? "bg-accent text-bg" : "text-muted hover:text-text"
-              }`}
-            >
-              {t === "gainers" ? "GAINERS" : "LOSERS"}
-            </button>
-          ))}
-        </div>
+        <Link href="/screener" className="font-mono text-[10px] font-bold text-muted hover:text-accent">
+          SCREENER &rarr;
+        </Link>
+      </div>
+      <div className="mt-2 flex gap-1 rounded-lg border border-border bg-card p-0.5">
+        {(["gainers", "losers"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={`flex-1 rounded px-2.5 py-1 font-mono text-[10px] font-bold ${
+              tab === t ? "bg-accent text-bg" : "text-muted hover:text-text"
+            }`}
+          >
+            {t === "gainers" ? "GAINERS" : "LOSERS"}
+          </button>
+        ))}
       </div>
 
       {rows.length > 0 ? (

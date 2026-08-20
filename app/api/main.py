@@ -72,6 +72,7 @@ from app.data.stock_overview import get_stock_overview
 from app.reasoning.backtest_stats import get_backtest_accuracy_summary
 from app.reasoning.call_tracker import check_matured_checkpoints, get_scoreboard
 from app.reasoning.market_movers import get_top_movers
+from app.reasoning.screener import run_screener
 from app.reasoning.daily_briefing import sweep_daily_briefings
 from app.reasoning.price_alerts import sweep_price_alerts
 from app.reasoning.rating_alerts import sweep_rating_changes
@@ -1293,6 +1294,38 @@ def get_market_movers(limit: int = Query(default=5, le=10), current_user: str = 
     # see market_movers.py's module docstring. Frontend must label this
     # clearly so it's never read as full-market coverage.
     return get_top_movers(limit=limit)
+
+
+@app.get("/v1/market/screener")
+def get_screener(
+    market_cap_min: Optional[float] = None,
+    market_cap_max: Optional[float] = None,
+    pe_max: Optional[float] = None,
+    pb_max: Optional[float] = None,
+    dividend_yield_min: Optional[float] = None,
+    change_pct_min: Optional[float] = None,
+    change_pct_max: Optional[float] = None,
+    volume_min: Optional[float] = None,
+    sort_by: str = "market_cap",
+    sort_desc: bool = True,
+    limit: int = Query(default=50, le=100),
+    current_user: str = Depends(auth.get_current_user),
+):
+    # Same "Tracked Universe" scope and honesty framing as Top Movers
+    # above -- screener.py's own module docstring covers why (curated
+    # backtest tickers + every user's watchlist tickers, unioned
+    # globally; never a full-market scan).
+    filters = {
+        "market_cap_min": market_cap_min,
+        "market_cap_max": market_cap_max,
+        "pe_max": pe_max,
+        "pb_max": pb_max,
+        "dividend_yield_min": dividend_yield_min,
+        "change_pct_min": change_pct_min,
+        "change_pct_max": change_pct_max,
+        "volume_min": volume_min,
+    }
+    return run_screener(filters, sort_by=sort_by, sort_desc=sort_desc, limit=limit)
 
 
 @app.get("/v1/market/sentiment")
