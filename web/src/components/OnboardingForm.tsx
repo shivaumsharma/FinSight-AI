@@ -124,10 +124,17 @@ export default function OnboardingForm({
 
   async function speak(text: string): Promise<void> {
     try {
+      // AbortSignal.timeout -- without it, a hung/slow backend leaves
+      // this await pending forever, which blocks askVoiceQuestion()
+      // from ever reaching voiceInputRef.current?.start() below: the
+      // exact same class of stuck-forever bug as VoiceInputButton.tsx's
+      // own transcribe() call, just on the speaking side instead of
+      // the listening side of the same voice loop.
       const resp = await fetch("/api/voice/synthesize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
+        signal: AbortSignal.timeout(20_000),
       });
       if (!resp.ok) return; // silent no-op -- the question can still be answered unheard is unlikely but not fatal
       const blob = await resp.blob();
@@ -169,10 +176,15 @@ export default function OnboardingForm({
 
     let value: string | null = null;
     try {
+      // AbortSignal.timeout -- same reasoning as speak()'s own fix
+      // above: without it, a hung backend leaves this stuck on
+      // "THINKING..." forever instead of falling through to the
+      // retry-then-manual-fallback path below.
       const resp = await fetch("/api/onboarding/classify-answer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ field, answer: text }),
+        signal: AbortSignal.timeout(20_000),
       });
       const data = await resp.json();
       value = resp.ok ? data.value : null;
