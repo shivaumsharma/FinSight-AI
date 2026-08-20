@@ -47,8 +47,16 @@ from app.training.rlvr_prompt import render_prompt
 # just one (build_ml_training_set.py's single 12mo-ago snapshot) --
 # more training signal from the same ticker universe without needing a
 # larger one. The most recent (12mo) window is the one held out below;
-# 18/24mo are only ever used for training.
-AS_OF_MONTHS_AGO_WINDOWS = [12, 18, 24]
+# every other window is training-only.
+#
+# Widened from the original [12, 18, 24] -- the first real GRPO run
+# showed how few unique prompts 121 examples actually is (the same
+# handful of tickers cycling repeatedly); doubling the training-only
+# windows (18-48mo, six windows instead of two) meaningfully grows the
+# example count without touching the shared ticker universe in
+# phase2_backtest.py, and 48mo is still comfortably inside
+# build_point_in_time_context's existing 10y price-history fetch.
+AS_OF_MONTHS_AGO_WINDOWS = [12, 18, 24, 30, 36, 42, 48]
 HELDOUT_WINDOW_MONTHS_AGO = 12
 
 TICKER_HOLDOUT_FRACTION = 0.2
