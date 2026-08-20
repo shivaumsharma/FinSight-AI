@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import AddToWatchlistButton from "./AddToWatchlistButton";
 import { currencySymbol } from "@/lib/currency";
-import { formatCompact } from "@/lib/format";
+import { fmtCompactNumber } from "@/lib/stockFormat";
 import type { ScreenerData, ScreenerFilters, ScreenerRow } from "@/lib/types";
 
 const SORT_OPTIONS: { value: string; label: string }[] = [
@@ -69,11 +69,11 @@ function ScreenerRowCard({ row }: { row: ScreenerRow }) {
         </div>
       </div>
       <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-dim">
-        <span>MCAP {row.market_cap !== null ? formatCompact(row.market_cap) : "--"}</span>
+        <span>MCAP {row.market_cap !== null ? fmtCompactNumber(row.market_cap) : "--"}</span>
         <span>P/E {row.pe_ratio !== null ? row.pe_ratio.toFixed(1) : "--"}</span>
         <span>P/B {row.pb_ratio !== null ? row.pb_ratio.toFixed(1) : "--"}</span>
         <span>DIV {row.dividend_yield !== null ? `${row.dividend_yield.toFixed(2)}%` : "--"}</span>
-        <span>VOL {row.volume !== null ? formatCompact(row.volume) : "--"}</span>
+        <span>VOL {row.volume !== null ? fmtCompactNumber(row.volume) : "--"}</span>
       </div>
     </div>
   );
