@@ -202,43 +202,84 @@ def verify_pdf_signature(job_id: str, expires_at: int, signature: str) -> bool:
 # separate secret rather than reused -- a token minted for one purpose
 # should never verify against another purpose's HMAC, even though both
 # currently use the identical "random fallback if unset" shape.
-_WAKE_LISTEN_SECRET = os.environ.get("WAKE_LISTEN_SECRET") or secrets.token_urlsafe(32)
-WAKE_LISTEN_TOKEN_TTL_SECONDS = 60
+_REALTIME_VOICE_SECRET = os.environ.get("WAKE_LISTEN_SECRET") or secrets.token_urlsafe(32)
+REALTIME_VOICE_TOKEN_TTL_SECONDS = 60
+# Kept as an alias -- main.py's existing wake-listen endpoint (and any
+# other code written against the old name) still resolves correctly;
+# new code should reach for REALTIME_VOICE_TOKEN_TTL_SECONDS directly.
+WAKE_LISTEN_TOKEN_TTL_SECONDS = REALTIME_VOICE_TOKEN_TTL_SECONDS
+
+# Every realtime-voice WebSocket purpose this token type can be minted
+# for. A purpose is baked into the signed message itself (not just
+# carried alongside it) specifically so a token minted for one
+# WebSocket can never be replayed against a different one -- e.g. a
+# wake-word token intercepted or reused couldn't be handed to the
+# conversation endpoint instead, even though both share this same
+# signing mechanism and secret.
+PURPOSE_WAKE_WORD = "wake_word"
+PURPOSE_CONVERSATION = "conversation"
 
 
-def sign_wake_listen_token(user_id: str) -> str:
-    """Short-lived, single-purpose credential for the browser-direct
-    /v1/voice/wake-listen WebSocket connection (main.py). The REAL
-    session token lives in an httpOnly cookie specifically so
-    client-side JS can never read it (XSS protection, see
-    session.ts's own comment) -- this mints a separate, narrowly
-    scoped, 60-second-lived token instead of ever exposing that real
-    one to the browser. Same "expiry baked into the signed message"
-    shape as sign_pdf_url above, but self-contained: the user_id is
-    encoded IN the token (not looked up from a table), since the
-    WebSocket handshake has no session-cookie access to resolve one
-    from -- verify_wake_listen_token below is what extracts it back
-    out, only if the signature actually matches."""
-    expires_at = int(time.time()) + WAKE_LISTEN_TOKEN_TTL_SECONDS
-    message = f"{user_id}:{expires_at}".encode("utf-8")
-    signature = hmac.new(_WAKE_LISTEN_SECRET.encode("utf-8"), message, hashlib.sha256).hexdigest()
-    return f"{user_id}.{expires_at}.{signature}"
+def sign_realtime_voice_token(user_id: str, purpose: str) -> str:
+    """Short-lived, single-purpose credential for a browser-direct
+    realtime voice WebSocket connection (main.py) -- originally built
+    for /v1/voice/wake-listen specifically (see sign_wake_listen_token's
+    prior docstring, preserved in spirit here), generalized to cover
+    /v1/voice/conversation-listen too without letting a token minted
+    for one be replayed against the other. The REAL session token
+    lives in an httpOnly cookie specifically so client-side JS can
+    never read it (XSS protection, see session.ts's own comment) --
+    this mints a separate, narrowly scoped, 60-second-lived token
+    instead of ever exposing that real one to the browser. Same
+    "expiry baked into the signed message" shape as sign_pdf_url
+    above, but self-contained: the user_id is encoded IN the token
+    (not looked up from a table), since the WebSocket handshake has no
+    session-cookie access to resolve one from -- verify_realtime_voice_token
+    below is what extracts it back out, only if the signature actually
+    matches AND the purpose matches what the caller expected."""
+    expires_at = int(time.time()) + REALTIME_VOICE_TOKEN_TTL_SECONDS
+    message = f"{user_id}:{purpose}:{expires_at}".encode("utf-8")
+    signature = hmac.new(_REALTIME_VOICE_SECRET.encode("utf-8"), message, hashlib.sha256).hexdigest()
+    return f"{user_id}.{purpose}.{expires_at}.{signature}"
 
 
-def verify_wake_listen_token(token: str) -> Optional[str]:
+def verify_realtime_voice_token(token: str, expected_purpose: str) -> Optional[str]:
     """Returns the user_id if `token` is a valid, unexpired
-    sign_wake_listen_token() output, else None. user_id is a uuid4
-    string (hyphens only, see db.py's create_user) so splitting on "."
-    is unambiguous."""
+    sign_realtime_voice_token() output minted for EXACTLY
+    `expected_purpose`, else None. A purpose mismatch (a well-formed,
+    correctly-signed, unexpired token minted for a DIFFERENT purpose)
+    is rejected the same as a bad signature -- this is the actual
+    replay-prevention property, not just a formality, so it's checked
+    before the signature comparison rather than assumed safe because
+    the signature already passed. user_id is a uuid4 string (hyphens
+    only, see db.py's create_user) so splitting on "." is unambiguous;
+    purpose is one of the PURPOSE_* constants above, never
+    user-influenced, so it can't itself contain a "."."""
     try:
-        user_id, expires_at_str, signature = token.split(".", 2)
+        user_id, purpose, expires_at_str, signature = token.split(".", 3)
         expires_at = int(expires_at_str)
     except (ValueError, AttributeError):
         return None
+    if purpose != expected_purpose:
+        return None
     if expires_at < time.time():
         return None
-    message = f"{user_id}:{expires_at}".encode("utf-8")
-    expected = hmac.new(_WAKE_LISTEN_SECRET.encode("utf-8"), message, hashlib.sha256).hexdigest()
+    message = f"{user_id}:{purpose}:{expires_at}".encode("utf-8")
+    expected = hmac.new(_REALTIME_VOICE_SECRET.encode("utf-8"), message, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, signature):
         return None
     return user_id
+
+
+def sign_wake_listen_token(user_id: str) -> str:
+    """Back-compat wrapper -- kept so nothing calling the pre-
+    generalization name breaks. New code should call
+    sign_realtime_voice_token(user_id, PURPOSE_WAKE_WORD) directly."""
+    return sign_realtime_voice_token(user_id, PURPOSE_WAKE_WORD)
+
+
+def verify_wake_listen_token(token: str) -> Optional[str]:
+    """Back-compat wrapper -- kept so nothing calling the pre-
+    generalization name breaks. New code should call
+    verify_realtime_voice_token(token, PURPOSE_WAKE_WORD) directly."""
+    return verify_realtime_voice_token(token, PURPOSE_WAKE_WORD)

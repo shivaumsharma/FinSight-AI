@@ -106,6 +106,54 @@ async def relay_for_wake_word(browser_ws: WebSocket, language_code: str = "en-IN
         raise SarvamRealtimeError(f"Sarvam realtime connection failed: {eg.exceptions}") from eg
 
 
+async def relay_for_conversation(browser_ws: WebSocket, language_code: str = "en-IN") -> None:
+    """
+    Generalization of relay_for_wake_word above for the main
+    conversation loop -- Phase 4 of the voice-assistant overhaul plan.
+    Same browser<->Sarvam relay shape (accept()-ed by the caller,
+    proxies raw PCM16 audio one way, transcript events the other), but
+    forwards the ACTUAL transcript text on every partial/final event
+    instead of only signaling a fixed-phrase match. The caller (the
+    frontend's realtime capture hook, once wired up) decides when a
+    transcript represents a finished turn -- this function's only job
+    is getting transcript text to the browser as fast as Sarvam
+    produces it.
+
+    Deliberately stream_type="balanced" (Sarvam's own default), NOT
+    "fast" like relay_for_wake_word above -- "fast" trades accuracy for
+    latency, which is a fine trade for substring-matching four fixed
+    wake phrases but not for transcribing an arbitrary real command
+    someone is relying on being heard correctly (same reasoning
+    sarvam_client.py's batch transcribe() already documents for why
+    IT stays on Sarvam's default too).
+
+    Raises SarvamRealtimeError only for a failure to establish the
+    Sarvam connection itself, same contract as relay_for_wake_word.
+    """
+    api_key = os.environ.get("SARVAM_API_KEY")
+    if not api_key:
+        raise SarvamRealtimeError("SARVAM_API_KEY is not configured.")
+
+    client = AsyncSarvamAI(api_subscription_key=api_key)
+
+    try:
+        async with client.speech_to_text_realtime_streaming.connect(
+            language_code=language_code,
+            model=_REALTIME_MODEL,
+            encoding="linear16",
+            sample_rate="16000",
+            endpointing="vad",
+            stream_type="balanced",
+        ) as sarvam_ws:
+            async with asyncio.TaskGroup() as tg:
+                tg.create_task(_pump_browser_audio(browser_ws, sarvam_ws))
+                tg.create_task(_pump_sarvam_transcripts_verbatim(sarvam_ws, browser_ws))
+    except* WebSocketDisconnect:
+        pass  # the browser closing the tab/ending the session is expected, not an error
+    except* Exception as eg:
+        raise SarvamRealtimeError(f"Sarvam realtime connection failed: {eg.exceptions}") from eg
+
+
 async def _pump_browser_audio(browser_ws: WebSocket, sarvam_ws) -> None:
     """Browser -> Sarvam: forward each raw binary audio chunk as-is."""
     while True:
@@ -131,6 +179,25 @@ async def _pump_sarvam_transcripts(sarvam_ws, browser_ws: WebSocket) -> None:
             text = getattr(message, "text", "") or ""
             if _contains_wake_phrase(text):
                 await browser_ws.send_json({"event": "wake_detected", "text": text})
+        elif event == "error":
+            is_fatal = getattr(message, "is_fatal", False)
+            logger.warning(f"Sarvam realtime STT error (fatal={is_fatal}): {getattr(message, 'message', message)}")
+            if is_fatal:
+                return
+
+
+async def _pump_sarvam_transcripts_verbatim(sarvam_ws, browser_ws: WebSocket) -> None:
+    """Sarvam -> browser, for the conversation relay: forward every
+    partial/final transcript's text as-is (no wake-phrase filtering --
+    the browser gets to see everything, since here it's the actual
+    command being said, not a phrase to substring-match)."""
+    async for message in sarvam_ws:
+        event = getattr(message, "event", None)
+        if event == "session.begin":
+            await browser_ws.send_json({"event": "ready"})
+        elif event in ("transcript.partial", "transcript.final"):
+            text = getattr(message, "text", "") or ""
+            await browser_ws.send_json({"event": event, "text": text})
         elif event == "error":
             is_fatal = getattr(message, "is_fatal", False)
             logger.warning(f"Sarvam realtime STT error (fatal={is_fatal}): {getattr(message, 'message', message)}")
