@@ -77,6 +77,7 @@ TICKERS = {
     "KHC": "deep-value (packaged food)", "INTC": "deep-value/distressed (semis)",
     "F": "deep-value (auto)", "GM": "deep-value (auto)", "WBA": "deep-value (retail pharmacy)",
     "HPQ": "deep-value (hardware)", "UPS": "deep-value (logistics)", "NEM": "deep-value (mining)",
+    "BA": "deep-value/distressed (aerospace)", "DOW": "deep-value (chemicals)",
 
     # Mid-caps outside tech/finance
     "CMI": "mid-cap (industrials)", "DPZ": "mid-cap (consumer disc.)",
@@ -87,6 +88,7 @@ TICKERS = {
     "KMB": "mid-cap (consumer staples)", "YUM": "mid-cap (consumer disc.)",
     "PHM": "mid-cap (homebuilder)", "DE": "mid-cap (industrials)",
     "CAT": "mid-cap (industrials)", "EMR": "mid-cap (industrials)",
+    "LEN": "mid-cap (homebuilder)", "IP": "mid-cap (industrials/paper)",
 
     # Hypergrowth / negative-FCF / plausibly overvalued
     "PLTR": "hypergrowth/plausibly overvalued", "CVNA": "formerly distressed/high-multiple",
@@ -97,6 +99,8 @@ TICKERS = {
     "UPST": "hypergrowth/negative-FCF (fintech)", "AFRM": "hypergrowth/negative-FCF (fintech)",
     "RBLX": "hypergrowth/negative-FCF (gaming)", "NIO": "hypergrowth/negative-FCF (EV)",
     "DKNG": "hypergrowth/negative-FCF (gaming)", "PATH": "hypergrowth/high-multiple",
+    "ABNB": "hypergrowth/high-multiple (travel)", "DASH": "hypergrowth/negative-FCF (delivery)",
+    "SOFI": "hypergrowth/negative-FCF (fintech)", "ROKU": "hypergrowth/negative-FCF (streaming)",
 
     # Mega-cap
     "AAPL": "mega-cap", "NVDA": "mega-cap", "MSFT": "mega-cap",
@@ -104,6 +108,11 @@ TICKERS = {
     "AMZN": "mega-cap", "TSLA": "mega-cap (high-multiple)",
     "ORCL": "mega-cap", "CRM": "mega-cap", "ADBE": "mega-cap", "NFLX": "mega-cap",
     "V": "mega-cap (payments)", "MA": "mega-cap (payments)",
+    "JNJ": "mega-cap (healthcare)", "UNH": "mega-cap (healthcare)",
+    "PG": "mega-cap (consumer staples)", "KO": "mega-cap (consumer staples)",
+    "PEP": "mega-cap (consumer staples)", "WMT": "mega-cap (retail)",
+    "HD": "mega-cap (retail)", "COST": "mega-cap (retail)",
+    "DIS": "mega-cap (media)", "IBM": "mega-cap (enterprise tech)",
 
     # Financial sector -- banks/insurers specifically, to stress-test
     # the "Insufficient Data" fallback path at scale (only JPM had hit
@@ -117,6 +126,8 @@ TICKERS = {
     "AIG": "financial (insurer)", "MET": "financial (insurer)", "PRU": "financial (insurer)",
     "TRV": "financial (insurer)", "ALL": "financial (insurer)", "PGR": "financial (insurer)",
     "CB": "financial (insurer)",
+    "COF": "financial (bank/credit)", "BK": "financial (custodian bank)",
+    "STT": "financial (custodian bank)",
 }
 
 
