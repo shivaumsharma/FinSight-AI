@@ -17,9 +17,14 @@ export default function WatchlistPage() {
           <div className="mx-auto max-w-2xl px-5 py-8">
             <div className="flex items-center justify-between">
               <h1 className="font-mono text-lg font-bold text-text">Watchlist</h1>
-              <Link href="/corporate-actions" className="font-mono text-[10px] font-bold text-muted hover:text-accent">
-                CORPORATE ACTIONS &rarr;
-              </Link>
+              <div className="flex flex-col items-end gap-1">
+                <Link href="/corporate-actions" className="font-mono text-[10px] font-bold text-muted hover:text-accent">
+                  CORPORATE ACTIONS &rarr;
+                </Link>
+                <Link href="/calculators" className="font-mono text-[10px] font-bold text-muted hover:text-accent">
+                  CALCULATORS &rarr;
+                </Link>
+              </div>
             </div>
             <Watchlist />
           </div>
