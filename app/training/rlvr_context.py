@@ -70,6 +70,17 @@ def build_point_in_time_context(
         raise PointInTimeUnavailable(
             f"{ticker}: insufficient price history spanning as-of date and today"
         )
+    # _price_on_or_before can return a real NaN (not None) if yfinance's
+    # own Close column has a NaN row on-or-before the target date --
+    # found live: every example in a full dataset build silently got a
+    # NaN realized_return_pct this way, which downstream score_rating()
+    # treats as an ordinary (non-None) False rather than "unscored,"
+    # so the GRPO reward for an entire training run was silently
+    # guaranteed 0.0 regardless of what the model predicted. Raising
+    # here instead means build_rlvr_dataset.py's existing skip-and-log
+    # path catches it, the same as any other bad-data case.
+    if price_as_of != price_as_of or price_today != price_today:
+        raise PointInTimeUnavailable(f"{ticker}: NaN price on-or-before as-of date or today")
 
     realized_return_pct = (price_today - price_as_of) / price_as_of * 100
 
