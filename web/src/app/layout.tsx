@@ -61,11 +61,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`h-full antialiased ${jetbrainsMono.variable} ${sourceSerif.variable}`}>
-      <body className="min-h-full flex flex-col">{children}</body>
-      <Script id="theme-init" strategy="beforeInteractive">
-        {THEME_INIT_SCRIPT}
-      </Script>
+    <html lang="en" className={`h-full antialiased ${jetbrainsMono.variable} ${sourceSerif.variable}`} suppressHydrationWarning>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <Script id="theme-init" strategy="beforeInteractive">
+          {THEME_INIT_SCRIPT}
+        </Script>
+      </body>
     </html>
   );
 }

@@ -294,7 +294,21 @@ const VoiceInputButton = forwardRef<VoiceInputHandle, {
       mediaRecorderRef.current = recorder;
       setState("recording");
       onRecordingStart?.();
-      stopTimerRef.current = setTimeout(() => stopRecording(), MAX_RECORDING_MS);
+      stopTimerRef.current = setTimeout(() => {
+        stopRecording();
+        // Escape hatch: onstop should fire within milliseconds of a
+        // successful stop() call. If the recorder is somehow still not
+        // "inactive" shortly after (a swallowed exception from a
+        // double-stop race with the silence-detector's own stopRecording()
+        // call, or a stuck driver), there was previously no way out of
+        // this except the user manually tapping cancel -- the UI would
+        // otherwise sit on "LISTENING..." forever with the mic still live.
+        window.setTimeout(() => {
+          if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+            forceStopCleanup();
+          }
+        }, 3000);
+      }, MAX_RECORDING_MS);
       watchForSilence();
     } catch {
       stopSilenceWatch();
@@ -303,8 +317,28 @@ const VoiceInputButton = forwardRef<VoiceInputHandle, {
     }
   }
 
+  function forceStopCleanup() {
+    stopSilenceWatch();
+    if (stopTimerRef.current) {
+      clearTimeout(stopTimerRef.current);
+      stopTimerRef.current = null;
+    }
+    mediaRecorderRef.current?.stream?.getTracks().forEach((t) => t.stop());
+    setState("error");
+    setErrorMessage("Voice recording didn't finish cleanly. Please try again or type your question.");
+  }
+
   function stopRecording() {
-    mediaRecorderRef.current?.stop();
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === "inactive") return;
+    try {
+      recorder.stop();
+    } catch {
+      // stop() threw synchronously -- onstop will never fire for this
+      // call, so run the same cleanup onstop would have done rather than
+      // leaving the UI stuck showing "LISTENING..." indefinitely.
+      forceStopCleanup();
+    }
   }
 
   async function transcribe(blob: Blob) {

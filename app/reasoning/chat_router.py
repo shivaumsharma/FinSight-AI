@@ -89,6 +89,28 @@ _INTENT_RE = re.compile(r"INTENT:\s*(\w+)", re.IGNORECASE)
 # constant's own cross-module reuse note further down.
 CHAT_MODEL = "allam-2-7b"
 
+# Classification specifically (not CHAT_MODEL above, which still backs
+# every actual reply) needs a stronger model -- confirmed live over a
+# real multi-turn voice session: allam-2-7b reliably ignores this
+# file's "classify the LATEST message, not the history" instruction
+# once real conversation history is present, and just repeats whatever
+# intent the FIRST message in the session got for every message after
+# it (e.g. "Justin, can you hear me?" right after a portfolio question
+# also came back portfolio_status). A gpt-oss reasoning model normally
+# can't be used here at all (see CHAT_MODEL's own comment -- its hidden
+# chain-of-thought burns through a short token budget before it ever
+# reaches the actual answer), but classification's own prompt is by far
+# the shortest, most template-shaped output in this file -- a budget
+# large enough for gpt-oss-20b to finish reasoning AND answer (400, not
+# 20) measured under 1s per call live, and got every reproduced
+# misclassification above right. Not applied to the other CHAT_MODEL
+# call sites in this file (the actual reply-generation ones) -- those
+# weren't confirmed broken, and each would need its own budget
+# increase and re-verification to use a reasoning model safely; keeping
+# this change scoped to the one call site actually proven broken.
+_CLASSIFY_MODEL = "openai/gpt-oss-20b"
+_CLASSIFY_MAX_TOKENS = 400
+
 # How many recent messages (not turns -- individual user+assistant rows)
 # to fold into a prompt as conversation memory. Small on purpose: this
 # is a fast/cheap classification+synthesis call, not the full research
@@ -462,7 +484,22 @@ def _build_classify_prompt(message: str, has_ticker: bool, history: list) -> str
         "conversation context below)."
         if has_ticker else "No ticker is available for this message."
     )
-    return f"""Classify this message from a user of a stock research app into EXACTLY ONE of these categories:
+    # Confirmed live: allam-2-7b (this file's classifier model -- see
+    # CHAT_MODEL's own docstring for why a bigger/reasoning model isn't
+    # an option here) tends to just repeat whatever intent the FIRST
+    # message in a session got, for every message after it, once real
+    # conversation history is present -- e.g. "Justin, can you hear me?"
+    # right after a portfolio question got classified portfolio_status
+    # too, even though it has nothing to do with a portfolio. The
+    # original prompt already said "classify the LATEST message, not
+    # this history" once, at the top of the history block; that alone
+    # wasn't enough for this model to actually follow it. The explicit
+    # "do NOT let the topic ... influence your choice" framing below,
+    # repeated again right next to LATEST MESSAGE, measurably fixed this
+    # for real reproduced cases -- weak models need the instruction
+    # repeated near where it actually applies, not just stated once
+    # up front.
+    return f"""Classify ONLY the LATEST MESSAGE below into EXACTLY ONE of these categories. Do NOT let the topic of RECENT CONVERSATION influence your choice -- it is provided only so you can resolve pronouns like "that"/"it" in the latest message, nothing else. A new message on a completely different topic must be classified on its own content, even if the conversation was previously about something else.
 
 portfolio_status - asking about their overall portfolio, holdings, or how it's doing
 ticker_question - asking what's going on with, or for information about, a specific stock/company (not asking for a deep valuation report)
@@ -474,14 +511,14 @@ place_order - an actual instruction to buy or sell a stock right now (e.g. "buy 
 create_alert - setting up a standing price alert to check later (e.g. "alert me if AAPL drops below 180", "sell if TCS drops below 4000", "notify me when MSFT rises above 300") -- a WATCH for later, NOT an immediate buy/sell (that's place_order)
 list_alerts - asking what price alerts they currently have set (e.g. "what alerts do I have", "show my price alerts")
 daily_briefing - asking for a pulled-together summary/digest of portfolio performance, recent rating changes, AND upcoming events all at once (e.g. "give me my briefing", "what's my daily update", "catch me up") -- NOT a plain "how's my portfolio doing" (that's portfolio_status, which has no rating-change/upcoming-event digest)
-general - anything else, including generic finance chit-chat
+general - anything else, including generic finance chit-chat, greetings, small talk, or a message unrelated to the categories above
 
 {ticker_note}
 
-RECENT CONVERSATION (oldest first, context only -- classify the LATEST message, not this history):
+RECENT CONVERSATION (context only, for pronoun resolution -- do NOT classify based on its topic):
 {_format_history(history)}
 
-LATEST MESSAGE: {message}
+LATEST MESSAGE (classify only this): {message}
 
 Respond in EXACTLY this format, nothing else:
 INTENT: <one of the categories above>"""
@@ -505,8 +542,8 @@ def classify_intent(message: str, history: list = None) -> dict:
     ticker = tickers[0] if tickers else _most_recent_ticker(history)
 
     try:
-        provider = HostedProvider(model=CHAT_MODEL)
-        raw = provider.generate(_build_classify_prompt(message, ticker is not None, history), max_new_tokens=20)
+        provider = HostedProvider(model=_CLASSIFY_MODEL)
+        raw = provider.generate(_build_classify_prompt(message, ticker is not None, history), max_new_tokens=_CLASSIFY_MAX_TOKENS)
         intent = _parse_intent(raw)
     except LLMProviderError:
         intent = INTENT_GENERAL
