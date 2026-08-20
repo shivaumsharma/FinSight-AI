@@ -198,6 +198,20 @@ class HostedProvider(LLMProvider):
             # confirmed live -- so it's gated to the one model family that
             # accepts and needs it.
             payload["reasoning_effort"] = "low"
+        elif self.model.startswith("qwen/"):
+            # Same hidden-reasoning problem as gpt-oss above, but Groq's
+            # qwen3.6 only accepts reasoning_effort "none" or "default"
+            # (confirmed live -- "low" is a hard 400 here, unlike gpt-oss).
+            # Left unset, qwen inlines its <think>...</think> block directly
+            # in `content` (not a separate `reasoning` field) and it scales
+            # to fill the whole max_tokens budget just like gpt-oss's does --
+            # confirmed live: a 150-token budget was entirely consumed by
+            # `<think>` with finish_reason "length" and zero real output,
+            # which is exactly why model_consensus.py's Qwen opinion was
+            # always degrading to "Insufficient Data -- Model response could
+            # not be parsed." "none" fully disables it, confirmed live to
+            # return real content on the first try with finish_reason "stop".
+            payload["reasoning_effort"] = "none"
 
         for attempt in range(self.max_retries + 1):
             try:
