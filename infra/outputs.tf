@@ -3,6 +3,11 @@ output "backend_url" {
   value       = "https://${aws_cloudfront_distribution.backend.domain_name}"
 }
 
+output "backend_url_api_gateway_stopgap" {
+  description = "API Gateway HTTPS URL (api_gateway.tf) -- stopgap FINSIGHT_API_URL while CloudFront's account verification is still pending. Switch back to the backend_url (CloudFront) output once that clears."
+  value       = aws_apigatewayv2_stage.default.invoke_url
+}
+
 output "backend_eb_url_http_only" {
   description = "The raw EB URL, plain HTTP -- for direct debugging/curl only, never give this to the frontend."
   value       = "http://${aws_elastic_beanstalk_environment.backend.cname}"

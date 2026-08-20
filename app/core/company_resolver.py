@@ -78,6 +78,17 @@ _STOPWORDS = {
     "i", "should", "analyze", "compare", "generate", "calculate", "teach",
     "what", "how", "why", "please", "give", "tell", "explain", "report",
     "investment", "thesis", "latest", "earnings",
+    # Confirmed live via voice chat: ordinary conversational
+    # sentence-openers ("Can you...", "Okay, so...") are just as
+    # capitalized as a real proper noun at the start of a sentence, and
+    # some of them (e.g. "Can") fuzzy-match a real, obscure ticker
+    # (CANG -- Cango Inc.) above FUZZY_MATCH_THRESHOLD. These are never
+    # company names on their own; a genuine mid-sentence mention (e.g.
+    # "does Cango look good") still resolves normally since only the
+    # bare filler word itself is excluded, not the whole candidate run.
+    "can", "could", "would", "will", "okay", "ok", "well", "so", "yes",
+    "no", "thanks", "thank", "sure", "alright", "actually", "also",
+    "now", "hey", "hi", "hello", "let", "lets", "just", "and",
 }
 
 _JOINERS = {"of", "and", "the", "&"}
@@ -282,10 +293,24 @@ def _extract_candidate_phrases(question: str) -> List[str]:
         current.clear()
 
     for tok in tokens:
-        # Strip a trailing possessive ("NVIDIA's" -> "NVIDIA") -- .strip()
-        # only removes leading/trailing characters and can't do this,
-        # since the apostrophe sits mid-token, not at the edge.
-        cleaned = re.sub(r"['’]s$", "", tok)
+        # Strip a trailing possessive/contraction suffix ("NVIDIA's" ->
+        # "NVIDIA", "I'm" -> "I") -- .strip() only removes leading/
+        # trailing characters and can't do this, since the apostrophe
+        # sits mid-token, not at the edge. Originally only stripped
+        # "'s" specifically -- confirmed live that left "I'm" (from
+        # ordinary sentence-initial "I'm ...") intact as its own
+        # candidate, which then fuzzy-matched an unrelated real company
+        # ("Vivani Medical, Inc." / VANI) above FUZZY_MATCH_THRESHOLD,
+        # since "I" alone is in _STOPWORDS but "I'm" as one token wasn't.
+        # An explicit list of short contraction suffixes, not a bare
+        # "apostrophe + anything to the end" pattern -- the greedy
+        # version's first attempt also silently mangled genuine
+        # apostrophized names like "O'Reilly" down to just "O" (its
+        # apostrophe is followed by real name letters all the way to
+        # the token's end too, so a length-blind pattern can't tell
+        # the two apart; a real contraction suffix is always one of
+        # this short, closed set).
+        cleaned = re.sub(r"['’](?:s|m|re|ve|ll|d|t)$", "", tok, flags=re.IGNORECASE)
         if not cleaned:
             continue
         lower = cleaned.lower()
