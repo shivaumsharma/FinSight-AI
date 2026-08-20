@@ -171,8 +171,8 @@ function ThemeRow() {
         className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${isLight ? "bg-accent" : "bg-border"}`}
       >
         <span
-          className={`absolute top-0.5 h-5 w-5 rounded-full bg-bg transition-transform ${
-            isLight ? "translate-x-5" : "translate-x-0.5"
+          className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-bg transition-transform ${
+            isLight ? "translate-x-5" : "translate-x-0"
           }`}
         />
       </button>
@@ -206,8 +206,8 @@ function NotificationRow() {
         }`}
       >
         <span
-          className={`absolute top-0.5 h-5 w-5 rounded-full bg-bg transition-transform ${
-            subscribed ? "translate-x-5" : "translate-x-0.5"
+          className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-bg transition-transform ${
+            subscribed ? "translate-x-5" : "translate-x-0"
           }`}
         />
       </button>
