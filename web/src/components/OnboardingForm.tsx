@@ -28,6 +28,7 @@ const VOICE_QUESTIONS: { field: FieldKey; prompt: string }[] = [
   { field: "interested_in_real_estate", prompt: "Last one -- are you interested in real estate? Yes or no." },
 ];
 const MAX_RETRIES_PER_QUESTION = 1;
+const VOICE_INTRO = "Hi, I'm FinSight. I've got five quick questions to help tailor things for you.";
 
 function OptionRow({ label, options, value, onChange }: { label: string; options: readonly string[]; value: string; onChange: (v: string) => void }) {
   return (
@@ -220,10 +221,12 @@ export default function OnboardingForm({
     }
   }
 
-  function startVoiceOnboarding() {
+  async function startVoiceOnboarding() {
     setVoiceActive(true);
     setVoiceStep(0);
     voiceAnswersRef.current = {};
+    setVoicePhase("speaking");
+    await speak(VOICE_INTRO);
     void askVoiceQuestion(0);
   }
 
@@ -269,7 +272,7 @@ export default function OnboardingForm({
           <>
             <button
               type="button"
-              onClick={startVoiceOnboarding}
+              onClick={() => void startVoiceOnboarding()}
               className="mb-4 flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-card py-2.5 font-mono text-xs font-bold text-muted hover:border-accent hover:text-accent"
             >
               <MicIcon active={false} />

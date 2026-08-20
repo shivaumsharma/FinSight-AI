@@ -112,6 +112,21 @@ export default function HomeAssistant({
           </button>
         </form>
         {a.error && <p className="mt-1.5 font-mono text-[10px] text-danger">{a.error}</p>}
+        {/* Mounted off-screen -- this screen's own mic button above just
+            calls a.startSession directly (it's a plain icon, not this
+            component), so without a live VoiceInputButton somewhere
+            holding a.voiceInputRef, that call's voiceInputRef.current
+            is null and silently no-ops: the mic never actually starts,
+            and the session status label falls through to its default
+            "STARTING..." forever. Same sr-only pattern OnboardingForm.tsx
+            uses to keep its own voice loop's ref alive across screens. */}
+        <div className="sr-only">
+          <VoiceInputButton
+            ref={a.voiceInputRef}
+            onTranscript={a.handleTranscript}
+            onStateChange={a.handleMicStateChange}
+          />
+        </div>
       </div>
     );
   }
@@ -147,14 +162,27 @@ export default function HomeAssistant({
       )}
 
       {a.sessionActive ? (
-        <button
-          type="button"
-          onClick={a.endSession}
-          className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-lg border border-accent bg-accent/10 py-2.5 font-mono text-[11px] font-bold text-accent"
-        >
-          <MicIcon active={a.micState === "recording"} />
-          {sessionStatusLabel(a.micState, a.sending, a.speaking)} -- TAP TO END
-        </button>
+        <>
+          <button
+            type="button"
+            onClick={a.endSession}
+            className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-lg border border-accent bg-accent/10 py-2.5 font-mono text-[11px] font-bold text-accent"
+          >
+            <MicIcon active={a.micState === "recording"} />
+            {sessionStatusLabel(a.micState, a.sending, a.speaking)} -- TAP TO END
+          </button>
+          {/* Same reason as the greeting screen's hidden instance above --
+              without a live VoiceInputButton holding a.voiceInputRef while
+              a session is active, the mic can never actually start. */}
+          <div className="sr-only">
+            <VoiceInputButton
+              ref={a.voiceInputRef}
+              onTranscript={a.handleTranscript}
+              onRecordingStart={a.stopSpeaking}
+              onStateChange={a.handleMicStateChange}
+            />
+          </div>
+        </>
       ) : (
         <>
           <button
