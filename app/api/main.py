@@ -728,7 +728,10 @@ def get_wake_listen_token(current_user: str = Depends(auth.get_current_user)):
     only the WebSocket connection itself talks to this backend
     directly, since Next.js Route Handlers cannot proxy WebSockets.
     """
-    return {"token": auth.sign_wake_listen_token(current_user), "expires_in": auth.WAKE_LISTEN_TOKEN_TTL_SECONDS}
+    return {
+        "token": auth.sign_realtime_voice_token(current_user, auth.PURPOSE_WAKE_WORD),
+        "expires_in": auth.REALTIME_VOICE_TOKEN_TTL_SECONDS,
+    }
 
 
 @app.websocket("/v1/voice/wake-listen")
@@ -766,7 +769,7 @@ async def wake_listen(websocket: WebSocket):
         await websocket.close(code=4001, reason="Expected a JSON auth message first.")
         return
 
-    user_id = auth.verify_wake_listen_token(first_message.get("wake_token", ""))
+    user_id = auth.verify_realtime_voice_token(first_message.get("wake_token", ""), auth.PURPOSE_WAKE_WORD)
     if user_id is None:
         await websocket.close(code=4401, reason="Invalid or expired wake_token.")
         return
@@ -790,6 +793,74 @@ async def wake_listen(websocket: WebSocket):
     # An ASGI WebSocket app that returns without ever sending a close
     # frame leaves the connection in an undefined state (found live:
     # this hung the test client indefinitely waiting for one).
+    try:
+        await websocket.close(code=1000)
+    except Exception:
+        pass
+
+
+@app.get("/v1/voice/conversation-listen-token")
+def get_conversation_listen_token(current_user: str = Depends(auth.get_current_user)):
+    """
+    Mints the short-lived credential for /v1/voice/conversation-listen
+    below -- same shape as GET /v1/voice/wake-listen-token above, just
+    scoped to a different purpose so the two tokens can never be used
+    interchangeably. Phase 4 of the voice-assistant overhaul plan: the
+    backend half of a real-time main-loop STT path is built and unit-
+    tested here, but the frontend doesn't call this yet -- the current
+    batch-record voice session (VoiceInputButton.tsx) stays the live
+    production default until this is wired up behind a flag, since a
+    WebSocket connection to this backend doesn't work in production
+    at all yet (see infra/api_gateway.tf's own comment: the current
+    stopgap API Gateway is HTTP-only and can't carry a WebSocket
+    upgrade -- this endpoint is real, tested, and only blocked from
+    prod browser use by that separate infra gap).
+    """
+    return {
+        "token": auth.sign_realtime_voice_token(current_user, auth.PURPOSE_CONVERSATION),
+        "expires_in": auth.REALTIME_VOICE_TOKEN_TTL_SECONDS,
+    }
+
+
+@app.websocket("/v1/voice/conversation-listen")
+async def conversation_listen(websocket: WebSocket):
+    """
+    Backs the (not-yet-wired-to-frontend) real-time main-conversation
+    STT path -- see sarvam_realtime_client.relay_for_conversation's own
+    docstring for what it does differently from the wake-word relay
+    above. Same connection/auth shape as /v1/voice/wake-listen in
+    every other respect (browser connects directly, first message must
+    be {"wake_token": "..."} even though the token here was minted for
+    the "conversation" purpose specifically -- verify_realtime_voice_token
+    rejects a wake-word token here and vice versa).
+    """
+    await websocket.accept()
+
+    try:
+        first_message = await websocket.receive_json()
+    except Exception:
+        await websocket.close(code=4001, reason="Expected a JSON auth message first.")
+        return
+
+    user_id = auth.verify_realtime_voice_token(first_message.get("wake_token", ""), auth.PURPOSE_CONVERSATION)
+    if user_id is None:
+        await websocket.close(code=4401, reason="Invalid or expired wake_token.")
+        return
+
+    try:
+        await sarvam_realtime_client.relay_for_conversation(websocket)
+    except sarvam_realtime_client.SarvamRealtimeError as e:
+        logger.warning(f"Conversation listener failed for user {user_id}: {e}")
+        try:
+            await websocket.send_json({"event": "error", "message": str(e)})
+            await websocket.close(code=1011)
+        except Exception:
+            pass  # the socket may already be closed/gone -- nothing left to notify
+        return
+    except WebSocketDisconnect:
+        return
+
+    # Same "always send a close frame" reasoning as wake_listen above.
     try:
         await websocket.close(code=1000)
     except Exception:

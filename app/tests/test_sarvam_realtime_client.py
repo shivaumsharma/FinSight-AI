@@ -135,6 +135,70 @@ def test_pump_sarvam_transcripts_continues_past_a_non_fatal_error():
     assert browser_ws.sent == [{"event": "wake_detected", "text": "hey finsight"}]
 
 
+# ---------------------------------------------------------------- relay_for_conversation
+
+def test_relay_for_conversation_raises_before_any_connection_when_key_missing(monkeypatch):
+    monkeypatch.delenv("SARVAM_API_KEY", raising=False)
+
+    with pytest.raises(src.SarvamRealtimeError, match="SARVAM_API_KEY"):
+        _run(src.relay_for_conversation(browser_ws=None))  # never reached -- fails before touching it
+
+
+# ---------------------------------------------------------------- _pump_sarvam_transcripts_verbatim
+
+def test_pump_sarvam_transcripts_verbatim_forwards_session_begin_as_ready():
+    messages = [SimpleNamespace(event="session.begin", request_id="abc123")]
+    browser_ws = _FakeBrowserWs()
+
+    _run(src._pump_sarvam_transcripts_verbatim(_FakeSarvamSocket(messages), browser_ws))
+
+    assert browser_ws.sent == [{"event": "ready"}]
+
+
+def test_pump_sarvam_transcripts_verbatim_forwards_every_transcript_unfiltered():
+    """Unlike _pump_sarvam_transcripts (wake-word only), this forwards
+    ordinary speech too -- it's the actual command being transcribed
+    here, not a phrase to substring-match."""
+    messages = [
+        SimpleNamespace(event="transcript.partial", text="whats going on"),
+        SimpleNamespace(event="transcript.partial", text="whats going on with apple"),
+        SimpleNamespace(event="transcript.final", text="whats going on with apple"),
+    ]
+    browser_ws = _FakeBrowserWs()
+
+    _run(src._pump_sarvam_transcripts_verbatim(_FakeSarvamSocket(messages), browser_ws))
+
+    assert browser_ws.sent == [
+        {"event": "transcript.partial", "text": "whats going on"},
+        {"event": "transcript.partial", "text": "whats going on with apple"},
+        {"event": "transcript.final", "text": "whats going on with apple"},
+    ]
+
+
+def test_pump_sarvam_transcripts_verbatim_stops_on_fatal_error():
+    messages = [
+        SimpleNamespace(event="error", is_fatal=True, message="quota exceeded"),
+        SimpleNamespace(event="transcript.final", text="never reached"),
+    ]
+    browser_ws = _FakeBrowserWs()
+
+    _run(src._pump_sarvam_transcripts_verbatim(_FakeSarvamSocket(messages), browser_ws))
+
+    assert browser_ws.sent == []
+
+
+def test_pump_sarvam_transcripts_verbatim_continues_past_a_non_fatal_error():
+    messages = [
+        SimpleNamespace(event="error", is_fatal=False, message="config rejected"),
+        SimpleNamespace(event="transcript.final", text="still works"),
+    ]
+    browser_ws = _FakeBrowserWs()
+
+    _run(src._pump_sarvam_transcripts_verbatim(_FakeSarvamSocket(messages), browser_ws))
+
+    assert browser_ws.sent == [{"event": "transcript.final", "text": "still works"}]
+
+
 # ---------------------------------------------------------------- _pump_browser_audio
 
 class _FakeSarvamSendClient:
