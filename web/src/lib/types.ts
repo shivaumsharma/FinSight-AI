@@ -564,6 +564,48 @@ export interface MarketMoversData {
   losers: MoverItem[];
 }
 
+// GET /v1/market/screener's per-row shape (app/reasoning/screener.py) --
+// same Tracked Universe as MoverItem above, just with the extra
+// fundamentals fields a screen filters/sorts on. Any of these besides
+// ticker/name/currency/price can be null: Yahoo's batch quote endpoint
+// doesn't cover every field for every ticker (e.g. no dividend_yield for
+// a non-payer), and that's a real "unknown", not a 0.
+export interface ScreenerRow {
+  ticker: string;
+  name: string;
+  currency: string;
+  price: number;
+  change_pct: number | null;
+  market_cap: number | null;
+  pe_ratio: number | null;
+  forward_pe: number | null;
+  pb_ratio: number | null;
+  dividend_yield: number | null;
+  volume: number | null;
+  avg_volume_3m: number | null;
+  fifty_two_week_high: number | null;
+  fifty_two_week_low: number | null;
+}
+
+export interface ScreenerData {
+  results: ScreenerRow[];
+  total_matched: number;
+  universe_size: number;
+}
+
+// Every field optional/undefined -- an unset filter is simply omitted
+// from the querystring the Screener component builds, not sent as null.
+export interface ScreenerFilters {
+  market_cap_min?: number;
+  market_cap_max?: number;
+  pe_max?: number;
+  pb_max?: number;
+  dividend_yield_min?: number;
+  change_pct_min?: number;
+  change_pct_max?: number;
+  volume_min?: number;
+}
+
 // GET /v1/market/sentiment's response shape -- FinSight's OWN research
 // sentiment (Buy vs Sell share of every distinct ticker's latest
 // completed rating across all users), not a market-wide indicator.
