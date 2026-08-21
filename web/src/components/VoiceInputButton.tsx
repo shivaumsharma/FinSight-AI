@@ -1,6 +1,7 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { GetUserMediaTimeoutError, getUserMediaWithTimeout } from "@/lib/getUserMediaWithTimeout";
 
 // Hard recording ceiling, not a substitute for silence detection below --
 // margin under Sarvam's synchronous STT endpoint's own 30s cap (see
@@ -250,7 +251,7 @@ const VoiceInputButton = forwardRef<VoiceInputHandle, {
   async function startRecording() {
     setErrorMessage(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await getUserMediaWithTimeout();
       const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus"
         : "audio/webm";
@@ -310,10 +311,14 @@ const VoiceInputButton = forwardRef<VoiceInputHandle, {
         }, 3000);
       }, MAX_RECORDING_MS);
       watchForSilence();
-    } catch {
+    } catch (err) {
       stopSilenceWatch();
       setState("error");
-      setErrorMessage("Microphone permission denied. Enable it in your browser settings to use voice input.");
+      setErrorMessage(
+        err instanceof GetUserMediaTimeoutError
+          ? "Didn't get a response to the microphone permission prompt. Check for a popup near your browser's address bar, allow access, and try again."
+          : "Microphone permission denied. Enable it in your browser settings to use voice input."
+      );
     }
   }
 
