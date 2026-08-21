@@ -171,6 +171,12 @@ data "aws_iam_policy_document" "github_actions_deploy" {
       "ecr:BatchCheckLayerAvailability", "ecr:GetDownloadUrlForLayer",
       "ecr:BatchGetImage", "ecr:PutImage", "ecr:InitiateLayerUpload",
       "ecr:UploadLayerPart", "ecr:CompleteLayerUpload",
+      # Read-only, needed by deploy-aws.yml's own idempotency check
+      # (skip build/push if this commit's tag is already in ECR) --
+      # ECR tags are immutable, so re-running the workflow for an
+      # already-pushed commit fails at PutImage without this check.
+      # Confirmed live 2026-08-21.
+      "ecr:DescribeImages",
     ]
     resources = [aws_ecr_repository.backend.arn]
   }
