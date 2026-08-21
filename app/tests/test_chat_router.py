@@ -646,6 +646,49 @@ def test_handle_place_order_sell_within_holdings_uses_the_rupee_symbol(monkeypat
     assert "₹4,231.00" in result
 
 
+def test_handle_place_order_ignores_a_ticker_carried_over_from_history(monkeypatch):
+    """Regression test: classify_intent() can hand this handler a
+    ticker resolved from a PREVIOUS message (_most_recent_ticker
+    fallback) when the CURRENT message names nothing resolvable --
+    right for a read-only follow-up, wrong for a real trade. "buy 10
+    ZZZZ" (an unresolvable ticker) must not silently propose buying a
+    completely different, unrelated ticker from earlier in the
+    conversation; confirmed live this previously happened instead of
+    failing clearly."""
+    monkeypatch.setattr(cr, "get_quote", lambda ticker: {"price": 150.0, "currency": "USD"})
+
+    result = cr._handle_place_order("u1", "AAPL", "buy 10 ZZZZ", [])
+
+    assert "couldn't tell which stock" in result
+    assert "u1" not in cr._pending_orders
+
+
+def test_handle_place_order_allows_a_ticker_carried_over_when_the_message_names_no_ticker_at_all(monkeypatch):
+    """The other side of the fix above: this handler's own no-quantity
+    path ("how many shares of {ticker} would you like to buy?") is a
+    real two-turn flow expecting a ticker-LESS reply like "buy 10" --
+    that must still complete against the carried-over ticker. Only a
+    message that names something which fails to resolve (the previous
+    test) should be rejected, not one that omits a ticker entirely."""
+    monkeypatch.setattr(cr, "get_quote", lambda ticker: {"price": 150.0, "currency": "USD"})
+
+    result = cr._handle_place_order("u1", "AAPL", "buy 10", [])
+
+    assert result == 'Confirm: BUY 10 AAPL at today\'s price of $150.00? Reply "yes" to place the order or "no" to cancel.'
+
+
+def test_handle_place_order_allows_an_all_caps_continuation_carried_over_from_history(monkeypatch):
+    """Same as above, all-caps -- confirms has_unresolved_ticker_attempt's
+    trading-word exclusion (BUY/SELL/etc.) covers a fully-uppercase
+    message, e.g. from a client that normalizes STT output, not just a
+    lowercase one."""
+    monkeypatch.setattr(cr, "get_quote", lambda ticker: {"price": 150.0, "currency": "USD"})
+
+    result = cr._handle_place_order("u1", "AAPL", "BUY 10", [])
+
+    assert result == 'Confirm: BUY 10 AAPL at today\'s price of $150.00? Reply "yes" to place the order or "no" to cancel.'
+
+
 # ---------------------------------------------------------------- Feature 4: position sizing
 
 def testsuggest_quantity_scales_with_risk_tolerance(monkeypatch):
@@ -1031,8 +1074,24 @@ def test_handle_create_alert_degrades_currency_symbol_on_quote_failure(monkeypat
     assert "$180.00" in result  # still confirms, just with the USD fallback symbol
 
 
+def test_handle_create_alert_ignores_a_ticker_carried_over_from_history(temp_db, monkeypatch):
+    """Regression test: same ticker-carryover bug class confirmed live
+    for place_order/watchlist_add. "alert me if asdkfjaslkdfj drops
+    below 180" must not silently set an alert on an unrelated earlier
+    ticker instead of failing clearly -- especially risky here since
+    an auto_execute alert is a future UNATTENDED trade the user won't
+    be watching for."""
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    monkeypatch.setattr(cr, "get_quote", lambda ticker: {"price": 190.0, "currency": "USD"})
+
+    result = cr._handle_create_alert(user_id, "AAPL", "alert me if asdkfjaslkdfj drops below 180", [])
+
+    assert "couldn't tell which stock" in result
+    assert temp_db.list_price_alerts(user_id) == []
+
+
 def test_handle_watchlist_add_with_no_ticker():
-    result = cr._handle_watchlist_add("u1", None)
+    result = cr._handle_watchlist_add("u1", None, "add something to my watchlist")
     assert "couldn't tell which stock" in result
 
 
@@ -1040,7 +1099,7 @@ def test_handle_watchlist_add_happy_path_persists_and_confirms(temp_db, monkeypa
     user_id = temp_db.create_user("a@example.com", "h", "s")
     monkeypatch.setattr(cr, "get_quote", lambda ticker: {"price": 190.0, "currency": "USD"})
 
-    result = cr._handle_watchlist_add(user_id, "AAPL")
+    result = cr._handle_watchlist_add(user_id, "AAPL", "add AAPL to my watchlist")
 
     assert result == "Added AAPL to your watchlist -- trading at $190.00 right now."
     assert {item["ticker"] for item in temp_db.get_watchlist(user_id)} == {"AAPL"}
@@ -1051,7 +1110,7 @@ def test_handle_watchlist_add_already_present(temp_db, monkeypatch):
     temp_db.add_watchlist_item(user_id, "AAPL")
     monkeypatch.setattr(cr, "get_quote", lambda ticker: {"price": 190.0, "currency": "USD"})
 
-    result = cr._handle_watchlist_add(user_id, "AAPL")
+    result = cr._handle_watchlist_add(user_id, "AAPL", "add AAPL to my watchlist")
 
     assert result == "AAPL is already on your watchlist."
 
@@ -1060,14 +1119,31 @@ def test_handle_watchlist_add_degrades_on_quote_failure(temp_db, monkeypatch):
     user_id = temp_db.create_user("a@example.com", "h", "s")
     monkeypatch.setattr(cr, "get_quote", lambda ticker: (_ for _ in ()).throw(Exception("down")))
 
-    result = cr._handle_watchlist_add(user_id, "AAPL")
+    result = cr._handle_watchlist_add(user_id, "AAPL", "add AAPL to my watchlist")
 
     assert result == "Added AAPL to your watchlist."  # still confirms, just without a price
     assert {item["ticker"] for item in temp_db.get_watchlist(user_id)} == {"AAPL"}
 
 
+def test_handle_watchlist_add_ignores_a_ticker_carried_over_from_history(temp_db, monkeypatch):
+    """Regression test: classify_intent() can hand this handler a
+    ticker resolved from a PREVIOUS message (_most_recent_ticker
+    fallback) when the CURRENT message names nothing resolvable --
+    right for a follow-up question, wrong for a write action. "add
+    asdkfjaslkdfj to my watchlist" must not silently act on whatever
+    ticker happened to be in history; confirmed live this previously
+    added the WRONG, unrelated ticker instead of failing clearly."""
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    monkeypatch.setattr(cr, "get_quote", lambda ticker: {"price": 190.0, "currency": "USD"})
+
+    result = cr._handle_watchlist_add(user_id, "AAPL", "add asdkfjaslkdfj to my watchlist")
+
+    assert "couldn't tell which stock" in result
+    assert temp_db.get_watchlist(user_id) == []
+
+
 def test_handle_watchlist_remove_with_no_ticker():
-    result = cr._handle_watchlist_remove("u1", None)
+    result = cr._handle_watchlist_remove("u1", None, "remove something from my watchlist")
     assert "couldn't tell which stock" in result
 
 
@@ -1075,7 +1151,7 @@ def test_handle_watchlist_remove_happy_path(temp_db):
     user_id = temp_db.create_user("a@example.com", "h", "s")
     temp_db.add_watchlist_item(user_id, "AAPL")
 
-    result = cr._handle_watchlist_remove(user_id, "AAPL")
+    result = cr._handle_watchlist_remove(user_id, "AAPL", "remove AAPL from my watchlist")
 
     assert result == "Removed AAPL from your watchlist."
     assert temp_db.get_watchlist(user_id) == []
@@ -1084,9 +1160,23 @@ def test_handle_watchlist_remove_happy_path(temp_db):
 def test_handle_watchlist_remove_not_present(temp_db):
     user_id = temp_db.create_user("a@example.com", "h", "s")
 
-    result = cr._handle_watchlist_remove(user_id, "AAPL")
+    result = cr._handle_watchlist_remove(user_id, "AAPL", "remove AAPL from my watchlist")
 
     assert result == "AAPL wasn't on your watchlist."
+
+
+def test_handle_watchlist_remove_ignores_a_ticker_carried_over_from_history(temp_db):
+    """Regression test, remove side: confirmed live "remove ZZZZ from
+    my watchlist" (an unresolvable ticker) previously removed a
+    completely different, unrelated real holding carried over from
+    history instead of failing clearly."""
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    temp_db.add_watchlist_item(user_id, "AAPL")
+
+    result = cr._handle_watchlist_remove(user_id, "AAPL", "remove ZZZZ from my watchlist")
+
+    assert "couldn't tell which stock" in result
+    assert {item["ticker"] for item in temp_db.get_watchlist(user_id)} == {"AAPL"}  # untouched
 
 
 def test_handle_chat_message_routes_watchlist_add_intent(temp_db, monkeypatch):
