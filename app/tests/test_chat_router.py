@@ -1269,3 +1269,150 @@ def test_execute_pending_order_reports_a_failed_leg_by_message(temp_db):
 
     assert "Couldn't place that order" in result
     assert user_id not in cr._pending_orders
+
+
+# ---------------------------------------------------------------- add_holding
+
+def test_parse_avg_cost_handles_at_with_a_dollar_sign():
+    assert cr._parse_avg_cost("add 10 shares of AAPL to my portfolio at $150") == 150.0
+
+
+def test_parse_avg_cost_handles_at_sign_shorthand():
+    assert cr._parse_avg_cost("10 AAPL @ 150.50") == 150.50
+
+
+def test_parse_avg_cost_handles_comma_formatted_rupees():
+    assert cr._parse_avg_cost("add 5 TCS at ₹4,231.00") == 4231.0
+
+
+def test_parse_avg_cost_none_without_an_at_marker():
+    # A bare number with no "at"/"@" marker is ambiguous with quantity --
+    # deliberately does not guess.
+    assert cr._parse_avg_cost("add 10 shares of AAPL to my portfolio") is None
+
+
+def test_parse_avg_cost_and_quantity_do_not_collide_on_the_same_message():
+    message = "add 10 shares of AAPL to my portfolio at $150"
+    assert cr._parse_quantity(message) == 10.0
+    assert cr._parse_avg_cost(message) == 150.0
+
+
+def test_handle_add_holding_with_no_ticker():
+    result = cr._handle_add_holding("u1", None, "add something to my portfolio at $150", [])
+    assert "couldn't tell which stock" in result
+
+
+def test_handle_add_holding_ignores_a_ticker_carried_over_from_history(monkeypatch):
+    """Same bug class confirmed live for place_order/create_alert/
+    watchlist_add: "add 10 shares of ZZZZ to my portfolio at $150" must
+    not silently record a holding against an unrelated earlier ticker.
+    Uses a ZZZZ-shaped fake ticker, not arbitrary lowercase gibberish
+    like the watchlist_add/remove version of this test -- this handler
+    is protected by has_unresolved_ticker_attempt() (needed for its own
+    "ask for the missing quantity/cost" follow-up, see its own
+    docstring), which -- like _handle_place_order's identical guard --
+    only recognizes a bare, ticker-SHAPED token (matching _TICKER_TOKEN),
+    not free-form gibberish; watchlist_add/remove use the simpler
+    resolve_companies() truthiness check instead, which has no such
+    follow-up flow to protect and so has no need for that narrower
+    (but continuation-safe) detector."""
+    monkeypatch.setattr(cr.db, "get_portfolio_holdings", lambda user_id: [])
+
+    result = cr._handle_add_holding("u1", "AAPL", "add 10 shares of ZZZZ to my portfolio at $150", [])
+
+    assert "couldn't tell which stock" in result
+
+
+def test_handle_add_holding_missing_both_quantity_and_cost(temp_db):
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    result = cr._handle_add_holding(user_id, "AAPL", "add AAPL to my portfolio", [])
+    assert "how many shares and your average cost" in result
+
+
+def test_handle_add_holding_missing_quantity_only(temp_db, monkeypatch):
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    result = cr._handle_add_holding(user_id, "AAPL", "add AAPL to my portfolio at $150", [])
+    assert result == 'Tell me how many shares for AAPL, e.g. "10 shares at $150".'
+
+
+def test_handle_add_holding_missing_cost_only(temp_db):
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    result = cr._handle_add_holding(user_id, "AAPL", "add 10 shares of AAPL to my portfolio", [])
+    assert result == 'Tell me your average cost per share for AAPL, e.g. "10 shares at $150".'
+
+
+def test_handle_add_holding_happy_path_persists_and_confirms(temp_db, monkeypatch):
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    monkeypatch.setattr(cr, "get_quote", lambda ticker: {"price": 190.0, "currency": "USD"})
+
+    result = cr._handle_add_holding(user_id, "AAPL", "add 10 shares of AAPL to my portfolio at $150", [])
+
+    assert result == "Added 10 shares of AAPL to your portfolio at an average cost of $150.00."
+    holdings = temp_db.get_portfolio_holdings(user_id)
+    assert len(holdings) == 1
+    assert holdings[0]["ticker"] == "AAPL"
+    assert holdings[0]["quantity"] == 10.0
+    assert holdings[0]["avg_cost"] == 150.0
+
+
+def test_handle_add_holding_refuses_to_silently_overwrite_an_existing_holding(temp_db, monkeypatch):
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    temp_db.upsert_portfolio_holding(user_id, "AAPL", 5.0, 120.0)
+    monkeypatch.setattr(cr, "get_quote", lambda ticker: {"price": 190.0, "currency": "USD"})
+
+    result = cr._handle_add_holding(user_id, "AAPL", "add 10 shares of AAPL to my portfolio at $150", [])
+
+    assert "already hold 5" in result
+    assert "$120.00" in result
+    # untouched -- the existing lot must not be silently replaced
+    holdings = temp_db.get_portfolio_holdings(user_id)
+    assert holdings[0]["quantity"] == 5.0
+    assert holdings[0]["avg_cost"] == 120.0
+
+
+def test_handle_add_holding_degrades_currency_symbol_on_quote_failure(temp_db, monkeypatch):
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    monkeypatch.setattr(cr, "get_quote", lambda ticker: (_ for _ in ()).throw(Exception("down")))
+
+    result = cr._handle_add_holding(user_id, "AAPL", "add 10 shares of AAPL to my portfolio at $150", [])
+
+    assert "$150.00" in result  # still records, just with the USD fallback symbol
+    assert temp_db.get_portfolio_holdings(user_id)[0]["quantity"] == 10.0
+
+
+def test_handle_chat_message_routes_add_holding_intent(temp_db, monkeypatch):
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    monkeypatch.setattr(cr, "resolve_companies", lambda q: ["AAPL"])
+    monkeypatch.setattr(cr, "HostedProvider", type("P", (), {
+        "__init__": lambda self, model=None, **kw: None,
+        "generate": lambda self, prompt, max_new_tokens=150: "INTENT: add_holding",
+    }))
+    monkeypatch.setattr(cr, "get_quote", lambda ticker: {"price": 190.0, "currency": "USD"})
+
+    result = cr.handle_chat_message(user_id, "add 10 shares of AAPL to my portfolio at $150")
+
+    assert result["intent"] == "add_holding"
+    assert "Added 10 shares of AAPL" in result["reply"]
+    assert temp_db.get_portfolio_holdings(user_id)[0]["ticker"] == "AAPL"
+
+
+# ---------------------------------------------------------------- end_voice_session
+
+def test_handle_end_voice_session_returns_a_fixed_goodbye():
+    result = cr._handle_end_voice_session()
+    assert "Ending the session" in result
+
+
+def test_handle_chat_message_routes_end_voice_session_intent(temp_db, monkeypatch):
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    monkeypatch.setattr(cr, "resolve_companies", lambda q: [])
+    monkeypatch.setattr(cr, "HostedProvider", type("P", (), {
+        "__init__": lambda self, model=None, **kw: None,
+        "generate": lambda self, prompt, max_new_tokens=150: "INTENT: end_voice_session",
+    }))
+
+    result = cr.handle_chat_message(user_id, "end the session")
+
+    assert result["intent"] == "end_voice_session"
+    assert "Ending the session" in result["reply"]
+    assert result["ticker"] is None

@@ -54,6 +54,8 @@ INTENT_CREATE_ALERT = "create_alert"
 INTENT_LIST_ALERTS = "list_alerts"
 INTENT_WATCHLIST_ADD = "watchlist_add"
 INTENT_WATCHLIST_REMOVE = "watchlist_remove"
+INTENT_ADD_HOLDING = "add_holding"
+INTENT_END_VOICE_SESSION = "end_voice_session"
 INTENT_DAILY_BRIEFING = "daily_briefing"
 INTENT_GENERAL = "general"
 
@@ -61,7 +63,8 @@ _VALID_INTENTS = {
     INTENT_PORTFOLIO_STATUS, INTENT_TICKER_QUESTION, INTENT_PORTFOLIO_FIT,
     INTENT_FULL_REPORT_REQUEST, INTENT_ADVICE_REQUEST, INTENT_STOCK_DISCOVERY_REQUEST,
     INTENT_PLACE_ORDER, INTENT_CREATE_ALERT, INTENT_LIST_ALERTS,
-    INTENT_WATCHLIST_ADD, INTENT_WATCHLIST_REMOVE, INTENT_DAILY_BRIEFING, INTENT_GENERAL,
+    INTENT_WATCHLIST_ADD, INTENT_WATCHLIST_REMOVE, INTENT_ADD_HOLDING,
+    INTENT_END_VOICE_SESSION, INTENT_DAILY_BRIEFING, INTENT_GENERAL,
 }
 # Intents that need a ticker to mean anything -- a message classified
 # into one of these with no ticker detected degrades to INTENT_GENERAL
@@ -70,11 +73,11 @@ _VALID_INTENTS = {
 # everything rated Sell") is a perfectly valid order intent with no
 # single ticker at all -- _handle_place_order below is the one that
 # decides whether a missing ticker means "invalid", not this
-# blanket degrade. INTENT_LIST_ALERTS is also not here -- it lists
-# every alert regardless of ticker, same as portfolio_status.
+# blanket degrade. INTENT_LIST_ALERTS and INTENT_END_VOICE_SESSION are
+# also not here -- neither one is about any particular ticker at all.
 _TICKER_SCOPED_INTENTS = {
     INTENT_TICKER_QUESTION, INTENT_PORTFOLIO_FIT, INTENT_FULL_REPORT_REQUEST, INTENT_CREATE_ALERT,
-    INTENT_WATCHLIST_ADD, INTENT_WATCHLIST_REMOVE,
+    INTENT_WATCHLIST_ADD, INTENT_WATCHLIST_REMOVE, INTENT_ADD_HOLDING,
 }
 
 _INTENT_RE = re.compile(r"INTENT:\s*(\w+)", re.IGNORECASE)
@@ -177,6 +180,12 @@ _pending_orders: dict = {}
 _BUY_RE = re.compile(r"\bbuy\b", re.IGNORECASE)
 _SELL_RE = re.compile(r"\bsell\b", re.IGNORECASE)
 _QUANTITY_RE = re.compile(r"\b(\d+(?:\.\d+)?)\b")
+# Requires the "at"/"@" marker (unlike _QUANTITY_RE's bare first-number
+# grab above) so _parse_avg_cost can pull a cost out of a message that
+# ALSO states a quantity ("10 shares at $150") without colliding on the
+# same number -- same [₹$]? + comma-tolerant shape as _ALERT_PRICE_RE
+# below.
+_AVG_COST_RE = re.compile(r"(?:\bat\b|@)\s*[₹$]?\s*([\d,]+(?:\.\d+)?)", re.IGNORECASE)
 
 # Feature 1 (batching) -- a SMALL FIXED set of exact phrases, not
 # open-ended strategy language (see this module's own combined
@@ -516,7 +525,9 @@ create_alert - setting up a standing price alert to check later (e.g. "alert me 
 list_alerts - asking what price alerts they currently have set (e.g. "what alerts do I have", "show my price alerts")
 watchlist_add - adding a specific stock/company to their watchlist to track it going forward, with NO price condition and NO buy/sell instruction (e.g. "add Bajaj Finance to my watchlist", "put TCS on my watchlist", "start tracking AAPL", "watchlist NVDA") -- a passive tracking request, NOT a price alert (that's create_alert, which always names a trigger price like "below 180"), NOT a trade (that's place_order), and NOT asking for the stock's current status (that's ticker_question)
 watchlist_remove - removing a specific stock/company from their watchlist (e.g. "remove TCS from my watchlist", "stop tracking AAPL", "take Bajaj Finance off my watchlist")
+add_holding - recording a stock they ALREADY OWN into their portfolio at a cost basis they state themselves (self-reported, not a live-price trade) (e.g. "add 10 shares of AAPL to my portfolio at $150", "I already own 5 TCS at 4000, add it to my portfolio") -- NOT a new trade at today's price (that's place_order) and NOT tracking-only with no stated ownership/cost (that's watchlist_add)
 daily_briefing - asking for a pulled-together summary/digest of portfolio performance, recent rating changes, AND upcoming events all at once (e.g. "give me my briefing", "what's my daily update", "catch me up") -- NOT a plain "how's my portfolio doing" (that's portfolio_status, which has no rating-change/upcoming-event digest)
+end_voice_session - explicitly asking to end/stop the current voice session or stop listening (e.g. "end the session", "stop listening", "that's all for now", "goodbye") -- NOT logging out of the account or deleting anything, just stopping this hands-free conversation
 general - anything else, including generic finance chit-chat, greetings, small talk, or a message unrelated to the categories above
 
 {ticker_note}
@@ -751,11 +762,19 @@ def _handle_stock_discovery_request() -> str:
     used it). Recommending brand-new, unresearched securities is a real
     capability gap, not something to paper over with an LLM guessing at
     a plausible-sounding deflection each time -- one honest, consistent
-    answer beats a different vague one on every turn."""
+    answer beats a different vague one on every turn.
+
+    Points to the Screener (real filters over the Tracked Universe --
+    market cap, valuation, dividend yield, volume) as the actual way to
+    discover something new, rather than a flat refusal with nowhere to
+    go -- deterministic filtering over real data is a fundamentally
+    different (and fine) thing from an LLM naming unresearched picks,
+    which is the specific capability this function declines above."""
     return (
         "I can't discover or recommend brand-new stocks -- picking specific, unresearched securities is "
         "outside what this app does (same boundary as real estate: allocation-level guidance only, never "
-        "property- or security-specific). What I can do: tell you how a stock you already have in mind fits "
+        "property- or security-specific). What I can do: take you to the Screener to filter real stocks by "
+        "market cap, valuation, dividend yield, or volume, tell you how a stock you already have in mind fits "
         "your portfolio, or pull a full research report for a specific ticker you name."
     )
 
@@ -994,6 +1013,86 @@ def _handle_watchlist_remove(user_id: str, ticker: str, message: str) -> str:
     return f"Removed {ticker} from your watchlist."
 
 
+def _parse_avg_cost(message: str) -> "float | None":
+    """The per-share cost from a phrase like "at $150" or "@ 1090" --
+    deliberately requires the "at"/"@" marker (unlike _parse_quantity's
+    bare first-number grab) so a quantity and a cost can coexist in the
+    SAME message ("add 10 shares of AAPL at $150") without both regexes
+    matching the same number."""
+    match = _AVG_COST_RE.search(message)
+    if not match:
+        return None
+    cost = float(match.group(1).replace(",", ""))
+    return cost if cost > 0 else None
+
+
+def _handle_add_holding(user_id: str, ticker: str, message: str, history: list) -> str:
+    """Manual portfolio entry ("add 10 shares of AAPL to my portfolio
+    at $150") -- a SELF-REPORTED position at a cost basis the user
+    states, not a simulated trade at a live quote (that's
+    place_order's job). Same shape as POST /v1/portfolio's own "+ Add
+    Holding" flow, just reached via chat.
+
+    `ticker` must come from resolve_companies() on THIS message, not
+    classify_intent's history-carryover fallback -- same fix as
+    place_order/create_alert/watchlist_add (see _handle_place_order's
+    own docstring for the confirmed live bug this guards against).
+
+    Refuses to silently overwrite an existing holding -- db.upsert_
+    portfolio_holding REPLACES quantity/avg_cost rather than
+    accumulating (see its own docstring: this is a current-position
+    editor, not a transaction ledger), so blindly calling it again for
+    a ticker already held would silently discard the user's real,
+    previously-recorded cost basis. Directing them to the Portfolio
+    card instead of guessing how to combine the two is the same
+    "degrade honestly rather than fabricate" discipline the rest of
+    this app already uses for a failed quote/price lookup."""
+    if not ticker or has_unresolved_ticker_attempt(message):
+        return "I couldn't tell which stock you mean -- try naming a ticker or company, e.g. \"add 10 shares of AAPL to my portfolio at $150\"."
+
+    existing = {h["ticker"]: h for h in db.get_portfolio_holdings(user_id)}
+    if ticker in existing:
+        h = existing[ticker]
+        try:
+            currency = get_quote(ticker).get("currency", "USD")
+        except Exception:
+            currency = "USD"
+        symbol = currency_symbol(currency)
+        return (
+            f"You already hold {h['quantity']:g} shares of {ticker} at an average cost of "
+            f"{symbol}{h['avg_cost']:,.2f} -- to change that, edit it from the Portfolio card instead of "
+            "adding it again, so the existing record isn't lost."
+        )
+
+    # The avg-cost number is cut out of the text handed to _parse_quantity
+    # first -- confirmed by a test catching it live: "add AAPL to my
+    # portfolio at $150" has only ONE number in the whole message, so
+    # _parse_quantity's own bare first-number grab would otherwise read
+    # the cost's own "150" as the QUANTITY too. Only matters when a
+    # quantity is genuinely absent; a message stating both ("10 shares
+    # ... at $150") already has two distinct numbers, so this is a no-op
+    # for the common case.
+    avg_cost_match = _AVG_COST_RE.search(message)
+    quantity_text = message[:avg_cost_match.start()] + message[avg_cost_match.end():] if avg_cost_match else message
+    quantity = _parse_quantity(quantity_text)
+    avg_cost = _parse_avg_cost(message)
+    if quantity is None or avg_cost is None:
+        missing = (
+            "how many shares and your average cost per share" if quantity is None and avg_cost is None
+            else "how many shares" if quantity is None else "your average cost per share"
+        )
+        return f"Tell me {missing} for {ticker}, e.g. \"10 shares at $150\"."
+
+    try:
+        currency = get_quote(ticker).get("currency", "USD")
+    except Exception:
+        currency = "USD"  # degrade -- still records the holding, just without a live-confirmed currency symbol
+
+    db.upsert_portfolio_holding(user_id, ticker, quantity, avg_cost)
+    symbol = currency_symbol(currency)
+    return f"Added {quantity:g} shares of {ticker} to your portfolio at an average cost of {symbol}{avg_cost:,.2f}."
+
+
 def _handle_list_alerts(user_id: str) -> str:
     alerts = db.list_price_alerts(user_id)
     if not alerts:
@@ -1032,6 +1131,14 @@ def _handle_daily_briefing(user_id: str) -> dict:
     return briefing
 
 
+def _handle_end_voice_session() -> str:
+    """A fixed string, not an LLM call -- there's nothing to generate,
+    and the frontend keys off `intent == end_voice_session` specifically
+    (not this text) to actually stop listening, so the wording here is
+    purely what gets spoken/shown, never parsed."""
+    return "Ending the session -- just say \"Hey FinSight\" or tap Start whenever you want to talk again."
+
+
 def _handle_general(message: str, history: list) -> str:
     """Short, caveated LLM answer with no specific data context -- no
     portfolio/ticker to key off for this message, so this deliberately
@@ -1065,6 +1172,8 @@ _HANDLERS = {
     INTENT_LIST_ALERTS: lambda user_id, ticker, message, history: _handle_list_alerts(user_id),
     INTENT_WATCHLIST_ADD: lambda user_id, ticker, message, history: _handle_watchlist_add(user_id, ticker, message),
     INTENT_WATCHLIST_REMOVE: lambda user_id, ticker, message, history: _handle_watchlist_remove(user_id, ticker, message),
+    INTENT_ADD_HOLDING: lambda user_id, ticker, message, history: _handle_add_holding(user_id, ticker, message, history),
+    INTENT_END_VOICE_SESSION: lambda user_id, ticker, message, history: _handle_end_voice_session(),
     INTENT_GENERAL: lambda user_id, ticker, message, history: _handle_general(message, history),
 }
 

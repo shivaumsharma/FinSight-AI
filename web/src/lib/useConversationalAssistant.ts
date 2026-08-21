@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { VoiceInputHandle, VoiceState } from "@/components/VoiceInputButton";
 import type { ChatMessage } from "@/lib/types";
+import { getNavigationTarget } from "@/lib/chatNavigation";
 import { splitSentences } from "@/lib/splitSentences";
 
 const VOICE_MODE_STORAGE_KEY = "finsight-voice-mode";
@@ -18,6 +20,7 @@ const MAX_MIC_ERROR_RETRIES = 2;
 // caller: the barge-in promise-resolution fix, the mic-error auto-
 // retry cap, the "re-arm only after playback truly finishes" ordering.
 export function useConversationalAssistant() {
+  const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   // Distinct from "loaded, zero messages" -- a failed fetch must not
@@ -259,6 +262,12 @@ export function useConversationalAssistant() {
     };
     setMessages((prev) => [...prev, optimisticUser]);
 
+    // Set inside the try block below (from the reply's own intent) and
+    // read after it -- lets the end-of-function re-arm logic know
+    // whether THIS turn was "end the session" without threading intent
+    // through another ref, matching sessionActiveRef's existing
+    // stale-closure-avoidance pattern.
+    let endingSession = false;
     try {
       // AbortSignal.timeout -- same reasoning as synthesizeAndSpeak()'s
       // own fix above, applied to the actual chat call itself: without
@@ -281,6 +290,20 @@ export function useConversationalAssistant() {
         intent: data.intent, ticker: data.ticker, created_at: Date.now() / 1000,
       };
       setMessages((prev) => [...prev, assistantMessage]);
+
+      // Navigate to wherever this reply's result actually lives (e.g.
+      // watchlist_add -> /watchlist) -- confirmed live: adding a stock
+      // by voice succeeded server-side but never visibly landed
+      // anywhere, reading as "did that even work?". end_voice_session
+      // is handled below instead (it stops the mic, not the router),
+      // so it's deliberately excluded from getNavigationTarget's map.
+      if (data.intent === "end_voice_session") {
+        endingSession = true;
+      } else {
+        const target = getNavigationTarget(data.intent, data.ticker);
+        if (target) router.push(target);
+      }
+
       if (voiceMode || sessionActiveRef.current) await synthesizeAndSpeak(data.reply);
     } catch {
       setError("Couldn't reach the assistant. Try again.");
@@ -291,8 +314,15 @@ export function useConversationalAssistant() {
     // Re-arm the mic for the next turn -- only after the reply has
     // fully finished speaking (synthesizeAndSpeak above already
     // awaited that), and only if the user hasn't ended the session in
-    // the meantime.
-    if (sessionActiveRef.current) voiceInputRef.current?.start();
+    // the meantime (either by tapping End, or by just asking the
+    // assistant to end it -- same teardown either way).
+    if (endingSession) {
+      sessionActiveRef.current = false;
+      setSessionActive(false);
+      voiceInputRef.current?.stop();
+    } else if (sessionActiveRef.current) {
+      voiceInputRef.current?.start();
+    }
   }
 
   async function handleSend(e: React.FormEvent) {
