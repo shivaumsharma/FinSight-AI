@@ -36,11 +36,20 @@ FIELD_OPTIONS: dict[str, tuple[str, ...]] = {
 
 _ANSWER_RE = re.compile(r"ANSWER:\s*(.+)", re.IGNORECASE)
 
-# allam-2-7b, not a gpt-oss/reasoning model: same reasoning as
-# chat_router.py's CHAT_MODEL -- no hidden chain-of-thought tax, so it
-# reliably fits this module's tight 20-token budget. Was previously
-# pinned to llama-3.3-70b-versatile, which Groq has fully removed.
-_MODEL = "allam-2-7b"
+# openai/gpt-oss-20b, not allam-2-7b -- confirmed live during the voice-
+# assistant overhaul: allam-2-7b (this module's original model, chosen
+# for the same "no hidden chain-of-thought tax" reason chat_router.py's
+# CHAT_MODEL originally was) confidently answers "NONE" for perfectly
+# ordinary colloquial no's -- "nah not really" and "not interested" for
+# a plain Yes/No question -- not just genuinely ambiguous answers. Same
+# fix already applied to chat_router.py's own classify_intent() today:
+# gpt-oss-20b gets both of those right (and still correctly says NONE
+# for an actually-ambiguous "I'm not really sure"), as long as the
+# token budget is large enough to clear its hidden reasoning before it
+# reaches the final answer -- 20 was never enough for this reasoning
+# model, 400 was verified live.
+_MODEL = "openai/gpt-oss-20b"
+_MAX_TOKENS = 400
 
 
 def _build_prompt(options: tuple[str, ...], answer_text: str) -> str:
@@ -65,7 +74,7 @@ def classify_onboarding_answer(field: str, answer_text: str) -> Optional[str]:
 
     try:
         provider = HostedProvider(model=_MODEL)
-        raw = provider.generate(_build_prompt(options, answer_text), max_new_tokens=20)
+        raw = provider.generate(_build_prompt(options, answer_text), max_new_tokens=_MAX_TOKENS)
     except LLMProviderError:
         return None
 
