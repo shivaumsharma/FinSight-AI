@@ -96,6 +96,27 @@ def test_build_briefing_includes_portfolio_pnl(temp_db, monkeypatch):
     assert "800.00" in briefing["text"]  # 4 * $200
 
 
+def test_build_briefing_handles_a_holding_with_exactly_zero_pnl(temp_db, monkeypatch):
+    """Regression test: a holding bought at exactly today's quote (a
+    trade that just filled) has a real P&L of exactly 0.0 -- falsy in
+    Python. portfolio_summary.py's total_unrealized_pnl_pct used to
+    have a bare truthy check that treated 0.0 as "no value" and
+    produced pnl_pct=None while total_unrealized_pnl itself correctly
+    stayed 0.0; this function's own _portfolio_line only checked "is
+    pnl None", so the mismatch crashed formatting pnl_pct with a real
+    500 in production. Confirmed live via "buy 5 AAPL" -> "yes" ->
+    "give me my daily briefing" before this fix -- must not raise."""
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    temp_db.execute_order(user_id, "AAPL", "BUY", 5, 150.0, "USD")
+    monkeypatch.setattr("app.reporting.portfolio_summary.get_quote", lambda t: {"price": 150.0, "change_pct": 0.0, "previous_close": 150.0, "currency": "USD"})
+    monkeypatch.setattr(db_briefing, "HostedProvider", _FakeProvider)
+
+    briefing = db_briefing.build_briefing(user_id)
+
+    assert "1 holding" in briefing["text"]
+    assert "750.00" in briefing["text"]  # 5 * $150, and does not crash getting here
+
+
 def test_build_briefing_includes_a_single_rating_change_and_sets_ticker(temp_db, monkeypatch):
     user_id = temp_db.create_user("a@example.com", "h", "s")
     temp_db.add_watchlist_item(user_id, "TCS")

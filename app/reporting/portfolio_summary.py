@@ -89,7 +89,19 @@ def build_portfolio_view(user_id: str) -> dict:
         })
 
     total_unrealized_pnl = total_market_value - total_cost_basis if holdings else None
-    total_unrealized_pnl_pct = (total_unrealized_pnl / total_cost_basis * 100) if total_unrealized_pnl and total_cost_basis else None
+    # `is not None`, not a bare truthy check -- confirmed live: a
+    # position bought moments ago (fill price == current quote) has a
+    # perfectly real, meaningful P&L of exactly 0.0, which is falsy in
+    # Python. The old `if total_unrealized_pnl and total_cost_basis`
+    # treated that as "no value" and silently produced pnl_pct=None
+    # while total_unrealized_pnl itself stayed 0.0 -- a caller checking
+    # only "is pnl None" (daily_briefing.py's _portfolio_line) then
+    # crashed trying to format the still-None pnl_pct alongside it.
+    total_unrealized_pnl_pct = (
+        (total_unrealized_pnl / total_cost_basis * 100)
+        if total_unrealized_pnl is not None and total_cost_basis
+        else None
+    )
 
     return {
         "holdings": holdings,
