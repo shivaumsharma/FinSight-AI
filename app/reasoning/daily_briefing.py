@@ -65,7 +65,13 @@ def _portfolio_line(user_id: str) -> str:
 
     pnl = view["summary"].get("total_unrealized_pnl")
     pnl_pct = view["summary"].get("total_unrealized_pnl_pct")
-    if pnl is None:
+    # Both, not just pnl -- confirmed live: portfolio_summary.py had its
+    # own bug where these two could disagree (pnl a real 0.0, pnl_pct
+    # still None), which crashed the f-string below since only pnl was
+    # checked. Fixed at the source too, but checking both here as well
+    # means this line can never crash from a similar mismatch again,
+    # from this or any future caller of build_portfolio_view.
+    if pnl is None or pnl_pct is None:
         return f"Portfolio: {len(holdings)} holding(s), ${total_value:,.2f} total (USD equiv.)."
 
     direction = "up" if pnl >= 0 else "down"

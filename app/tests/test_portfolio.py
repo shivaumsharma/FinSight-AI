@@ -96,6 +96,29 @@ def test_add_list_remove_round_trip(client, monkeypatch, auth_headers):
     assert resp.json()["summary"]["total_market_value"] is None
 
 
+def test_summary_pnl_pct_is_zero_not_none_for_exactly_zero_pnl(client, monkeypatch, auth_headers):
+    """Regression test: a holding bought at exactly today's price (e.g.
+    an order that just filled) has a real, meaningful P&L of exactly
+    0.0 -- which is falsy in Python. total_unrealized_pnl_pct's old
+    `if total_unrealized_pnl and total_cost_basis` truthy check treated
+    that as "no value" and produced pnl_pct=None while
+    total_unrealized_pnl itself correctly stayed 0.0, a mismatch that
+    crashed app/reasoning/daily_briefing.py's _portfolio_line (only
+    total_unrealized_pnl was checked for None there) with a real 500 in
+    production. Confirmed live via the exact chat sequence "buy 5 AAPL"
+    -> "yes" -> "give me my daily briefing" before this fix."""
+    monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote(price=150.0))
+    monkeypatch.setattr(portfolio_summary, "get_quote", lambda ticker: _fake_quote(price=150.0))
+
+    resp = client.post("/v1/portfolio", json={"ticker": "aapl", "quantity": 10, "avg_cost": 150.0}, headers=auth_headers)
+    assert resp.status_code == 200
+
+    resp = client.get("/v1/portfolio", headers=auth_headers)
+    summary = resp.json()["summary"]
+    assert summary["total_unrealized_pnl"] == 0.0
+    assert summary["total_unrealized_pnl_pct"] == 0.0  # not None
+
+
 def test_re_adding_the_same_ticker_replaces_quantity_and_avg_cost(client, monkeypatch, auth_headers):
     monkeypatch.setattr(main, "get_quote", lambda ticker: _fake_quote())
     monkeypatch.setattr(portfolio_summary, "get_quote", lambda ticker: _fake_quote())
