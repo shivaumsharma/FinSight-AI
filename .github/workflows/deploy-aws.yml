@@ -35,8 +35,22 @@ jobs:
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
         run: |
           IMAGE_URI="$ECR_REGISTRY/finsight-backend:${{ github.sha }}"
-          docker build -t "$IMAGE_URI" .
-          docker push "$IMAGE_URI"
+          # ECR tags are immutable -- re-running this workflow for a commit
+          # whose image was already pushed (e.g. manually re-triggering
+          # after the EB deploy step below failed for an unrelated reason,
+          # downstream of a successful push) would otherwise always fail
+          # here with "tag invalid: ... already exists in the
+          # 'finsight-backend' repository and cannot be overwritten".
+          # Confirmed live 2026-08-21: exactly this, re-running for an
+          # already-pushed commit after a hung EC2 instance broke the first
+          # attempt's later steps. Checking first makes this step
+          # idempotent -- reuse the existing image instead of erroring.
+          if aws ecr describe-images --repository-name finsight-backend --image-ids imageTag="${{ github.sha }}" >/dev/null 2>&1; then
+            echo "Image already exists in ECR for this commit -- skipping build/push."
+          else
+            docker build -t "$IMAGE_URI" .
+            docker push "$IMAGE_URI"
+          fi
           echo "uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
 
       - name: Render Dockerrun.aws.json with the freshly-pushed image
