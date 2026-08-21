@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { GetUserMediaTimeoutError, getUserMediaWithTimeout } from "@/lib/getUserMediaWithTimeout";
 
 const SAMPLE_RATE = 16000; // must match app/data/sarvam_realtime_client.py's connect() call exactly
 const CHUNK_SAMPLES = 4096; // ScriptProcessorNode buffer size, in samples at SAMPLE_RATE (~256ms/chunk)
@@ -120,7 +121,7 @@ export function useWakeWordListener(onWakeDetected: (text: string) => void) {
     pausedRef.current = false;
     setErrorMessage(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await getUserMediaWithTimeout();
       streamRef.current = stream;
 
       const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -160,10 +161,14 @@ export function useWakeWordListener(onWakeDetected: (text: string) => void) {
       silentGain.connect(audioContext.destination);
 
       await openWs();
-    } catch {
+    } catch (err) {
       stoppedRef.current = true;
       setState("error");
-      setErrorMessage("Microphone permission denied. Enable it in your browser settings to use the wake-word listener.");
+      setErrorMessage(
+        err instanceof GetUserMediaTimeoutError
+          ? "Didn't get a response to the microphone permission prompt. Check for a popup near your browser's address bar, allow access, and try again."
+          : "Microphone permission denied. Enable it in your browser settings to use the wake-word listener."
+      );
     }
   }, [openWs]);
 
