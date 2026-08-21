@@ -33,7 +33,7 @@ import re
 import time
 
 from app.api import db
-from app.core.company_resolver import resolve_companies
+from app.core.company_resolver import has_unresolved_ticker_attempt, resolve_companies
 from app.core.currency import currency_symbol
 from app.core.llm_provider import HostedProvider, LLMProviderError
 from app.data.market_data import TickerNotFoundError, get_quote
@@ -780,12 +780,31 @@ def _handle_place_order(user_id: str, ticker: str, message: str, history: list) 
     like "sell everything rated Sell" can still be handled -- checked
     FIRST, below, before `ticker` is ever consulted (a batch command
     legitimately names no single ticker, and any carried-over ticker
-    from earlier conversation would be irrelevant to it anyway)."""
+    from earlier conversation would be irrelevant to it anyway).
+
+    A message that EXPLICITLY names something that fails to resolve
+    must never fall back to guessing a different ticker discussed
+    earlier -- confirmed live: "buy 10 ZZZZ" (an unresolvable ticker)
+    silently proposed buying a completely different, unrelated ticker
+    from an earlier turn instead of failing clearly. Checked via
+    has_unresolved_ticker_attempt(), NOT a bare
+    `not resolve_companies(message)` truthiness check -- this handler
+    has its own real two-turn sub-flow (the no-quantity "how many
+    shares of {ticker} would you like to buy?" prompt below) that
+    deliberately expects a ticker-LESS reply like "buy 10" or "10",
+    relying on the exact same history-carryover classify_intent()
+    already did. A blanket resolve_companies(message) truthiness check
+    can't tell "buy 10 ZZZZ" (a real, failed attempt) apart from
+    "buy 10" (names no ticker at all, carryover is correct) -- both
+    return [] alike -- so it would silently break that legitimate
+    continuation. has_unresolved_ticker_attempt() only fires on an
+    actual leftover ticker-shaped token, not on a message that simply
+    omits one."""
     batch = _parse_batch_command(message)
     if batch is not None:
         return _propose_batch_order(user_id, batch)
 
-    if not ticker:
+    if not ticker or has_unresolved_ticker_attempt(message):
         return "I couldn't tell which stock you mean -- try naming a ticker or company, e.g. \"buy 5 AAPL\"."
 
     side = _parse_side(message)
@@ -884,8 +903,18 @@ def _handle_create_alert(user_id: str, ticker: str, message: str, history: list)
     turn; the one genuinely risky case (auto_execute=1, a FUTURE
     unattended trade) is instead gated by requiring the separately-
     worded opt-in _parse_alert_command demands, not a second turn
-    here."""
-    if not ticker:
+    here.
+
+    `ticker` must come from resolve_companies() on THIS message, not
+    classify_intent's history-carryover fallback -- same bug class
+    confirmed live for place_order/watchlist_add ("buy 10 ZZZZ" /
+    "add asdkfjaslkdfj" silently acting on an unrelated earlier
+    ticker instead of failing clearly). Arguably higher-stakes here
+    than place_order: an auto_execute alert is a FUTURE unattended
+    trade the user won't be watching for, so setting it on the wrong
+    ticker could go unnoticed far longer than an immediate mistaken
+    buy."""
+    if not ticker or not resolve_companies(message):
         return "I couldn't tell which stock you mean -- try naming a ticker or company, e.g. \"alert me if AAPL drops below 180\"."
 
     parsed = _parse_alert_command(message)
@@ -907,7 +936,7 @@ def _handle_create_alert(user_id: str, ticker: str, message: str, history: list)
     return f"Alert set: if {ticker} {verb} {symbol}{parsed['target_price']:,.2f}, I'll {action_bit} (simulated)."
 
 
-def _handle_watchlist_add(user_id: str, ticker: str) -> str:
+def _handle_watchlist_add(user_id: str, ticker: str, message: str) -> str:
     """Adds a ticker to the watchlist and confirms it -- same single-
     turn, no-confirmation shape as _handle_create_alert above (a
     reversible, non-monetary action, not a trade). The get_quote()
@@ -916,8 +945,22 @@ def _handle_watchlist_add(user_id: str, ticker: str) -> str:
     classify_intent(), and db.add_watchlist_item is INSERT OR IGNORE
     with no dependency on live market data, so a quote hiccup should
     never block a legitimate add -- same reasoning _handle_create_alert
-    already applies to its own currency-symbol lookup."""
-    if not ticker:
+    already applies to its own currency-symbol lookup.
+
+    Confirmed live: classify_intent()'s ticker can come from
+    _most_recent_ticker(history) when resolve_companies(message) finds
+    nothing in the CURRENT message -- exactly right for a follow-up
+    question ("is it a good buy?"), but wrong here: "remove ZZZZ from
+    my watchlist" (an unresolvable ticker) silently removed a
+    completely different, unrelated ticker from two turns earlier
+    instead of failing clearly. Re-running resolve_companies on just
+    this message (not trusting classify_intent's ticker blindly) is
+    the deterministic way to tell "this message named a real company"
+    apart from "classify_intent guessed from stale context" -- a write
+    action naming something that fails to resolve must surface as
+    "couldn't identify it", never silently act on whatever was talked
+    about earlier."""
+    if not ticker or not resolve_companies(message):
         return "I couldn't tell which stock you mean -- try naming a ticker or company, e.g. \"add AAPL to my watchlist\"."
 
     already_present = ticker in {item["ticker"] for item in db.get_watchlist(user_id)}
@@ -934,10 +977,13 @@ def _handle_watchlist_add(user_id: str, ticker: str) -> str:
         return f"Added {ticker} to your watchlist."  # degrade -- the add itself already succeeded above
 
 
-def _handle_watchlist_remove(user_id: str, ticker: str) -> str:
+def _handle_watchlist_remove(user_id: str, ticker: str, message: str) -> str:
     """Removes a ticker from the watchlist and confirms it. No quote
-    lookup needed -- removal carries no price to report."""
-    if not ticker:
+    lookup needed -- removal carries no price to report. Same
+    resolve_companies(message)-must-match-the-CURRENT-message
+    requirement as _handle_watchlist_add above, for the identical
+    reason -- confirmed live against the identical failure mode."""
+    if not ticker or not resolve_companies(message):
         return "I couldn't tell which stock you mean -- try naming a ticker or company, e.g. \"remove AAPL from my watchlist\"."
 
     was_present = ticker in {item["ticker"] for item in db.get_watchlist(user_id)}
@@ -1017,8 +1063,8 @@ _HANDLERS = {
     INTENT_PLACE_ORDER: lambda user_id, ticker, message, history: _handle_place_order(user_id, ticker, message, history),
     INTENT_CREATE_ALERT: lambda user_id, ticker, message, history: _handle_create_alert(user_id, ticker, message, history),
     INTENT_LIST_ALERTS: lambda user_id, ticker, message, history: _handle_list_alerts(user_id),
-    INTENT_WATCHLIST_ADD: lambda user_id, ticker, message, history: _handle_watchlist_add(user_id, ticker),
-    INTENT_WATCHLIST_REMOVE: lambda user_id, ticker, message, history: _handle_watchlist_remove(user_id, ticker),
+    INTENT_WATCHLIST_ADD: lambda user_id, ticker, message, history: _handle_watchlist_add(user_id, ticker, message),
+    INTENT_WATCHLIST_REMOVE: lambda user_id, ticker, message, history: _handle_watchlist_remove(user_id, ticker, message),
     INTENT_GENERAL: lambda user_id, ticker, message, history: _handle_general(message, history),
 }
 

@@ -601,6 +601,52 @@ def resolve_companies(question: str) -> List[str]:
     return found
 
 
+# Short all-caps words that legitimately appear in a trading command's
+# OWN vocabulary (typed/spoken in caps, or normalized upstream) but are
+# never themselves an attempted ticker -- excluded so
+# has_unresolved_ticker_attempt() below can tell "BUY 10" (no ticker
+# named at all -- a genuine continuation, e.g. answering "how many
+# shares of AAPL would you like to buy?") apart from "BUY 10 ZZZZ" (an
+# explicit, failed attempt to name a specific ticker). Grows the same
+# way _STOPWORDS above does: as a real false positive is confirmed.
+_TRADING_COMMAND_WORDS = {
+    "BUY", "SELL", "HOLD", "IF", "AT", "TO", "OF", "THE", "FOR", "AND",
+    "IS", "IT", "ALL", "ABOVE", "BELOW", "AUTO", "TODAY", "NOW", "STOCK",
+    "ME", "MY",
+}
+
+
+def has_unresolved_ticker_attempt(question: str) -> bool:
+    """True if `question` contains a bare 2-5 letter all-caps token
+    that looks like an attempted ticker symbol (matches _TICKER_TOKEN,
+    the same pattern resolve_companies() itself checks) but isn't a
+    real one in either the US or NSE universe -- e.g. "ZZZZ" in "buy
+    10 ZZZZ".
+
+    Exists for callers that need to tell that case -- a real, failed
+    attempt to name a specific ticker, which must never silently fall
+    back to a DIFFERENT ticker carried over from earlier conversation
+    -- apart from a message that names no ticker at all, like "buy 10"
+    answering "how many shares of AAPL would you like to buy?", where
+    that same carryover is exactly correct. A bare
+    `not resolve_companies(question)` truthiness check can't
+    distinguish these: both return `[]` alike. Confirmed live: "buy 10
+    ZZZZ" silently proposed a completely different, unrelated ticker
+    instead of failing clearly (see _handle_place_order's own
+    docstring)."""
+    index = _load_index()
+    nse_index = _load_nse_index()
+    for token in _TICKER_TOKEN.findall(question):
+        if token in _TRADING_COMMAND_WORDS:
+            continue
+        if token in index["tickers"]:
+            continue
+        if f"{token}.NS" in nse_index["tickers"]:
+            continue
+        return True
+    return False
+
+
 def suggest_companies(prefix: str, limit: int = 8) -> List[dict]:
     """
     Autocomplete suggestions for a partial ticker or company name --

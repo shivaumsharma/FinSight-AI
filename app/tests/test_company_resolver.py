@@ -87,6 +87,47 @@ def test_similar_nse_company_names_disambiguate_correctly():
     assert _resolve("is bajaj finserv a good buy") == ["BAJAJFINSV.NS"]
 
 
+# ---------------------------------------------------------------- has_unresolved_ticker_attempt
+
+def _has_unresolved(question: str) -> bool:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    from app.core.company_resolver import has_unresolved_ticker_attempt
+
+    return has_unresolved_ticker_attempt(question)
+
+
+def test_has_unresolved_ticker_attempt_true_for_a_fake_bare_ticker():
+    # The exact live-confirmed bug this exists to catch: "ZZZZ" looks
+    # like someone trying to name a ticker, and isn't a real one.
+    assert _has_unresolved("buy 10 ZZZZ") is True
+
+
+def test_has_unresolved_ticker_attempt_false_for_a_real_ticker():
+    assert _has_unresolved("buy 10 AAPL") is False
+
+
+def test_has_unresolved_ticker_attempt_false_for_a_quantity_only_continuation():
+    # No ticker-shaped token at all -- must NOT be flagged, since a
+    # ticker-less reply like this is exactly what a real two-turn
+    # place_order continuation ("how many shares of AAPL would you
+    # like to buy?" -> "buy 10") relies on carrying over correctly.
+    assert _has_unresolved("buy 10") is False
+    assert _has_unresolved("10") is False
+
+
+def test_has_unresolved_ticker_attempt_false_for_an_all_caps_continuation():
+    # Same as above, but fully uppercase -- BUY/SELL must not
+    # themselves be mistaken for a failed ticker attempt.
+    assert _has_unresolved("BUY 10") is False
+    assert _has_unresolved("SELL 10") is False
+
+
+def test_has_unresolved_ticker_attempt_false_for_an_nse_ticker():
+    assert _has_unresolved("buy 10 TCS") is False
+
+
 # ---------------------------------------------------------------- suggest_companies
 
 def _suggest(prefix: str, limit: int = 8):
