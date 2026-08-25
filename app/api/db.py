@@ -301,6 +301,27 @@ def init_db() -> None:
             conn.execute("ALTER TABLE orders ADD COLUMN rationale TEXT")
         except sqlite3.OperationalError:
             pass  # column already exists
+        # Proposed-but-not-yet-confirmed chat orders (chat_router.py's
+        # "buy 10 AAPL" -> "yes" two-turn flow). Was a process-local
+        # in-memory dict -- worked fine on this app's actual current
+        # single-worker/single-instance deploy, but silently broke the
+        # instant that changed: Turn 1 (the proposal) and Turn 2 (the
+        # "yes") landing on two different Gunicorn/Uvicorn workers or
+        # autoscaled instances would leave the confirming worker with
+        # no memory of the proposal, dropping the trade with no error
+        # shown to the user. One row per user_id (a second proposal
+        # always replaces the first, same semantics the dict already
+        # had) -- see set_pending_order/get_pending_order/
+        # pop_pending_order below.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pending_orders (
+                user_id TEXT PRIMARY KEY,
+                legs_json TEXT NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        )
         # One flat per-user log, not a separate conversations/threading
         # table -- see chat_router.py's own docstring for why a single
         # continuous history is enough for this feature's scope.
@@ -1210,6 +1231,40 @@ def execute_order(
         "new_holding_quantity": new_quantity,
         "rationale": rationale,
     }
+
+
+def set_pending_order(user_id: str, legs: list) -> None:
+    """Stores/replaces this user's proposed-but-unconfirmed chat order
+    (chat_router.py's confirm-then-execute flow). A second proposal for
+    the same user always replaces the first -- the old dict-based
+    version had the same "last write wins" semantics."""
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO pending_orders (user_id, legs_json, created_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET legs_json=excluded.legs_json, created_at=excluded.created_at",
+            (user_id, json.dumps(legs), time.time()),
+        )
+
+
+def get_pending_order(user_id: str) -> Optional[dict]:
+    """{"legs": [...]}, or None if there's no pending order for this
+    user -- read-only, unlike pop_pending_order below (chat_router.py's
+    confirmation-detection check needs to peek without clearing it,
+    since an ambiguous reply clears it via a separate explicit pop)."""
+    with _connect() as conn:
+        row = conn.execute("SELECT legs_json FROM pending_orders WHERE user_id=?", (user_id,)).fetchone()
+    return {"legs": json.loads(row[0])} if row is not None else None
+
+
+def pop_pending_order(user_id: str) -> Optional[dict]:
+    """Same shape as get_pending_order, but atomically clears the row
+    too -- for the two call sites that consume the pending order
+    (confirmed execution, explicit cancellation, or an unrelated
+    message superseding it) rather than just checking it."""
+    with _connect() as conn:
+        row = conn.execute("SELECT legs_json FROM pending_orders WHERE user_id=?", (user_id,)).fetchone()
+        conn.execute("DELETE FROM pending_orders WHERE user_id=?", (user_id,))
+    return {"legs": json.loads(row[0])} if row is not None else None
 
 
 def list_orders(user_id: str, limit: int = 20) -> list:

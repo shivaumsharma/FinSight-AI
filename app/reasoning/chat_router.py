@@ -167,15 +167,15 @@ DISCLAIMER_NOTE = (
 # process deployment everywhere else (jobs.py's ThreadPoolExecutor
 # being the clearest precedent), so there's no multi-instance scenario
 # where one instance's pending order needs to be visible to another.
-# A pending order is deliberately ephemeral: lost on a process
-# restart just means the user re-issues the command, the same
-# "no harm done" property any other in-flight, unconfirmed HTTP
-# request already has. Each entry is
+# Pending-order state lives in db.py's pending_orders table (see
+# set_pending_order/get_pending_order/pop_pending_order), not an
+# in-memory dict -- a process-local dict silently drops a "yes" that
+# lands on a different worker/instance than the one that made the
+# proposal, with no error shown to the user. Each entry is
 # {"legs": [{"ticker", "side", "quantity", "price", "currency", "rationale"}, ...]}
 # -- always a list, even for a single order, so the batch feature
 # (Feature 1) and the single-order path share one confirm/execute
 # implementation instead of two parallel ones.
-_pending_orders: dict = {}
 
 _BUY_RE = re.compile(r"\bbuy\b", re.IGNORECASE)
 _SELL_RE = re.compile(r"\bsell\b", re.IGNORECASE)
@@ -281,14 +281,14 @@ def _pending_order_ticker(pending: dict) -> "str | None":
 def _execute_pending_order(user_id: str) -> str:
     """Calls db.execute_order for every leg of the user's pending order
     (always present when this is called -- handle_chat_message only
-    calls it after confirming _pending_orders[user_id] exists), then
-    clears the pending state regardless of outcome -- a failed leg must
-    never leave a stale, already-shown proposal sitting around to be
-    silently re-confirmed by a later, unrelated "yes". Reports exactly
-    which legs filled and which didn't (Feature 1's own acceptance
-    requirement) rather than aborting the whole batch on one failure or
-    silently skipping the failure."""
-    pending = _pending_orders.pop(user_id, None)
+    calls it after confirming a pending order exists for this user),
+    then clears the pending state regardless of outcome -- a failed leg
+    must never leave a stale, already-shown proposal sitting around to
+    be silently re-confirmed by a later, unrelated "yes". Reports
+    exactly which legs filled and which didn't (Feature 1's own
+    acceptance requirement) rather than aborting the whole batch on one
+    failure or silently skipping the failure."""
+    pending = db.pop_pending_order(user_id)
     if pending is None:
         return "There's no pending order to confirm."
 
@@ -441,7 +441,7 @@ def suggest_quantity(user_id: str, ticker: str, price: float) -> "tuple[float, s
 def _propose_batch_order(user_id: str, batch: dict) -> str:
     """Turn 1 of the batch confirm-then-execute flow -- expands the
     recognized batch type into concrete priced legs and stores them as
-    this user's pending order, same _pending_orders shape (and same
+    this user's pending order, same shape (and same
     _execute_pending_order path) a single order uses. The confirmation
     always shows the FULL expanded list (this feature's own explicit
     acceptance requirement) -- never a blanket "confirm the batch?" for
@@ -457,7 +457,7 @@ def _propose_batch_order(user_id: str, batch: dict) -> str:
         note_bit = (" (" + "; ".join(notes) + ")") if notes else ""
         return empty_message + note_bit
 
-    _pending_orders[user_id] = {"legs": legs}
+    db.set_pending_order(user_id, legs)
 
     leg_list = ", ".join(f"{l['quantity']:g} {l['ticker']}" for l in legs)
     note_bit = (" Note: " + "; ".join(notes) + ".") if notes else ""
@@ -870,9 +870,10 @@ def _handle_place_order(user_id: str, ticker: str, message: str, history: list) 
         quantity, sizing_note = suggestion
 
     rationale = "User-initiated via chat" if sizing_note is None else f"User-initiated via chat, sized via suggestion ({sizing_note})"
-    _pending_orders[user_id] = {
-        "legs": [{"ticker": ticker, "side": side, "quantity": quantity, "price": price, "currency": currency, "rationale": rationale}],
-    }
+    db.set_pending_order(
+        user_id,
+        [{"ticker": ticker, "side": side, "quantity": quantity, "price": price, "currency": currency, "rationale": rationale}],
+    )
 
     if sizing_note is not None:
         # Confirming or overriding the suggestion is still an explicit
@@ -1200,16 +1201,16 @@ def handle_chat_message(user_id: str, message: str, history: list = None) -> dic
     "yes" to something else entirely."""
     history = history or []
 
-    pending = _pending_orders.get(user_id)
+    pending = db.get_pending_order(user_id)
     if pending is not None:
         confirmation = _parse_confirmation(message)
         if confirmation == "yes":
             reply = _execute_pending_order(user_id)
             return {"reply": reply, "intent": INTENT_PLACE_ORDER, "ticker": _pending_order_ticker(pending)}
         if confirmation == "no":
-            _pending_orders.pop(user_id, None)
+            db.pop_pending_order(user_id)
             return {"reply": "Cancelled -- no order placed.", "intent": INTENT_PLACE_ORDER, "ticker": None}
-        _pending_orders.pop(user_id, None)
+        db.pop_pending_order(user_id)
 
     classification = classify_intent(message, history)
     intent = classification["intent"]
