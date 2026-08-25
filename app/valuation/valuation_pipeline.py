@@ -1,7 +1,9 @@
 import pandas as pd
 
 from app.core.currency import currency_symbol
+from app.data.market_data import get_benchmark_history
 from app.valuation.dcf_engine import DCFEngine
+from app.valuation.ddm_engine import DDMEngine
 from app.valuation.fcff_engine import FCFFEngine
 from app.valuation.wacc_engine import WACCEngine
 from app.valuation.sensitivity_analysis import SensitivityAnalysis
@@ -68,9 +70,59 @@ DEFAULT_TERMINAL_GROWTH_RATE = 0.04
 # conservative middle estimate -- clearly above the US figure, well
 # below raw current growth -- pending the same kind of empirical
 # backtest (scripts/phase2_backtest.py) that justified 4% for the US.
+#
+# USD risk_free_rate below is a FALLBACK ONLY -- see
+# _live_us_risk_free_rate(): __init__ tries a live 10Y Treasury yield
+# (^TNX) first and only falls back to this constant if that fetch
+# fails, closing the "hardcoded, no live source" gap
+# scripts/wacc_capm_audit.py flagged. INR has no equivalent live
+# fetch wired in (no free yfinance-covered India 10Y G-Sec series
+# confirmed), so it stays a cited approximation, unchanged.
+#
+# USD equity risk premium was 6.00% (a round, undocumented guess) --
+# replaced with 4.45%, Aswath Damodaran's published US implied ERP as
+# of his July 2026 data update (implied ERP is a forward-looking,
+# market-priced estimate -- back out of current index price + expected
+# cash flows -- not a historical-average guess; see
+# https://aswathdamodaran.blogspot.com/2026/03/the-price-of-risk-equity-risk-premium.html
+# and his Data Update series for the same year). This is a real,
+# meaningful change to cost of equity, not just a citation: ERP is
+# multiplied by beta in CAPM, so lowering it disproportionately raises
+# intrinsic value for higher-beta names -- which, per
+# scripts/wacc_capm_audit.py, is disproportionately the mega-cap/
+# high-growth category the DCF has been undervaluing. Re-run that
+# script and scripts/canonical_accuracy.py after this change lands to
+# measure the actual effect, not just assume it helps. INR ERP is kept
+# as its existing risk-free-rate-linked approximation (no equivalent
+# India implied-ERP series sourced here).
 RISK_FREE_RATE_BY_CURRENCY = {"USD": 0.04, "INR": 0.07}
-MARKET_RISK_PREMIUM_BY_CURRENCY = {"USD": 0.06, "INR": 0.07}
+MARKET_RISK_PREMIUM_BY_CURRENCY = {"USD": 0.0445, "INR": 0.07}
 TERMINAL_GROWTH_RATE_BY_CURRENCY = {"USD": DEFAULT_TERMINAL_GROWTH_RATE, "INR": 0.05}
+
+# ^TNX's own reported "Close" is already the yield in percentage-point
+# units (e.g. 4.696 means 4.696%, confirmed against a live fetch --
+# NOT the old Yahoo convention of yield*10), so dividing by 100 alone
+# converts it to the decimal WACCEngine expects.
+_TNX_TICKER = "^TNX"
+
+
+def _live_us_risk_free_rate() -> float:
+    """Latest 10-year Treasury yield (^TNX) as a decimal, replacing the
+    old hardcoded 4.00% guess with a real, dated market rate. Falls
+    back to RISK_FREE_RATE_BY_CURRENCY["USD"] on any fetch failure or
+    empty/malformed response -- same degrade-not-raise contract every
+    other get_benchmark_history() caller in this codebase already
+    follows (see alpha_factors.py's interest-rate-sensitivity factor,
+    which fetches this exact same series for a different purpose and
+    benefits from get_benchmark_history's own 6h cache, so this adds
+    no new network cost on a run that already computes that factor)."""
+    history = get_benchmark_history(_TNX_TICKER, period="5d")
+    if history is None or history.empty or "Close" not in history:
+        return RISK_FREE_RATE_BY_CURRENCY["USD"]
+    try:
+        return float(history["Close"].iloc[-1]) / 100
+    except (ValueError, TypeError):
+        return RISK_FREE_RATE_BY_CURRENCY["USD"]
 
 # A user's saved risk_tolerance (app/api/db.py's users.risk_tolerance,
 # see PATCH /v1/auth/risk-tolerance) nudges the discount rate applied
@@ -121,7 +173,8 @@ SENSITIVITY_WACC_OFFSETS = [-0.02, -0.01, 0.0, 0.01, 0.02]
 
 
 class ValuationPipeline:
-  def __init__(self,financial_df,market_cap,beta,ticker=None,currency=None,risk_tolerance="Moderate"):
+  def __init__(self,financial_df,market_cap,beta,ticker=None,currency=None,risk_tolerance="Moderate",
+               risk_free_rate_override=None):
     self.financial_df=(financial_df)
     self.market_cap=(market_cap)
     self.beta=(beta)
@@ -138,7 +191,25 @@ class ValuationPipeline:
     # breaking valuation entirely.
     self.currency = currency or "USD"
     self.risk_tolerance = risk_tolerance or "Moderate"
-    self.risk_free_rate = RISK_FREE_RATE_BY_CURRENCY.get(self.currency, RISK_FREE_RATE_BY_CURRENCY["USD"])
+    # risk_free_rate_override exists ONLY for point-in-time callers
+    # (scripts/phase2_backtest.py) that must value a company "as of" a
+    # past date -- _live_us_risk_free_rate() below always fetches
+    # TODAY's Treasury yield, which would be a genuine look-ahead leak
+    # if used for a historical as-of valuation (this pipeline's other
+    # no-look-ahead care -- point-in-time financials, trailing beta --
+    # would be undermined by silently discounting a 2025 cash flow at
+    # 2026's rate). None (the default) preserves live-fetch behavior
+    # for every real-time caller (ValuationTool), which is exactly what
+    # a live report should use.
+    if risk_free_rate_override is not None:
+        self.risk_free_rate = risk_free_rate_override
+    elif (currency or "USD") == "USD":
+        # USD gets a live 10Y Treasury yield (see _live_us_risk_free_rate's
+        # own docstring for the fallback); every other currency keeps the
+        # existing cited-approximation constant, unchanged.
+        self.risk_free_rate = _live_us_risk_free_rate()
+    else:
+        self.risk_free_rate = RISK_FREE_RATE_BY_CURRENCY.get(self.currency, RISK_FREE_RATE_BY_CURRENCY["USD"])
     # Applied as an ADDITION to the currency-driven risk-free rate above,
     # not a replacement -- see RISK_TOLERANCE_WACC_ADJUSTMENT_PCT's own
     # comment. Defaults to "Moderate" (0.0 adjustment), so any existing
@@ -168,6 +239,14 @@ class ValuationPipeline:
         # about the same ticker within VALUATION_CACHE_TTL_SECONDS, since
         # every other component of this key is identical between them.
         self.risk_tolerance,
+        # self.risk_free_rate is no longer a pure function of currency
+        # for USD (see _live_us_risk_free_rate) -- rounded to 4dp
+        # (basis-point precision) so this cache stays genuinely
+        # content-addressed: a stale cache entry from an earlier
+        # Treasury-yield reading must not be served once the live rate
+        # has actually moved, matching this cache's own "correctness,
+        # not just a storage bound" design (see module docstring above).
+        round(self.risk_free_rate, 4),
     )
 
   def run_valuation(self):
@@ -226,8 +305,16 @@ class ValuationPipeline:
             f"derived from relative valuation and sentiment."
         )
 
+    # Computed ONCE and used consistently everywhere terminal growth
+    # matters below (forecast_fcff's fade target, DCFEngine's terminal
+    # value, MonteCarloDCFEngine's perturbation base, and the reported
+    # value) -- see FCFFEngine.quality_terminal_growth_adjustment's own
+    # docstring for why computing it independently in each place would
+    # risk a real discontinuity, not just an inconsistency.
+    effective_terminal_growth_rate = self.terminal_growth_rate + fcff_engine.quality_terminal_growth_adjustment()
+
     revenue_forecasts=fcff_engine.forecast_revenue()
-    fcff_forecasts=fcff_engine.forecast_fcff(terminal_growth_rate=self.terminal_growth_rate)
+    fcff_forecasts=fcff_engine.forecast_fcff(terminal_growth_rate=effective_terminal_growth_rate)
 
     # forecast_fcff() returns None (not a crash) when the revenue CAGR
     # it needs for the fade math isn't computable -- fewer than two
@@ -294,10 +381,24 @@ class ValuationPipeline:
             "below is instead derived from relative valuation and sentiment."
         )
 
+    # Dividend discount model -- a genuinely independent cross-check
+    # from the FCFF-DCF above, not a variant of it (see DDMEngine's own
+    # docstring). Computed unconditionally alongside DCF, not gated on
+    # DCF's own success -- scoped to consistent dividend payers only
+    # (DDMEngine.is_dividend_payer), so it's None for the vast majority
+    # of companies (any non-payer, or a payer with too short/volatile a
+    # track record) rather than attempting a distorted read outside
+    # where the model's own assumption (a durable, growing payout)
+    # actually holds.
+    ddm_value = DDMEngine(
+        financial_df=self.financial_df,
+        cost_of_equity=wacc_engine.calculate_cost_of_equity(),
+    ).calculate_intrinsic_value()
+
     dcf_engine=(DCFEngine(
         forecast_fcff_df=fcff_forecasts,
         discount_rate=raw_wacc,
-        terminal_growth_rate=self.terminal_growth_rate,
+        terminal_growth_rate=effective_terminal_growth_rate,
     ))
 
     # The engine floors the WACC actually used internally if raw_wacc
@@ -359,7 +460,7 @@ class ValuationPipeline:
             fcff_engine=fcff_engine,
             base_growth_rate=fcff_engine.calculate_revenue_cagr(),
             base_wacc=wacc_used,
-            base_terminal_growth=self.terminal_growth_rate,
+            base_terminal_growth=effective_terminal_growth_rate,
             total_debt=total_debt,
             cash=cash,
             shares_outstanding=shares_outstanding,
@@ -375,9 +476,10 @@ class ValuationPipeline:
     "raw_wacc": raw_wacc,
     "wacc_floored": wacc_info["floored"],
     "wacc_floor_note": wacc_floor_note,
-    "terminal_growth_rate": self.terminal_growth_rate,
+    "terminal_growth_rate": effective_terminal_growth_rate,
     "sensitivity_analysis":sensitivity_analysis,
     "monte_carlo_values": monte_carlo_values,
+    "ddm_value": ddm_value,
     }
 
   def _unavailable_result(self, reason: str) -> dict:
@@ -398,6 +500,7 @@ class ValuationPipeline:
           "terminal_growth_rate": self.terminal_growth_rate,
           "sensitivity_analysis": None,
           "monte_carlo_values": None,
+          "ddm_value": None,
       }
 
   def _get_shares_outstanding(self):

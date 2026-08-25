@@ -170,7 +170,7 @@ def _point_in_time_statement(raw_df, as_of_date):
     return raw_df[keep_cols]
 
 
-def run_one(ticker, category, as_of_date, today_date, market_history):
+def run_one(ticker, category, as_of_date, today_date, market_history, tnx_history=None):
     stock = yf.Ticker(ticker)
 
     # 10y, not 2y: RelativeValuationEngine looks up a year-end close
@@ -231,6 +231,29 @@ def run_one(ticker, category, as_of_date, today_date, market_history):
         "beta": beta,
     }
 
+    # ValuationPipeline now fetches a LIVE 10Y Treasury yield for a
+    # real-time report (see valuation_pipeline.py's _live_us_risk_free_rate)
+    # -- using that here would value a company "as of" a past date at
+    # TODAY's rate, a look-ahead leak this script otherwise goes out of
+    # its way to avoid (point-in-time financials, trailing beta ending
+    # at as_of_date). risk_free_rate_override supplies the ^TNX close
+    # nearest as_of_date instead, same "value as of the historical
+    # date" discipline as price_as_of/beta above. None (unchanged
+    # live-fetch behavior) only if tnx_history itself is unavailable.
+    if tnx_history is not None:
+        tnx_as_of = _price_on_or_before(tnx_history, as_of_date)
+        if tnx_as_of is not None:
+            ctx.risk_free_rate_override = tnx_as_of / 100
+
+    # Same look-ahead concern as risk_free_rate_override above, for a
+    # second latent leak: ValuationTool.run()'s AlphaFactorsEngine
+    # momentum/relative-strength/sector/rate-sensitivity factors compare
+    # this ticker's (correctly point-in-time) price series against
+    # benchmark/sector/rate histories that get_benchmark_history()
+    # otherwise always fetches through TODAY -- see
+    # valuation_tool.py's own point_in_time_cutoff comment for the fix.
+    ctx.point_in_time_cutoff = as_of_date
+
     ValuationTool().run(ctx)
 
     # Sentiment intentionally omitted -- see module docstring scope note.
@@ -273,6 +296,14 @@ def run_one(ticker, category, as_of_date, today_date, market_history):
         "dcf_score": rec.get("dcf_score"),
         "relative_score": rec.get("relative_score"),
         "composite_score": rec.get("composite_score"),
+        # DDMEngine's Gordon Growth intrinsic value (app/valuation/ddm_engine.py)
+        # -- None for the large majority of tickers (not a material,
+        # consistent dividend payer, see is_dividend_payer), captured so
+        # scripts/tune_ddm_weight.py can test blending it into the
+        # composite the same cheap-recombination way dcf_score/
+        # relative_score already get tested, without re-running the
+        # pipeline per candidate weight.
+        "ddm_value": ctx.valuation_results.get("ddm_value"),
         "price_as_of": round(price_as_of, 2),
         "price_today": round(price_today, 2),
         "realized_return_pct": round(realized_return_pct, 2),
@@ -482,9 +513,16 @@ def main():
     # "12 months ago" default.
     market_history = _tz_naive(yf.Ticker(MARKET_BENCHMARK).history(period="5y"))
 
+    # Point-in-time risk-free rate source for run_one's
+    # risk_free_rate_override -- see that call site's own comment.
+    # None (degrade to the pipeline's live-fetch default) if ^TNX
+    # itself can't be fetched, same fail-open spirit as every other
+    # per-ticker fetch failure in this script.
+    tnx_history = _tz_naive(yf.Ticker("^TNX").history(period="5y"))
+
     def _run(ticker, category):
         try:
-            return run_one(ticker, category, as_of_date, exit_date, market_history)
+            return run_one(ticker, category, as_of_date, exit_date, market_history, tnx_history)
         except Exception as e:
             return {
                 "ticker": ticker, "category": category, "as_of_date": as_of_date.date().isoformat(),
