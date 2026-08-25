@@ -45,7 +45,7 @@ def _no_network_benchmark_history(monkeypatch):
     # get_benchmark_history (real yfinance network call) for any
     # non-.NS ticker -- the true external seam, mocked to keep every
     # test in this file network-free and deterministic.
-    monkeypatch.setattr(vt, "get_benchmark_history", lambda ticker: None)
+    monkeypatch.setattr(vt, "get_benchmark_history", lambda ticker, period="5y": None)
 
 
 # ---------------------------------------------------------------- happy path
