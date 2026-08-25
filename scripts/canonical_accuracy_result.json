@@ -1,0 +1,39 @@
+{
+  "metric": "12-month forward directional accuracy",
+  "methodology": "Buy/Hold/Sell calls from FinSight's real production decision path (report_data_builder.derive_recommendation), scored 12 months later against the same +-5%% rule validated in EVALUATION.md. Pooled across two non-overlapping historical windows on the broad 1,002-ticker S&P 500+400+600(partial) universe -- not a hand-picked ticker list.",
+  "n": 923,
+  "model_accuracy_pct": 36.4,
+  "model_ci_95": [
+    33.4,
+    39.6
+  ],
+  "always_buy_baseline_pct": 60.0,
+  "always_buy_ci_95": [
+    56.8,
+    63.1
+  ],
+  "beats_baseline": false,
+  "sources": [
+    {
+      "file": "backtest_results_ticker_universe_asof12mo_exit0mo.json",
+      "n_scored": 485,
+      "as_of_range": [
+        "2025-08-29",
+        "2025-08-29"
+      ]
+    },
+    {
+      "file": "backtest_results_ticker_universe_asof24mo_exit12mo.json",
+      "n_scored": 438,
+      "as_of_range": [
+        "2024-09-03",
+        "2024-09-03"
+      ]
+    }
+  ],
+  "live_tracker_n": 0,
+  "live_tracker_note": "The live production call tracker (app/api/db.py tracked_call_checkpoints, window_days=365) is not pooled in yet -- this deploy target's filesystem is ephemeral across redeploys, so it has no data that has reliably survived to maturity. See this script's module docstring.",
+  "generated_at": "2026-08-24T13:35:45.737086+00:00",
+  "reproduce": "python scripts/canonical_accuracy.py",
+  "summary_line": "36.4% forward-accuracy (N=923, 95% CI 33.4-39.6%) vs. 60.0% Always-Buy baseline (95% CI 56.8-63.1%)"
+}
