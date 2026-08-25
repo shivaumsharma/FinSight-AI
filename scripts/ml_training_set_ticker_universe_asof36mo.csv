@@ -1,0 +1,2 @@
+ticker,category,as_of_date,growth_rate,wacc,beta,revenue_growth,fcf_yield,dcf_over_price,mc_mean_over_price,mc_std_over_price,mc_prob_undervalued,net_cash_per_share_over_price,relative_vs_history_pct,momentum_6m,momentum_12m,annualized_volatility,realized_return_pct,realized_label
+GEF,Materials (S&P 400),2023-09-06,0.14279800579543211,0.07,0.7235591228173578,0.14279800579543206,0.10174754122537305,5.58228791728834,4.01834634363646,1.3859317486543388,0.9979381443298969,-0.5529066368688826,0.35,10.4,7.73,29.31,38.75,UNDERVALUED

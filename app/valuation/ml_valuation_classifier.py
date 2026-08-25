@@ -40,10 +40,11 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold, train_test_split, cross_validate
-from sklearn.metrics import classification_report, confusion_matrix, f1_score
+from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
+from sklearn.utils.class_weight import compute_sample_weight
 
 try:
     from xgboost import XGBClassifier
@@ -76,9 +77,14 @@ if HAS_XGBOOST:
             self._encoder = LabelEncoder()
             self._model = XGBClassifier(**xgb_kwargs)
 
-        def fit(self, X, y):
+        def fit(self, X, y, sample_weight=None):
+            # sample_weight: XGBClassifier has no multiclass class_weight
+            # equivalent (unlike LogisticRegression's constructor-time
+            # "balanced" option, see build_logreg's own comment) -- the
+            # standard alternative is per-sample weights supplied at fit
+            # time, computed via sklearn.utils.class_weight.compute_sample_weight.
             y_enc = self._encoder.fit_transform(y)
-            self._model.fit(X, y_enc)
+            self._model.fit(X, y_enc, sample_weight=sample_weight)
             self.classes_ = self._encoder.classes_
             return self
 
@@ -110,7 +116,20 @@ def _secondary_model_name() -> str:
 
 
 def build_logreg():
-    return Pipeline([("scale", StandardScaler()), ("clf", LogisticRegression(max_iter=1000))])
+    # class_weight="balanced" -- without it, on this dataset's real
+    # label distribution (roughly 60% UNDERVALUED after the Phase 2
+    # broad-universe expansion, a bull-market base rate baked into the
+    # labels themselves, not learned skill), Logistic Regression simply
+    # predicted UNDERVALUED for nearly everything: 100% recall on that
+    # class, ~0-4% recall on the other two, F1-macro dropping even as
+    # raw accuracy rose. Confirmed against this exact training set
+    # before adding this. Re-weights each class inversely to its
+    # frequency during fitting, the standard sklearn-native fix for
+    # exactly this failure mode -- no external sample_weight plumbing
+    # needed since it's a constructor-time parameter, so it works
+    # transparently through cross_validate() and train_test_split()
+    # alike, unlike the secondary model below (see build_secondary_model).
+    return Pipeline([("scale", StandardScaler()), ("clf", LogisticRegression(max_iter=1000, class_weight="balanced"))])
 
 
 def load_training_data(path: str) -> pd.DataFrame:
@@ -119,6 +138,20 @@ def load_training_data(path: str) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Training file is missing feature columns: {missing}")
     return df.dropna(subset=FEATURE_COLUMNS + ["realized_label"])
+
+
+def _fit_model(name: str, model, X_train, y_train):
+    """Fits with class-balanced weighting -- class_weight="balanced" is
+    already baked into build_logreg()'s constructor (needs no fit-time
+    plumbing), the secondary model needs an explicit sample_weight
+    instead (see _LabelEncodedXGB.fit's own comment). Shared by
+    cross_validate_models and train_and_evaluate so both apply the
+    exact same weighting, not two independently-maintained copies."""
+    if name == "logistic_regression":
+        model.fit(X_train, y_train)
+    else:
+        model.fit(X_train, y_train, sample_weight=compute_sample_weight("balanced", y_train))
+    return model
 
 
 def cross_validate_models(df: pd.DataFrame, n_splits: int = 5) -> Dict[str, Any]:
@@ -134,16 +167,28 @@ def cross_validate_models(df: pd.DataFrame, n_splits: int = 5) -> Dict[str, Any]
     n_splits = int(max(min(n_splits, df["realized_label"].value_counts().min()), 2))
     cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
 
-    models = {"logistic_regression": build_logreg(), _secondary_model_name(): build_secondary_model()}
+    model_builders = {"logistic_regression": build_logreg, _secondary_model_name(): build_secondary_model}
 
+    # Manual fold loop instead of sklearn's cross_validate() convenience
+    # wrapper -- passing sample_weight through cross_validate needs its
+    # newer metadata-routing API (sklearn's `params=`, confirmed this
+    # installed version no longer even accepts the older `fit_params=`
+    # kwarg), which requires each estimator to explicitly opt in via
+    # set_fit_request -- version-fragile complexity next to just
+    # fitting each fold directly with _fit_model above.
     results = {}
-    for name, model in models.items():
-        scores = cross_validate(model, X, y, cv=cv, scoring=["accuracy", "f1_macro"], return_train_score=False)
+    for name, builder in model_builders.items():
+        accuracies, f1_macros = [], []
+        for train_idx, test_idx in cv.split(X, y):
+            model = _fit_model(name, builder(), X[train_idx], y[train_idx])
+            preds = model.predict(X[test_idx])
+            accuracies.append(accuracy_score(y[test_idx], preds))
+            f1_macros.append(f1_score(y[test_idx], preds, average="macro", zero_division=0))
         results[name] = {
-            "cv_accuracy_mean": float(np.mean(scores["test_accuracy"])),
-            "cv_accuracy_std": float(np.std(scores["test_accuracy"])),
-            "cv_f1_macro_mean": float(np.mean(scores["test_f1_macro"])),
-            "cv_f1_macro_std": float(np.std(scores["test_f1_macro"])),
+            "cv_accuracy_mean": float(np.mean(accuracies)),
+            "cv_accuracy_std": float(np.std(accuracies)),
+            "cv_f1_macro_mean": float(np.mean(f1_macros)),
+            "cv_f1_macro_std": float(np.std(f1_macros)),
             "n_splits": n_splits,
         }
     return results
@@ -164,7 +209,7 @@ def train_and_evaluate(df: pd.DataFrame, test_size: float = 0.25):
 
     for name, model in [("logistic_regression", build_logreg()),
                          (_secondary_model_name(), build_secondary_model())]:
-        model.fit(X_train, y_train)
+        model = _fit_model(name, model, X_train, y_train)
         preds = model.predict(X_test)
 
         cm = confusion_matrix(y_test, preds, labels=LABELS)
@@ -198,7 +243,7 @@ def feature_importance_table(model, model_name: str) -> pd.DataFrame:
 def train_final_model_on_all_data(df: pd.DataFrame, best_model_name: str):
     X, y = df[FEATURE_COLUMNS], df["realized_label"]
     model = build_logreg() if best_model_name == "logistic_regression" else build_secondary_model()
-    model.fit(X, y)
+    model = _fit_model(best_model_name, model, X, y)
     joblib.dump({"model": model, "model_name": best_model_name, "feature_columns": FEATURE_COLUMNS}, MODEL_PATH)
     return model
 
