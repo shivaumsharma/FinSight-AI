@@ -581,7 +581,14 @@ def _handle_portfolio_status(user_id: str, message: str, history: list) -> str:
     view = build_portfolio_view(user_id)
     holdings = view["holdings"]
     if not holdings:
-        return "You don't have any holdings in your portfolio yet."
+        # A bare "you have nothing" was a real dead end -- confirmed
+        # live: asking again just repeats the identical sentence with
+        # no way forward. Buying a stock right here in chat ("buy 5
+        # AAPL") IS how a holding gets created (see chat_router.py's
+        # own _handle_place_order / db.execute_order) -- pointing at
+        # that, not a separate "add holding" button that doesn't exist
+        # anywhere in this app.
+        return "You don't have any holdings in your portfolio yet. Try telling me to buy a stock -- e.g. \"buy 5 AAPL\" -- to get started."
 
     lines = [f"Your portfolio has {len(holdings)} holding{'s' if len(holdings) != 1 else ''}."]
 

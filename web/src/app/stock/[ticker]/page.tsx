@@ -62,7 +62,7 @@ function StockDetailContent({ ticker }: { ticker: string }) {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-bg pb-20">
+      <div className="min-h-screen bg-bg pb-safe-20">
         <div className="mx-auto max-w-2xl px-5 py-8">
           <Link href="/" className="font-mono text-[10px] font-bold text-dim hover:text-accent">
             &larr; BACK
@@ -78,7 +78,7 @@ function StockDetailContent({ ticker }: { ticker: string }) {
 
   if (!overview) {
     return (
-      <div className="min-h-screen bg-bg pb-20">
+      <div className="min-h-screen bg-bg pb-safe-20">
         <div className="mx-auto max-w-2xl px-5 py-8">
           <p className="font-mono text-xs text-dim">loading...</p>
         </div>
@@ -88,10 +88,10 @@ function StockDetailContent({ ticker }: { ticker: string }) {
   }
 
   return (
-    // pb-36, not pb-20 like every other page -- this one stacks TWO
+    // pb-safe-36, not pb-safe-20 like every other page -- this one stacks TWO
     // fixed bottom bars (TradeBar above BottomNav), so needs extra
     // clearance to keep the last card from being covered by either.
-    <div className="min-h-screen bg-bg pb-36">
+    <div className="min-h-screen bg-bg pb-safe-36">
       <div className="mx-auto max-w-2xl px-5 py-8">
         <StockHeader overview={overview} />
 

@@ -42,7 +42,15 @@ export default function TradeBar({ ticker, currency }: { ticker: string; currenc
   }
 
   return (
-    <div className="fixed inset-x-0 bottom-16 z-10 border-t border-border bg-bg/95 px-4 py-2.5 backdrop-blur">
+    <div
+      className="fixed inset-x-0 z-10 border-t border-border bg-bg/95 px-4 py-2.5 backdrop-blur"
+      // bottom-16 (4rem) was tuned to sit exactly above BottomNav's own
+      // ~64px height -- now that BottomNav adds env(safe-area-inset-bottom)
+      // on top of that, this needs the same inset added or TradeBar
+      // sits too low and hides partly behind the now-taller nav on any
+      // notched/gesture-bar device.
+      style={{ bottom: "calc(4rem + env(safe-area-inset-bottom))" }}
+    >
       <div className="mx-auto flex max-w-2xl items-center gap-2">
         <input
           type="number"
