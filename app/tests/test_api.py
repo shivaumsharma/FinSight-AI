@@ -838,7 +838,11 @@ def test_scoreboard_never_404s_with_zero_tracked_calls(client, auth_headers):
 
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body["windows"].keys()) == {"7", "30", "90"}
+    # 365 added alongside the original 7/30/90 (app/api/db.py's
+    # TRACKED_WINDOWS_DAYS) so the live tracker can eventually pool
+    # with the 12-month-horizon historical backtest under the same
+    # accuracy definition -- see scripts/canonical_accuracy.py.
+    assert set(body["windows"].keys()) == {"7", "30", "90", "365"}
     assert body["windows"]["7"]["model_accuracy_pct"] is None
     assert body["windows"]["7"]["sample_size"] == 0
 
