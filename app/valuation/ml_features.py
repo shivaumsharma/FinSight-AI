@@ -38,6 +38,32 @@ FEATURE_COLUMNS = [
     "mc_prob_undervalued",
     "net_cash_per_share_over_price",
     "relative_vs_history_pct",
+    # Momentum/technical signal AlphaFactorsEngine already computed for
+    # display only (signal_quality's breakdown) -- this classifier
+    # previously had zero access to it, despite it being exactly the
+    # category of feature academic stock-direction models lean on most.
+    # Only the 3 below depend solely on the company's OWN price series
+    # (AlphaFactorsEngine._return_over_window/_annualized_volatility,
+    # both read only self.prices) -- genuinely universal for any
+    # DCF-eligible ticker with >=12mo of price history, US or not.
+    #
+    # Deliberately NOT included, despite being computed by the same
+    # engine: relative_strength_vs_index, sector_relative_performance,
+    # interest_rate_sensitivity -- all three depend on benchmark_history/
+    # sector_history/rate_proxy_history, which ValuationTool.run() never
+    # even fetches for a non-US (.NS) ticker (is_non_us_listing guard).
+    # Making any of them a required column here would silently zero out
+    # predict_verdict() (this module's own strict "every FEATURE_COLUMNS
+    # value present" check) for FinSight's entire Indian-ticker
+    # population -- confirmed by a real test failure while building this
+    # (test_valuation_tool.py's benchmark-history-mocked-to-None fixture
+    # hit exactly this). Piotroski F-Score / Altman Z-Score / sentiment
+    # are also deferred, for the same "would shrink the tiny training set
+    # or zero out a whole population" reason -- see extract_features()'s
+    # own note.
+    "momentum_6m",
+    "momentum_12m",
+    "annualized_volatility",
 ]
 
 
@@ -93,6 +119,16 @@ def extract_features(context: ResearchContext) -> Optional[Dict[str, Any]]:
     monte_carlo = valuation_results.get("monte_carlo") or {}
     relative = valuation_results.get("relative_valuation") or {}
 
+    # alpha_factors is populated by ValuationTool.run() BEFORE this
+    # function is called (see that file's own reordering comment) --
+    # reads the same already-computed AlphaFactorsEngine output the
+    # display-only signal_quality breakdown uses, not a second
+    # computation. See FEATURE_COLUMNS' own comment for exactly which
+    # alpha factors are (and are not) included here and why.
+    alpha_factors = valuation_results.get("alpha_factors") or {}
+    market = alpha_factors.get("market") or {}
+    risk = alpha_factors.get("risk") or {}
+
     return {
         "growth_rate": growth_rate,
         "wacc": valuation_results.get("wacc"),
@@ -105,4 +141,7 @@ def extract_features(context: ResearchContext) -> Optional[Dict[str, Any]]:
         "mc_prob_undervalued": monte_carlo.get("prob_undervalued"),
         "net_cash_per_share_over_price": net_cash_per_share / current_price,
         "relative_vs_history_pct": relative.get("vs_history_pct"),
+        "momentum_6m": market.get("6-Month Price Momentum (%)"),
+        "momentum_12m": market.get("12-Month Price Momentum (%)"),
+        "annualized_volatility": risk.get("Annualized Volatility (%)"),
     }
