@@ -53,12 +53,12 @@ def test_evidence_dispatch_advances_with_step():
 
 def test_evidence_dispatch_falls_through_to_trailing_tools_once_plan_exhausted():
     state: GraphState = {"plan": ["rag_tool"], "step": 1, "context": None}
-    assert _evidence_dispatch(state) == "institutional_consensus_tool"
+    assert _evidence_dispatch(state) == TRAILING_TOOLS[0]
 
 
 def test_evidence_dispatch_handles_empty_plan():
     state: GraphState = {"plan": [], "step": 0, "context": None}
-    assert _evidence_dispatch(state) == "institutional_consensus_tool"
+    assert _evidence_dispatch(state) == TRAILING_TOOLS[0]
 
 
 # ---------------------------------------------------------- full graph runs

@@ -385,7 +385,7 @@ export default function ReportView({
         <div>
           <div className="flex items-center gap-2">
             <RatingBadge rating={rec.rating} />
-            <BacktestBadge />
+            <BacktestBadge trackRecord={rd.track_record} />
           </div>
           <div className="mt-1 text-[10.5px] text-muted">
             composite {fmtScore(rec.composite_score)} · overall score {confidence["Overall Score"] ?? "N/A"}

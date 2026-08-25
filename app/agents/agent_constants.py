@@ -11,7 +11,7 @@ ToolRegistry's full model/network stack (torch, transformers, chromadb,
 llama-cpp-python) just to see this list or catch this exception.
 """
 
-TRAILING_TOOLS = ["institutional_consensus_tool", "news_tool", "report_tool", "evaluation_tool"]
+TRAILING_TOOLS = ["news_tool", "institutional_consensus_tool", "report_tool", "evaluation_tool"]
 
 
 class NoCompanyDetectedError(Exception):

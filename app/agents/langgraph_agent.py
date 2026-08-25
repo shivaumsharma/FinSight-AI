@@ -104,13 +104,17 @@ def _route_passthrough_node(state: GraphState) -> GraphState:
 
 def _evidence_dispatch(state: GraphState) -> str:
     """Router: name of the next evidence tool to run, in the planner's
-    own order, or 'institutional_consensus_tool' (the first trailing
-    tool) once the plan is exhausted -- mirrors
-    `for tool_name in plan: tool.run(context)` one step at a time."""
+    own order, or TRAILING_TOOLS[0] (whichever tool that currently is)
+    once the plan is exhausted -- mirrors
+    `for tool_name in plan: tool.run(context)` one step at a time.
+    Deliberately reads TRAILING_TOOLS[0] rather than a hardcoded name:
+    a hardcoded 'institutional_consensus_tool' here silently survived a
+    TRAILING_TOOLS reorder once already (this was the entry point stayed
+    pinned to that tool even after news_tool was moved to run first)."""
     plan = state["plan"]
     step = state["step"]
     if step >= len(plan):
-        return "institutional_consensus_tool"
+        return TRAILING_TOOLS[0]
     return plan[step]
 
 
@@ -166,12 +170,17 @@ def build_graph(checkpointer=None, tools=None, planner=None):
     graph.add_edge("resolve_and_plan", "route")
 
     path_map = {name: name for name in EVIDENCE_TOOLS}
-    path_map["institutional_consensus_tool"] = "institutional_consensus_tool"
+    path_map[TRAILING_TOOLS[0]] = TRAILING_TOOLS[0]
     graph.add_conditional_edges("route", _evidence_dispatch, path_map)
 
-    # TRAILING_TOOLS is ["institutional_consensus_tool", "news_tool",
+    # TRAILING_TOOLS is ["news_tool", "institutional_consensus_tool",
     # "report_tool", "evaluation_tool"] -- chain them in that fixed
-    # order, same as ResearchAgent.run()'s trailing-tools loop.
+    # order, same as ResearchAgent.run()'s trailing-tools loop. news_tool
+    # must run before institutional_consensus_tool: the latter calls
+    # derive_recommendation() with context.news_sentiment_summary, which
+    # only news_tool populates -- reversed, that argument is always
+    # empty and the consensus tool's own Buy/Hold/Sell baseline goes
+    # stale relative to what report_tool derives right after it.
     for earlier, later in zip(TRAILING_TOOLS, TRAILING_TOOLS[1:]):
         graph.add_edge(earlier, later)
     graph.add_edge(TRAILING_TOOLS[-1], END)

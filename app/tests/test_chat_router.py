@@ -13,13 +13,18 @@ from app.reasoning import chat_router as cr
 
 
 @pytest.fixture(autouse=True)
-def _clear_pending_orders():
-    # _pending_orders is module-scoped, per-user, in-memory state (see
-    # its own comment in chat_router.py) -- give each test a clean slate
-    # so one test's unconfirmed order can't leak into another's.
-    cr._pending_orders.clear()
+def _pending_orders_db(tmp_path, monkeypatch):
+    # Pending orders live in db.py's pending_orders SQLite table now,
+    # not an in-memory dict (see db.py's own comment on that table) --
+    # every test in this file gets an isolated, freshly-initialized DB
+    # so one test's unconfirmed order can't leak into another's, same
+    # guarantee the old dict.clear() gave. A test that also requests
+    # the explicit `temp_db` fixture below still works fine: that
+    # fixture's own monkeypatch just wins for that test (same tmp_path,
+    # different filename), and it calls init_db() too.
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "test_pending_orders.db")
+    db.init_db()
     yield
-    cr._pending_orders.clear()
 
 
 @pytest.fixture
@@ -593,7 +598,7 @@ def test_handle_place_order_sell_with_no_quantity_asks_without_fetching_a_quote(
     monkeypatch.setattr(cr, "get_quote", _unexpected_quote)
     result = cr._handle_place_order("u1", "TCS", "sell some TCS", [])
     assert "How many shares of TCS" in result
-    assert "u1" not in cr._pending_orders
+    assert db.get_pending_order("u1") is None
 
 
 def test_handle_place_order_buy_with_no_quantity_and_no_portfolio_value_asks_for_a_quantity(monkeypatch):
@@ -606,14 +611,14 @@ def test_handle_place_order_buy_with_no_quantity_and_no_portfolio_value_asks_for
     result = cr._handle_place_order("u1", "AAPL", "buy some AAPL", [])
 
     assert "How many shares of AAPL" in result
-    assert "u1" not in cr._pending_orders
+    assert db.get_pending_order("u1") is None
 
 
 def test_handle_place_order_sell_exceeding_holdings(monkeypatch):
     monkeypatch.setattr(cr.db, "get_portfolio_holdings", lambda user_id: [{"ticker": "TCS", "quantity": 5}])
     result = cr._handle_place_order("u1", "TCS", "sell 1000 TCS", [])
     assert "only hold 5" in result
-    assert "u1" not in cr._pending_orders
+    assert db.get_pending_order("u1") is None
 
 
 def test_handle_place_order_sell_with_no_holding_at_all(monkeypatch):
@@ -626,7 +631,7 @@ def test_handle_place_order_degrades_honestly_on_a_quote_failure(monkeypatch):
     monkeypatch.setattr(cr, "get_quote", lambda ticker: (_ for _ in ()).throw(Exception("yfinance down")))
     result = cr._handle_place_order("u1", "AAPL", "buy 5 AAPL", [])
     assert "couldn't check AAPL's price" in result
-    assert "u1" not in cr._pending_orders
+    assert db.get_pending_order("u1") is None
 
 
 def test_handle_place_order_buy_happy_path_stores_a_pending_order_and_asks_to_confirm(monkeypatch):
@@ -634,7 +639,7 @@ def test_handle_place_order_buy_happy_path_stores_a_pending_order_and_asks_to_co
     result = cr._handle_place_order("u1", "AAPL", "buy 5 AAPL", [])
 
     assert result == 'Confirm: BUY 5 AAPL at today\'s price of $150.00? Reply "yes" to place the order or "no" to cancel.'
-    assert cr._pending_orders["u1"]["legs"] == [
+    assert db.get_pending_order("u1")["legs"] == [
         {"ticker": "AAPL", "side": "BUY", "quantity": 5.0, "price": 150.0, "currency": "USD", "rationale": "User-initiated via chat"}
     ]
 
@@ -660,7 +665,7 @@ def test_handle_place_order_ignores_a_ticker_carried_over_from_history(monkeypat
     result = cr._handle_place_order("u1", "AAPL", "buy 10 ZZZZ", [])
 
     assert "couldn't tell which stock" in result
-    assert "u1" not in cr._pending_orders
+    assert db.get_pending_order("u1") is None
 
 
 def test_handle_place_order_allows_a_ticker_carried_over_when_the_message_names_no_ticker_at_all(monkeypatch):
@@ -744,7 +749,7 @@ def test_handle_place_order_buy_with_no_quantity_proposes_a_sized_suggestion(mon
     assert "2%" in result
     assert "Conservative" in result
     assert "confirm, or tell me a different quantity" in result
-    leg = cr._pending_orders["u1"]["legs"][0]
+    leg = db.get_pending_order("u1")["legs"][0]
     assert leg == {
         "ticker": "AAPL", "side": "BUY", "quantity": 2.0, "price": 150.0, "currency": "USD",
         "rationale": "User-initiated via chat, sized via suggestion (that's about 2% of your portfolio, sized for Conservative)",
@@ -801,33 +806,35 @@ def test_handle_chat_message_confirm_yes_executes_the_order(temp_db, monkeypatch
     assert holdings["AAPL"]["quantity"] == 4.0
 
     # Confirmed and cleared -- a second "yes" has nothing left to confirm.
-    assert user_id not in cr._pending_orders
+    assert db.get_pending_order(user_id) is None
 
 
 def test_handle_chat_message_confirm_no_cancels_without_placing_an_order(temp_db, monkeypatch):
     user_id = temp_db.create_user("a@example.com", "h", "s")
-    cr._pending_orders[user_id] = {
-        "legs": [{"ticker": "AAPL", "side": "BUY", "quantity": 5.0, "price": 150.0, "currency": "USD", "rationale": None}],
-    }
+    db.set_pending_order(
+        user_id,
+        [{"ticker": "AAPL", "side": "BUY", "quantity": 5.0, "price": 150.0, "currency": "USD", "rationale": None}],
+    )
 
     result = cr.handle_chat_message(user_id, "no")
 
     assert result["reply"] == "Cancelled -- no order placed."
-    assert user_id not in cr._pending_orders
+    assert db.get_pending_order(user_id) is None
     assert temp_db.list_orders(user_id) == []
 
 
 def test_handle_chat_message_ambiguous_reply_drops_the_pending_order_and_classifies_normally(monkeypatch):
-    cr._pending_orders["u1"] = {
-        "legs": [{"ticker": "AAPL", "side": "BUY", "quantity": 5.0, "price": 150.0, "currency": "USD", "rationale": None}],
-    }
+    db.set_pending_order(
+        "u1",
+        [{"ticker": "AAPL", "side": "BUY", "quantity": 5.0, "price": 150.0, "currency": "USD", "rationale": None}],
+    )
     monkeypatch.setattr(cr, "resolve_companies", lambda q: [])
     monkeypatch.setattr(cr, "HostedProvider", _FakeProvider)  # returns "INTENT: portfolio_status"
     monkeypatch.setattr(cr, "build_portfolio_view", lambda user_id: {"holdings": [], "summary": {}})
 
     result = cr.handle_chat_message("u1", "actually hows my portfolio doing")
 
-    assert "u1" not in cr._pending_orders
+    assert db.get_pending_order("u1") is None
     assert result["intent"] == "portfolio_status"
 
 
@@ -844,7 +851,7 @@ def test_handle_chat_message_sell_more_than_held_is_a_clear_rejection_not_a_cras
     result = cr.handle_chat_message(user_id, "sell 1000 TCS")
 
     assert "only hold 5" in result["reply"]
-    assert user_id not in cr._pending_orders  # never proposed, nothing to confirm
+    assert db.get_pending_order(user_id) is None  # never proposed, nothing to confirm
     # Only the setup BUY exists -- the rejected SELL never got recorded.
     orders = temp_db.list_orders(user_id)
     assert len(orders) == 1
@@ -953,7 +960,7 @@ def test_propose_batch_order_with_no_matches_reports_the_empty_case_without_a_pe
     monkeypatch.setattr(cr.db, "get_portfolio_holdings", lambda user_id: [])
     result = cr._propose_batch_order("u1", {"type": "sell_rated", "rating": "Sell"})
     assert "don't currently hold anything rated Sell" in result
-    assert "u1" not in cr._pending_orders
+    assert db.get_pending_order("u1") is None
 
 
 def test_handle_chat_message_batch_sell_rated_end_to_end(temp_db, monkeypatch):
@@ -1261,14 +1268,15 @@ def test_execute_pending_order_reports_a_failed_leg_by_message(temp_db):
     # leg was valid when proposed, but execute_order re-validates for
     # real at execution time and this must surface as a clear failure,
     # not a crash or a silent no-op.
-    cr._pending_orders[user_id] = {
-        "legs": [{"ticker": "TCS", "side": "SELL", "quantity": 10.0, "price": 4000.0, "currency": "INR", "rationale": None}],
-    }
+    db.set_pending_order(
+        user_id,
+        [{"ticker": "TCS", "side": "SELL", "quantity": 10.0, "price": 4000.0, "currency": "INR", "rationale": None}],
+    )
 
     result = cr._execute_pending_order(user_id)
 
     assert "Couldn't place that order" in result
-    assert user_id not in cr._pending_orders
+    assert db.get_pending_order(user_id) is None
 
 
 # ---------------------------------------------------------------- add_holding
