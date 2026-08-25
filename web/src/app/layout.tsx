@@ -53,6 +53,12 @@ export const viewport: Viewport = {
   themeColor: "#05070a",
   width: "device-width",
   initialScale: 1,
+  // Without this, env(safe-area-inset-*) always evaluates to 0 on iOS
+  // regardless of any CSS using it -- "cover" is what lets the page
+  // actually extend under the notch/home-indicator/gesture-bar areas,
+  // which is the precondition for BottomNav/TradeBar's own safe-area
+  // padding below to do anything at all.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

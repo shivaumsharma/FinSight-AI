@@ -31,7 +31,7 @@ function ScoreboardContent() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-bg pb-20">
+    <div className="min-h-screen bg-bg pb-safe-20">
       <div className="mx-auto max-w-2xl px-5 py-8">
         <h1 className="font-mono text-lg font-bold text-text">Scoreboard</h1>
         <p className="mt-1.5 text-xs text-muted">

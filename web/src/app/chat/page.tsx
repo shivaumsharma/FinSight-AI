@@ -37,7 +37,7 @@ function ChatContent() {
   }, [a.messages, a.sending]);
 
   return (
-    <div className="min-h-screen bg-bg pb-36">
+    <div className="min-h-screen bg-bg pb-safe-36">
       <div className="mx-auto max-w-2xl px-5 py-8">
         <div className="flex items-center justify-between">
           <h1 className="font-mono text-lg font-bold text-text">Chat</h1>
@@ -102,7 +102,10 @@ function ChatContent() {
         </div>
       </div>
 
-      <div className="fixed inset-x-0 bottom-16 z-10 border-t border-border bg-bg/95 px-5 py-3 backdrop-blur">
+      <div
+        className="fixed inset-x-0 z-10 border-t border-border bg-bg/95 px-5 py-3 backdrop-blur"
+        style={{ bottom: "calc(4rem + env(safe-area-inset-bottom))" }}
+      >
         <form onSubmit={a.handleSend} className="mx-auto flex max-w-2xl items-center gap-2">
           <input
             type="text"

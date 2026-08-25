@@ -1578,7 +1578,19 @@ def get_stock_news(ticker: str, current_user: str = Depends(auth.get_current_use
 
 @app.get("/v1/stocks/{ticker}/events")
 def get_stock_events(ticker: str, current_user: str = Depends(auth.get_current_user)):
-    return get_corporate_actions_history(ticker)
+    try:
+        return get_corporate_actions_history(ticker)
+    except Exception:
+        # get_corporate_actions_history() already wraps each of its own
+        # sub-lookups (calendar/dividends/splits) in its own try/except
+        # -- this is a last-resort guard for anything that manages to
+        # escape that anyway (e.g. yf.Ticker() construction itself), the
+        # same "one ticker's failure must not throw a raw 500" isolation
+        # get_watchlist() already applies per-item just below. Degrades
+        # to the same all-empty shape a real never-split, never-dividend
+        # ticker returns -- the Events tab already renders that as "No
+        # corporate action history available", not an error.
+        return {"next_earnings_date": None, "next_ex_dividend_date": None, "dividends": [], "splits": []}
 
 
 @app.get("/v1/stocks/{ticker}/similar")

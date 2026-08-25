@@ -102,7 +102,7 @@ function SimulatedProgress({ ticker, question }: { ticker?: string; question: st
           return (
             <div key={label} className="flex items-center gap-3 py-2">
               <span
-                className={`font-mono text-sm ${done ? "text-accent" : active ? "text-accent" : "text-dim"}`}
+                className={`font-mono text-sm ${done ? "text-accent" : active ? "text-accent animate-pulse" : "text-dim"}`}
               >
                 {done ? "✓" : active ? "●" : "○"}
               </span>
@@ -170,7 +170,7 @@ function RealProgress({
           return (
             <div key={`${toolName}-${i}`} className="flex items-center gap-3 py-2">
               <span
-                className={`font-mono text-sm ${done ? "text-accent" : active ? "text-accent" : "text-dim"}`}
+                className={`font-mono text-sm ${done ? "text-accent" : active ? "text-accent animate-pulse" : "text-dim"}`}
               >
                 {done ? "✓" : active ? "●" : "○"}
               </span>
