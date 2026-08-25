@@ -28,15 +28,26 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import time
+
 import pandas as pd
 import yfinance as yf
 
 from app.analysis.baseline_scoring import score_rating
 
+# A small, deliberate delay between per-ticker earnings-date fetches --
+# this session already hit severe Yahoo Finance rate limiting once
+# from a large sequential sweep with no throttling; this endpoint is
+# lighter than the full financials/price-history pulls that caused
+# that, but not worth risking a repeat over.
+REQUEST_DELAY_SECONDS = 0.3
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 WINDOW_FILES = [
     "backtest_results_curated_asof12mo_exit0mo.json",
     "backtest_results_curated_asof24mo_exit12mo.json",
+    "backtest_results_ticker_universe_asof12mo_exit0mo.json",
+    "backtest_results_ticker_universe_asof24mo_exit12mo.json",
 ]
 
 CLOSE_THRESHOLD_DAYS = 30
@@ -51,6 +62,7 @@ def days_to_next_earnings(ticker: str, as_of_date: pd.Timestamp):
             _earnings_cache[ticker] = dates.index.tz_localize(None) if dates is not None and not dates.empty else None
         except Exception:
             _earnings_cache[ticker] = None
+        time.sleep(REQUEST_DELAY_SECONDS)
 
     dates = _earnings_cache[ticker]
     if dates is None:
