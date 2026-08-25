@@ -37,8 +37,18 @@
   --border-subtle: #ece4d1;
   --text: #221d14;
   --muted: #6e6350;
-  --dim: #a99c81;
-  --accent: #b8862a;
+  /* Was #a99c81 -- measured contrast against --bg was ~2.4:1, well
+     under WCAG AA's 3:1 floor even for large text/UI components. This
+     darker tan measures ~3.3:1: still a visible step lighter than
+     --muted (preserves the text > muted > dim hierarchy), just no
+     longer illegible. */
+  --dim: #8f8265;
+  /* Was #b8862a -- measured contrast against --bg was ~2.9:1, under
+     WCAG AA's 4.5:1 floor for text (this is used for "positive/gain"
+     badges and links, real text-weight content, not just a decorative
+     accent). This darker gold measures ~5.5:1, same hue direction,
+     still reads as "gold" not "brown". */
+  --accent: #7a5a1c;
   --danger: #b3352b;
   --warn: #c17817;
   --font-mono-loaded: var(--font-serif-loaded), Georgia, "Times New Roman", serif;
@@ -63,4 +73,22 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
+}
+
+/*
+  Bottom-nav-clearance padding for every page that stacks scrollable
+  content above the fixed BottomNav -- plain pb-20/pb-36 Tailwind
+  utilities were static (5rem/9rem), so on a notched/gesture-bar phone
+  where BottomNav.tsx now adds env(safe-area-inset-bottom) to its own
+  height, the last bit of scrolled content (and, on some devices, taps
+  near the bottom of the last card) ended up underneath the taller nav
+  instead of above it. pb-safe-20 mirrors pb-20's page default; pb-safe-36
+  mirrors the stock-detail page's extra TradeBar clearance (see that
+  page's own pb-36 comment).
+*/
+.pb-safe-20 {
+  padding-bottom: calc(5rem + env(safe-area-inset-bottom));
+}
+.pb-safe-36 {
+  padding-bottom: calc(9rem + env(safe-area-inset-bottom));
 }

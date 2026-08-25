@@ -176,7 +176,7 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
   const hour = new Date().getHours();
 
   return (
-    <div className="min-h-screen bg-bg pb-20">
+    <div className="min-h-screen bg-bg pb-safe-20">
       <div className="mx-auto max-w-2xl px-5 py-8">
         <InstallPrompt />
         <OnboardingTour />

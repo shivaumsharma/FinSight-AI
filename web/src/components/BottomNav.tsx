@@ -58,12 +58,16 @@ function ProfileIcon({ active }: { active: boolean }) {
 // Portfolio/Orders/Account tabs the way a brokerage app's bottom nav
 // would, since this isn't one -- see the Home dashboard scope
 // discussion). Fixed to the viewport bottom; each page's content
-// wrapper adds bottom padding (pb-20) so the nav never covers content.
+// wrapper adds bottom padding (pb-safe-20/pb-safe-36, globals.css) so
+// the nav never covers content, on notched devices included.
 export default function BottomNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-10 border-t border-border bg-bg/95 backdrop-blur">
+    <nav
+      className="fixed inset-x-0 bottom-0 z-10 border-t border-border bg-bg/95 backdrop-blur"
+      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+    >
       <div className="mx-auto flex max-w-2xl items-stretch justify-around px-2">
         {ITEMS.map(({ href, label, icon: Icon }) => {
           const active = pathname === href;

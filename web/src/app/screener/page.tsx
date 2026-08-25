@@ -13,7 +13,7 @@ export default function ScreenerPage() {
   return (
     <AuthGate>
       {() => (
-        <div className="min-h-screen bg-bg pb-20">
+        <div className="min-h-screen bg-bg pb-safe-20">
           <div className="mx-auto max-w-2xl px-5 py-8">
             <Link href="/" className="font-mono text-xs font-bold text-muted hover:text-accent">
               &larr; HOME
