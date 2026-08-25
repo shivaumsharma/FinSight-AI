@@ -1,38 +1,33 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { BacktestAccuracySummary } from "@/lib/types";
+import type { TrackRecord } from "@/lib/types";
 
 // Mandatory badge on every recommendation card -- this app's own
-// measured Buy/Hold/Sell accuracy against real historical outcomes,
-// not a per-ticker or per-report number (see backtest_stats.py's
-// docstring: most researched tickers aren't in the 79-ticker curated
-// backtest universe, so there's no honest way to compute one just for
-// THIS ticker). The title attribute surfaces the older, lower-scoring
-// cohort too -- shown, not hidden.
-export default function BacktestBadge() {
-  const [data, setData] = useState<BacktestAccuracySummary | null>(null);
-  const [failed, setFailed] = useState(false);
+// measured Buy/Hold/Sell accuracy against real historical outcomes.
+//
+// Deliberately reads the SAME `trackRecord` prop TrackRecordBlock below
+// uses (report_data_builder.py's canonical_accuracy.py-backed number),
+// not its own separate fetch to /v1/research/backtest-accuracy. It used
+// to: that endpoint computes a DIFFERENT statistic (the curated
+// 79-ticker cohort, e.g. "48.0%") from what TrackRecordBlock shows
+// (the canonical broad-universe number, e.g. "36.4%") -- two real,
+// honestly-computed numbers, but displayed as if they were the same
+// claim on the same report, which just reads as a contradiction to
+// anyone comparing them. canonical_accuracy.py's own docstring is
+// explicit that it's meant to be "FinSight's ONE reported accuracy
+// number, not a table of sub-metrics" -- this badge now honors that by
+// showing that one number everywhere, instead of a second, older one.
+export default function BacktestBadge({ trackRecord }: { trackRecord: TrackRecord | null | undefined }) {
+  if (!trackRecord) return null;
 
-  useEffect(() => {
-    fetch("/api/research/backtest-accuracy")
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then(setData)
-      .catch(() => setFailed(true));
-  }, []);
-
-  if (failed || data === null) return null;
-
-  const tooltip = data.secondary
-    ? `${data.correct}/${data.scored} correct, ${data.window_label}. Older cohort (${data.secondary.window_label}): ${data.secondary.accuracy_pct}% (${data.secondary.correct}/${data.secondary.scored}).`
-    : `${data.correct}/${data.scored} correct, ${data.window_label}.`;
+  const tooltip = `${trackRecord.summary_line}. ${trackRecord.methodology}`;
 
   return (
     <span
       title={tooltip}
       className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg px-2 py-0.5 font-mono text-[9.5px] font-bold text-muted"
     >
-      BACKTESTED {data.accuracy_pct}% ACCURATE
+      BACKTESTED {trackRecord.model_accuracy_pct}% ACCURATE
       <span className="text-dim">ⓘ</span>
     </span>
   );
