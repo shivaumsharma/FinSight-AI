@@ -1264,7 +1264,12 @@ def list_chat_messages(user_id: str, limit: int = 50) -> list:
 
 # ---------------------------------------------------------------- scoreboard (live call-outcome tracking)
 
-TRACKED_WINDOWS_DAYS = (7, 30, 90)
+# 365 added alongside the original 7/30/90 so the live tracker can
+# eventually be pooled with scripts/phase2_backtest.py's 12-month-horizon
+# historical backtest under the exact same accuracy definition -- see
+# scripts/canonical_accuracy.py, the one script that reports FinSight's
+# single canonical accuracy number.
+TRACKED_WINDOWS_DAYS = (7, 30, 90, 365)
 
 
 def insert_tracked_call(

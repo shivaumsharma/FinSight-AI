@@ -15,7 +15,10 @@ supporting narrative in the Investment Thesis section around
 whatever this rule decided.
 """
 
+import json
 import math
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -26,6 +29,25 @@ from app.core.research_context import ResearchContext
 
 def _is_nan(value) -> bool:
     return isinstance(value, float) and math.isnan(value)
+
+
+_TRACK_RECORD_PATH = Path(__file__).resolve().parent.parent.parent / "scripts" / "canonical_accuracy_result.json"
+
+
+@lru_cache(maxsize=1)
+def _load_track_record() -> Optional[Dict[str, Any]]:
+    """FinSight's one canonical backtested-accuracy number (see
+    scripts/canonical_accuracy.py), read from a git-committed artifact
+    that ships with the code -- deliberately NOT the live tracked_calls
+    DB, which resets on every redeploy on this project's actual
+    ephemeral-filesystem deploy targets (README's Cloud Run/Railway
+    notes). Cached for the process lifetime: this file only changes
+    when the backtest is re-run and re-committed, never per-report."""
+    try:
+        with open(_TRACK_RECORD_PATH) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
 
 # Recommendation thresholds, applied to the composite score below (a
 # blend of the DCF and relative-valuation component scores, both on
@@ -288,6 +310,41 @@ def _composite_score(dcf_score: float, relative_score):
     if relative_score is None:
         return dcf_score
     return DCF_WEIGHT * dcf_score + RELATIVE_WEIGHT * relative_score
+
+
+def _dividend_discount_model(valuation_results: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Display-only cross-check from DDMEngine (app/valuation/ddm_engine.py)
+    -- a genuinely independent valuation lens (values the actual
+    dividend stream, not modeled FCFF), scoped to consistent, material
+    dividend payers only, so None for most companies. NOT part of the
+    composite score: scripts/tune_ddm_weight.py tested blending it in
+    and found a real-looking effect (accuracy rose on the DDM-available
+    subset), but on only 71 point-in-time observations -- far too small
+    a sample to trust (a 2-3 point swing is well within noise at that
+    N), and the script's own plateau check flagged it as a narrow
+    spike, not a robust signal. Shown to the reader as one more real
+    data point rather than withheld until that sample grows enough to
+    validate blending it into the actual rating -- same "prove it, then
+    wire it in" pattern the ML classifier went through before its own
+    Phase 4 test (also negative, see EVALUATION.md section 4)."""
+    ddm_value = valuation_results.get("ddm_value")
+    current_price = valuation_results.get("current_price")
+    if ddm_value is None or not current_price:
+        return None
+
+    upside_pct = (ddm_value - current_price) / current_price * 100
+    if upside_pct > 10:
+        signal = "cheap"
+    elif upside_pct < -10:
+        signal = "expensive"
+    else:
+        signal = "in-line"
+
+    return {
+        "intrinsic_value": round(ddm_value, 2),
+        "upside_pct": round(upside_pct, 2),
+        "signal": signal,
+    }
 
 
 def _monte_carlo_ci_straddles_price(valuation_results: Dict[str, Any]) -> bool:
@@ -900,6 +957,9 @@ def build_report_data(context: ResearchContext) -> Dict[str, Any]:
             "monte_carlo": valuation_results.get("monte_carlo"),
             "ml_classifier": valuation_results.get("ml_classifier"),
             "alpha_factors": valuation_results.get("alpha_factors"),
+            # Display-only, not part of the recommendation composite --
+            # see _dividend_discount_model's own docstring for why.
+            "dividend_discount_model": _dividend_discount_model(valuation_results),
         },
 
         "market_earnings_snapshot": {
@@ -945,6 +1005,12 @@ def build_report_data(context: ResearchContext) -> Dict[str, Any]:
         # see derive_signal_quality's own docstring for the display-only
         # boundary and exactly which already-computed values feed it.
         "signal_quality": signal_quality,
+
+        # FinSight's one canonical backtested accuracy number, the same
+        # on every report -- not this ticker's outcome, the whole
+        # pipeline's historical track record. None if the artifact
+        # hasn't been generated yet (see _load_track_record's docstring).
+        "track_record": _load_track_record(),
 
         "references": _references(context),
 

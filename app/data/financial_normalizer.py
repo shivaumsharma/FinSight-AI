@@ -40,6 +40,7 @@ class FinancialStatementNormaliser:
 )
         normalised_data["total_assets"] = self.extract_metric(self.balance_sheet, METRIC_MAPPINGS["total_assets"])
         normalised_data["retained_earnings"] = self.extract_metric(self.balance_sheet, METRIC_MAPPINGS["retained_earnings"])
+        normalised_data["dividends_paid"] = self.extract_metric(self.cash_flow, METRIC_MAPPINGS["dividends_paid"])
 
         normalised_df=pd.DataFrame(normalised_data)
         cleaned_df=self.align_and_clean(normalised_df)
@@ -57,6 +58,13 @@ class FinancialStatementNormaliser:
 
         if "capex" in normalised_df.columns:
           normalised_df["capex"] = (normalised_df["capex"].abs())
+
+        # Reported as a cash OUTFLOW (negative) by yfinance's cashflow
+        # statement, same convention as capex above -- abs() so
+        # DDMEngine can treat it as a plain positive dividend amount
+        # rather than every caller needing to remember the sign.
+        if "dividends_paid" in normalised_df.columns:
+          normalised_df["dividends_paid"] = (normalised_df["dividends_paid"].abs())
 
         normalised_df=normalised_df.dropna(how="all")
     

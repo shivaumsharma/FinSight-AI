@@ -86,4 +86,8 @@ METRIC_MAPPINGS={
     "Retained Earnings",
     "Retained Earnings Accumulated Deficit"
   ],
+  "dividends_paid": [
+    "Cash Dividends Paid",
+    "Common Stock Dividend Paid"
+  ],
 }

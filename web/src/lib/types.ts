@@ -52,6 +52,14 @@ export interface ValuationAnalysis {
     probabilities: Record<string, number>;
     model_name: string;
   } | null;
+  // From app/valuation/ddm_engine.py, display-only -- see
+  // report_data_builder.py's _dividend_discount_model docstring for
+  // why it isn't part of the recommendation composite yet.
+  dividend_discount_model?: {
+    intrinsic_value: number;
+    upside_pct: number;
+    signal: "cheap" | "expensive" | "in-line";
+  } | null;
   // Category -> {label: value}, from app/analysis/alpha_factors.py.
   // Deliberately loose on the value type: most entries are number |
   // string | null, but "P/E vs Own History"/"P/B vs Own History" are
@@ -121,6 +129,26 @@ export interface SignalQuality {
   };
 }
 
+// From scripts/canonical_accuracy.py -- FinSight's one canonical
+// backtested accuracy number, the same on every report (not this
+// ticker's outcome, the whole pipeline's historical track record).
+// Read from a git-committed artifact, not the live call tracker DB
+// (which resets on this project's ephemeral-filesystem deploy
+// targets) -- see report_data_builder.py's _load_track_record().
+export interface TrackRecord {
+  metric: string;
+  methodology: string;
+  n: number;
+  model_accuracy_pct: number;
+  model_ci_95: [number, number];
+  always_buy_baseline_pct: number;
+  always_buy_ci_95: [number, number];
+  beats_baseline: boolean;
+  summary_line: string;
+  generated_at: string;
+  reproduce: string;
+}
+
 export interface ReportData {
   currency?: string;
   currency_symbol?: string;
@@ -134,6 +162,7 @@ export interface ReportData {
     "Completeness (%)"?: number | string;
   };
   signal_quality?: SignalQuality;
+  track_record?: TrackRecord | null;
   narrative?: Partial<Record<NarrativeSection, string>>;
   market_earnings_snapshot?: MarketEarningsSnapshot;
   valuation_analysis?: ValuationAnalysis;

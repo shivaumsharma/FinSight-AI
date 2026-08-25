@@ -253,6 +253,13 @@ if "report" in st.session_state:
         "financial advisor before making investment decisions."
     )
 
+    track_record = report_data.get("track_record")
+    if track_record:
+        st.caption(
+            f"**Model track record (12-month forward accuracy, backtested):** "
+            f"{_md_escape(track_record['summary_line'])}. Full methodology in EVALUATION.md."
+        )
+
     col1, col2 = st.columns([1, 2])
     with col1:
         st.markdown(f"### :{color}[{rating}]")
@@ -310,6 +317,21 @@ if "report" in st.session_state:
             c1.metric("ML Verdict", ml_classifier["verdict"])
             c2.metric("Confidence", f"{top_prob:.1%}")
             st.caption(f"Model: {ml_classifier['model_name'].replace('_', ' ').title()}")
+
+    ddm = report_data.get("valuation_analysis", {}).get("dividend_discount_model")
+    if ddm:
+        with st.expander("Dividend Discount Model (informational only)", expanded=False):
+            st.caption(
+                "A genuinely independent valuation lens from the DCF above -- values the actual "
+                "dividend stream, not modeled free cash flow. Only computed for consistent, material "
+                "dividend payers. **Not part of the recommendation above** -- tested for inclusion "
+                "and found promising but on too small a sample (71 point-in-time observations) to "
+                "trust yet; see EVALUATION.md."
+            )
+            c1, c2 = st.columns(2)
+            c1.metric("DDM Intrinsic Value", f"${ddm['intrinsic_value']:,.2f}")
+            c2.metric("Upside vs. Price", f"{ddm['upside_pct']:+.1f}%")
+            st.caption(f"Signal: {ddm['signal']}")
 
     whatif = _r.get("whatif")
     if whatif:
@@ -435,9 +457,20 @@ if "report" in st.session_state:
                 "the analysis above -- so you can judge whether the selection looks "
                 "reasonable, not only what the model chose to reference."
             )
-            for article in news_sources["all_articles"]:
-                tag = "✅ Used" if article["used_in_analysis"] else "⬜ Retrieved, not used"
-                st.markdown(f"**{article['headline']}**  \n{article['source']} — {article['date']} — [{tag}]({article['url']})")
+            all_articles = news_sources["all_articles"]
+            used = [a for a in all_articles if a["used_in_analysis"]]
+            not_used = [a for a in all_articles if not a["used_in_analysis"]]
+            for article in used:
+                st.markdown(f"**{_md_escape(article['headline'])}**  \n{article['source']} — {article['date']} — [✅ Used]({article['url']})")
+            # Capped for the same reason as pdf_report_builder.py's
+            # MAX_UNUSED_ARTICLES_SHOWN -- an active mega-cap can retrieve
+            # 200+ articles, and this expander shouldn't turn into a
+            # multi-hundred-row list just because a reader clicked it open.
+            for article in not_used[:6]:
+                st.markdown(f"**{_md_escape(article['headline'])}**  \n{article['source']} — {article['date']} — [⬜ Retrieved, not used]({article['url']})")
+            remaining = len(not_used) - 6
+            if remaining > 0:
+                st.caption(f"+ {remaining} more article{'s' if remaining != 1 else ''} retrieved but not used in this analysis.")
 
     if _r["pdf_bytes"]:
         st.download_button(

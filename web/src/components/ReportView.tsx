@@ -6,7 +6,7 @@ import ModelCompare from "./ModelCompare";
 import RatingBadge, { ratingColorClass } from "./RatingBadge";
 import Tabs from "./Tabs";
 import WhatIfPanel from "./WhatIfPanel";
-import type { ResearchResult, SignalQuality } from "@/lib/types";
+import type { NewsSources, ResearchResult, SignalQuality, TrackRecord } from "@/lib/types";
 
 function ShareButton({ jobId }: { jobId: string }) {
   const [state, setState] = useState<"idle" | "sharing" | "copied" | "error">("idle");
@@ -129,6 +129,63 @@ function SignalQualityBlock({ signalQuality }: { signalQuality: SignalQuality | 
         How much of the supporting evidence and independent cross-checks agree -- separate from, and never a
         factor in, the rating above.
       </p>
+    </div>
+  );
+}
+
+// FinSight's one canonical accuracy number (scripts/canonical_accuracy.py),
+// the same on every report regardless of ticker -- the whole pipeline's
+// backtested track record, not this call's own outcome. Shown plainly
+// rather than hidden: a number with no baseline attached isn't a claim,
+// and this one currently loses to its own baseline (see below).
+function TrackRecordBlock({ trackRecord }: { trackRecord: TrackRecord | null | undefined }) {
+  if (!trackRecord) return null;
+
+  return (
+    <div className="mt-2 rounded-lg border border-border bg-card px-3 py-2 text-[11px] text-muted">
+      <strong className="text-text">Model track record ({trackRecord.metric}):</strong>{" "}
+      {trackRecord.summary_line}. {trackRecord.beats_baseline ? "Beats" : "Currently loses to"} the naive baseline.{" "}
+      <span className="text-dim">Full methodology in EVALUATION.md.</span>
+    </div>
+  );
+}
+
+type NewsArticleItem = NonNullable<NewsSources["all_articles"]>[number];
+
+// Retrieved-but-unused articles are capped -- same reason as
+// pdf_report_builder.py's MAX_UNUSED_ARTICLES_SHOWN and
+// streamlit_app.py's equivalent: an active mega-cap can retrieve
+// 200+ articles in a single pull, and this list shouldn't render every
+// one just because a reader opened this tab. Used articles (the ones
+// that actually informed the report) are never capped.
+const MAX_UNUSED_ARTICLES_SHOWN = 6;
+
+function NewsSourceList({ articles }: { articles: NewsArticleItem[] }) {
+  const used = articles.filter((a) => a.used_in_analysis);
+  const notUsed = articles.filter((a) => !a.used_in_analysis);
+  const shown = notUsed.slice(0, MAX_UNUSED_ARTICLES_SHOWN);
+  const remaining = notUsed.length - shown.length;
+
+  const row = (a: NewsArticleItem, label: string) => (
+    <div key={a.url + a.headline} className="text-xs">
+      <a href={a.url} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
+        {a.headline}
+      </a>
+      <div className="text-[10px] text-muted">
+        {a.source} — {a.date} — {label}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-2">
+      {used.map((a) => row(a, "Used"))}
+      {shown.map((a) => row(a, "Retrieved, not used"))}
+      {remaining > 0 && (
+        <p className="text-[10px] text-dim">
+          + {remaining} more article{remaining !== 1 ? "s" : ""} retrieved but not used in this analysis.
+        </p>
+      )}
     </div>
   );
 }
@@ -278,6 +335,7 @@ export default function ReportView({
   const valuation = rd.valuation_analysis || {};
   const monteCarlo = valuation.monte_carlo;
   const mlClassifier = valuation.ml_classifier;
+  const ddm = valuation.dividend_discount_model;
   const alphaFactors = valuation.alpha_factors;
   const consensus = rd.institutional_consensus?.recommendation_consensus;
   const news = rd.news_sources || {};
@@ -306,6 +364,7 @@ export default function ReportView({
         model outputs are not guarantees of future results. Consult a licensed financial advisor before making
         investment decisions.
       </div>
+      <TrackRecordBlock trackRecord={rd.track_record} />
 
       {/* Verdict card -- border color set inline since it's chosen from
           a runtime value (rating); a Tailwind class built via template
@@ -458,6 +517,24 @@ export default function ReportView({
                     </div>
                   )}
 
+                  {ddm && (
+                    <div>
+                      <div className="mb-2 font-mono text-[11px] font-bold tracking-wide text-muted">
+                        DIVIDEND DISCOUNT MODEL (informational only)
+                      </div>
+                      <div className="flex gap-2">
+                        <StatTile label="DDM VALUE" value={fmtMoney(ddm.intrinsic_value, symbol)} />
+                        <StatTile label="UPSIDE VS. PRICE" value={`${ddm.upside_pct >= 0 ? "+" : ""}${ddm.upside_pct.toFixed(1)}%`} />
+                        <StatTile label="SIGNAL" value={ddm.signal} />
+                      </div>
+                      <p className="mt-2 text-[11px] text-dim">
+                        Independent of the DCF above -- values the actual dividend stream, only computed for
+                        consistent dividend payers. Not part of the recommendation; tested and found promising
+                        but on too small a sample to trust yet (see EVALUATION.md).
+                      </p>
+                    </div>
+                  )}
+
                   {valuation["DCF Available"] && (
                     <WhatIfPanel endpoint={`/api/research/${jobId}/what-if`} symbol={symbol} />
                   )}
@@ -550,18 +627,7 @@ export default function ReportView({
                     {!news.total_retrieved ? (
                       <p className="text-xs text-muted">No recent news coverage was found for this company.</p>
                     ) : (
-                      <div className="space-y-2">
-                        {news.all_articles?.map((a, i) => (
-                          <div key={i} className="text-xs">
-                            <a href={a.url} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
-                              {a.headline}
-                            </a>
-                            <div className="text-[10px] text-muted">
-                              {a.source} — {a.date} — {a.used_in_analysis ? "Used" : "Retrieved, not used"}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                      <NewsSourceList articles={news.all_articles ?? []} />
                     )}
                   </div>
                 </div>

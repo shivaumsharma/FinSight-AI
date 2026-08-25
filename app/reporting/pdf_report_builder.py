@@ -19,6 +19,16 @@ from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak,
 )
 
+# A broad news pull retrieves everything matching a ticker in the last
+# 60 days -- for an active mega-cap that's routinely 200+ articles.
+# Showing every retrieved-but-unused one turned this section into a
+# multi-page link dump instead of an analysis. Used articles (the ones
+# that actually informed the report) are never capped -- only the
+# "also retrieved, not used" transparency list is, since that's the
+# part that scales with how much news exists, not with anything the
+# analysis actually needed.
+MAX_UNUSED_ARTICLES_SHOWN = 6
+
 _STYLES = getSampleStyleSheet()
 
 _TITLE_STYLE = ParagraphStyle(
@@ -410,14 +420,36 @@ def build_pdf_report(report_data: dict) -> bytes:
             _BODY_STYLE,
         ))
         story.append(Spacer(1, 6))
-        for article in news_sources["all_articles"]:
-            marker = "[Used]" if article["used_in_analysis"] else "[Retrieved, not used]"
+
+        def _article_paragraph(article, marker):
             text = (
                 f'<font size="8">{marker}</font> <b>{article["headline"]}</b><br/>'
                 f'{article["source"]} &mdash; {article["date"]} &mdash; '
-                f'<a href="{article["url"]}">{article["url"]}</a>'
+                f'<a href="{article["url"]}">View source</a>'
             )
             story.append(Paragraph(text, _BODY_STYLE))
+
+        all_articles = news_sources["all_articles"]
+        used = [a for a in all_articles if a["used_in_analysis"]]
+        not_used = [a for a in all_articles if not a["used_in_analysis"]]
+
+        for article in used:
+            _article_paragraph(article, "[Used]")
+
+        # Retrieved-but-unused articles are still shown, just capped --
+        # the transparency goal (can a reader spot an obvious story the
+        # model skipped?) only needs a representative sample, not an
+        # exhaustive list (see MAX_UNUSED_ARTICLES_SHOWN above).
+        for article in not_used[:MAX_UNUSED_ARTICLES_SHOWN]:
+            _article_paragraph(article, "[Retrieved, not used]")
+
+        remaining = len(not_used) - MAX_UNUSED_ARTICLES_SHOWN
+        if remaining > 0:
+            story.append(Paragraph(
+                f"+ {remaining} more article{'s' if remaining != 1 else ''} retrieved "
+                "but not used in this analysis.",
+                _BODY_STYLE,
+            ))
     else:
         # Always say something here, even with zero coverage -- silence
         # would look like the section was forgotten, not that there's
