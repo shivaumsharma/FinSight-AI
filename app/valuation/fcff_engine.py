@@ -260,6 +260,56 @@ class FCFFEngine:
             return self.HOLD_YEARS_DEFAULT
         return self.HOLD_YEARS_LOW_QUALITY
 
+    # Terminal growth is a "forever" assumption in the Gordon-growth
+    # model -- the same trailing-fundamentals extrapolation problem the
+    # 3-stage fade above addresses for the explicit forecast years also
+    # applies to where that fade LANDS. A single flat terminal rate for
+    # every company (the original behavior) structurally undervalues a
+    # durable, high-ROE compounder's perpetuity value relative to a
+    # mature/declining business's -- this is a direct, measured
+    # contributor to the mega-cap-vs-deep-value skew
+    # scripts/wacc_capm_audit.py quantifies (EVALUATION.md section 9):
+    # post-3-stage-fade, mega-cap median intrinsic/price was still
+    # ~0.91 vs. deep-value's ~1.75, roughly a 2x gap. Tied to the SAME
+    # ROE tier _quality_hold_years already uses, not a second
+    # independent quality signal -- a company doesn't get a longer
+    # explicit-forecast runway from its quality and then land on a
+    # generic terminal rate regardless of that same quality.
+    #
+    # +/-1.0 percentage point, not a larger swing: within the range
+    # this codebase already treats as a reasonable terminal-growth band
+    # elsewhere (valuation_pipeline.py's SENSITIVITY_GROWTH_RANGE sweeps
+    # 1%-5%), and deliberately picked from first principles (roughly:
+    # sustained real growth + inflation + modest share-gain premium for
+    # a moat business, vs. a discount for structural/secular pressure)
+    # rather than fitted to this session's specific backtest numbers --
+    # a full grid search here would need re-running the actual DCF per
+    # candidate value (unlike the composite-weight tuning, which
+    # recombines already-computed scores cheaply), so this is a single,
+    # principled value tested once against real backtest data, not the
+    # winner of a multi-candidate search (see EVALUATION.md section 9's
+    # own before/after for that test).
+    TERMINAL_GROWTH_ADJUSTMENT_HIGH_QUALITY = 0.01
+    TERMINAL_GROWTH_ADJUSTMENT_LOW_QUALITY = -0.01
+
+    def quality_terminal_growth_adjustment(self):
+        """Public (unlike _quality_hold_years) -- ValuationPipeline
+        calls this once and applies the resulting adjusted terminal
+        growth rate consistently to forecast_fcff's fade math AND
+        DCFEngine's/MonteCarloDCFEngine's own Gordon-growth terminal
+        value calculation. Computing the adjustment independently in
+        each place would risk forecast_fcff fading to a different rate
+        than the terminal-value step capitalizes at -- a real
+        discontinuity bug, not just an inconsistency."""
+        roe = self.calculate_return_on_equity()
+        if roe is None or roe > self.ROE_IMPLAUSIBLE_THRESHOLD:
+            return 0.0
+        if roe >= self.ROE_HIGH_QUALITY_THRESHOLD:
+            return self.TERMINAL_GROWTH_ADJUSTMENT_HIGH_QUALITY
+        if roe >= self.ROE_LOW_QUALITY_THRESHOLD:
+            return 0.0
+        return self.TERMINAL_GROWTH_ADJUSTMENT_LOW_QUALITY
+
     def forecast_fcff(self,forecast_years=10,terminal_growth_rate=0.03,
                        base_fcff_override=None,initial_growth_rate_override=None):
        """

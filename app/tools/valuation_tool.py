@@ -37,6 +37,28 @@ from .base_tool import BaseTool
 _CRYPTO_UNAVAILABLE_REASON = "No financial statements exist for cryptocurrencies -- DCF valuation is not applicable."
 
 
+def _truncate_to_cutoff(history, cutoff):
+    """None-safe point-in-time truncation for a benchmark/sector/rate
+    history DataFrame -- see point_in_time_cutoff's own comment in
+    run() for why this exists. Returns history unchanged if it's None
+    (a failed fetch degrades the same way with or without a cutoff).
+
+    get_benchmark_history's yfinance data comes back tz-aware
+    (America/New_York); the backtest's as_of_date is a plain tz-naive
+    pd.Timestamp (same convention phase2_backtest.py's own price/beta
+    point-in-time helpers use) -- comparing the two directly raises
+    "Invalid comparison between dtype=datetime64[ns, tz] and Timestamp"
+    (confirmed against a live fetch), so the tz is stripped from a
+    COPY of the index for the comparison only, never mutating history
+    itself."""
+    if history is None or history.empty:
+        return history
+    index = history.index
+    if index.tz is not None:
+        index = index.tz_localize(None)
+    return history[index <= cutoff]
+
+
 class ValuationTool(BaseTool):
 
     name = "valuation_tool"
@@ -81,6 +103,12 @@ class ValuationTool(BaseTool):
             ticker=context.ticker,
             currency=(context.company_info or {}).get("currency"),
             risk_tolerance=context.risk_tolerance,
+            # None for every real-time caller (the live app never sets
+            # this) -- only scripts/phase2_backtest.py sets it, to a
+            # point-in-time historical Treasury yield, so its as-of-date
+            # simulations don't leak today's live rate into a past
+            # valuation. See ValuationPipeline.__init__'s own docstring.
+            risk_free_rate_override=getattr(context, "risk_free_rate_override", None),
         )
 
         results = pipeline.run_valuation()
@@ -127,36 +155,51 @@ class ValuationTool(BaseTool):
         context.equity_value = results.get("equity_value")
         context.intrinsic_value = results.get("intrinsic_value")
 
-        # ML valuation classifier -- see ml_valuation_classifier.py.
-        # Display-only, NOT folded into the recommendation composite
-        # (report_data_builder.py's DCF_WEIGHT/RELATIVE_WEIGHT) --
-        # this signal has no accuracy track record yet. None if no
-        # trained model exists (scripts/train_ml_classifier.py hasn't
-        # been run) or if DCF was unavailable for this company (see
-        # extract_features).
-        ml_features = extract_features(context)
-        results["ml_classifier"] = predict_verdict(ml_features) if ml_features else None
-
         # Alpha Factors scorecard -- see alpha_factors.py's own module
-        # docstring. Same non-negotiable boundary as ml_classifier
-        # above: display-only, never read by report_data_builder.py's
-        # composite score. The three benchmark-comparison factors
-        # (Relative Strength vs Index, Sector Relative Performance,
-        # Interest Rate Sensitivity) are skipped entirely for .NS
-        # tickers -- comparing a rupee-denominated stock against a
-        # USD-denominated benchmark isn't a meaningful signal (see
-        # AlphaFactorsEngine's own docstring) -- so those fetches are
-        # never even made for an NSE ticker.
+        # docstring. Computed BEFORE ml_features/extract_features below
+        # (previously ran after) so extract_features can read
+        # results["alpha_factors"] via context.valuation_results --
+        # momentum/quality/sentiment/macro factors are real, already-
+        # computed signal that a valuation-only feature vector was
+        # simply never given access to. Still display-only with
+        # respect to report_data_builder.py's composite score (DCF_WEIGHT/
+        # RELATIVE_WEIGHT) -- that boundary is unchanged; only the ML
+        # classifier's own feature set gains access to these.
+        #
+        # The three benchmark-comparison factors (Relative Strength vs
+        # Index, Sector Relative Performance, Interest Rate Sensitivity)
+        # are skipped entirely for .NS tickers -- comparing a rupee-
+        # denominated stock against a USD-denominated benchmark isn't a
+        # meaningful signal (see AlphaFactorsEngine's own docstring) --
+        # so those fetches are never even made for an NSE ticker.
+        #
+        # point_in_time_cutoff: set only by scripts/phase2_backtest.py's
+        # run_one() (and, through it, scripts/build_ml_training_set.py)
+        # to simulate "as of" a past date. Without truncating these
+        # benchmark/sector/rate histories to that cutoff, a backtest
+        # valuing a company "as of 18 months ago" would silently compare
+        # its point-in-time-correct stock price against TODAY's S&P/
+        # sector/Treasury level -- a real look-ahead leak get_benchmark_history's
+        # own always-fetch-through-today behavior would otherwise cause.
+        # None (the default, every live report) leaves today's full
+        # history untouched. 10y (not the 5y default) so a cutoff several
+        # years in the past still leaves enough trailing history for the
+        # 12-month momentum window computed off of it.
         is_non_us_listing = (context.ticker or "").upper().endswith(".NS")
+        point_in_time_cutoff = getattr(context, "point_in_time_cutoff", None)
         benchmark_history = None
         sector_history = None
         rate_proxy_history = None
         if not is_non_us_listing:
-            benchmark_history = get_benchmark_history("^GSPC")
-            rate_proxy_history = get_benchmark_history("^TNX")
+            benchmark_history = get_benchmark_history("^GSPC", period="10y")
+            rate_proxy_history = get_benchmark_history("^TNX", period="10y")
             sector_etf = SECTOR_ETF_PROXIES.get((context.company_info or {}).get("sector"))
             if sector_etf:
-                sector_history = get_benchmark_history(sector_etf)
+                sector_history = get_benchmark_history(sector_etf, period="10y")
+            if point_in_time_cutoff is not None:
+                benchmark_history = _truncate_to_cutoff(benchmark_history, point_in_time_cutoff)
+                rate_proxy_history = _truncate_to_cutoff(rate_proxy_history, point_in_time_cutoff)
+                sector_history = _truncate_to_cutoff(sector_history, point_in_time_cutoff)
 
         results["alpha_factors"] = AlphaFactorsEngine(
             normalized_financials=context.normalized_financials,
@@ -175,6 +218,18 @@ class ValuationTool(BaseTool):
             sector_history=sector_history,
             rate_proxy_history=rate_proxy_history,
         ).evaluate()
+
+        # ML valuation classifier -- see ml_valuation_classifier.py.
+        # Display-only, NOT folded into the recommendation composite
+        # (report_data_builder.py's DCF_WEIGHT/RELATIVE_WEIGHT) --
+        # this signal has no accuracy track record yet. None if no
+        # trained model exists (scripts/train_ml_classifier.py hasn't
+        # been run) or if DCF was unavailable for this company (see
+        # extract_features). Runs after alpha_factors above so its
+        # feature set (ml_features.py) can read momentum/quality/
+        # sentiment/macro factors, not just valuation-derived ones.
+        ml_features = extract_features(context)
+        results["ml_classifier"] = predict_verdict(ml_features) if ml_features else None
 
         context.valuation_summary = ValuationSummaryBuilder().build(results)
 
