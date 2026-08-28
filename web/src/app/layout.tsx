@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Source_Serif_4 } from "next/font/google";
 import Script from "next/script";
+import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import "./globals.css";
 
 // The whole UI is built on a monospace terminal aesthetic (see
@@ -70,6 +71,7 @@ export default function RootLayout({
     <html lang="en" className={`h-full antialiased ${jetbrainsMono.variable} ${sourceSerif.variable}`} suppressHydrationWarning>
       <body className="min-h-full flex flex-col">
         {children}
+        <ServiceWorkerRegistration />
         <Script id="theme-init" strategy="beforeInteractive">
           {THEME_INIT_SCRIPT}
         </Script>
