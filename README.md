@@ -15,7 +15,7 @@ An agentic equity-research and paper-trading platform built using Python, FastAP
 
 The platform combines an LLM tool-planning agent, a real DCF valuation engine, retrieval-augmented generation over live regulatory filings, a self-evaluation scoring pass, a 31-signal quantitative factor scorecard, a simulated paper-trading layer, voice input, and a rigorously benchmarked evaluation framework into one deployable, tested system.
 
-**[Try the research demo →](https://shivaum-finsight-ai.streamlit.app)** · **[Try the full platform →](https://web-ten-blond-39.vercel.app)**
+**[Try the research demo →](https://huggingface.co/spaces/shivaumsharma/finsight-ai)** · **[Try the full platform →](https://web-ten-blond-39.vercel.app)**
 
 ---
 
@@ -125,8 +125,8 @@ Every tool reads from and writes to one shared `ResearchContext` object. The pla
 | Orchestration | Hand-rolled controller, plus a LangGraph port kept alongside it as a documented, benchmarked alternative — see [EVALUATION.md](EVALUATION.md) |
 | Caching | Redis — content-addressed for valuation/narrative output, TTL-only for statement fetches; degrades to a no-op if unreachable |
 | Report output | reportlab (downloadable PDF) |
-| Deployment | AWS Elastic Beanstalk (API, Terraform-defined, EC2 applied and healthy; CloudFront/HTTPS pending AWS account verification) + Vercel (frontend); Google Cloud Run supported but currently down (GCP project billing disabled); Streamlit Community Cloud / Hugging Face Spaces (research demo); Railway supported as an alternative |
-| Testing / CI | pytest (989 test functions, 59 files), GitHub Actions with failure-annotation diagnostics |
+| Deployment | AWS Elastic Beanstalk (API, Terraform-defined) + CloudFront (HTTPS termination in front of it) + Vercel (frontend); Google Cloud Run supported but currently down (GCP project billing disabled); Hugging Face Spaces (research demo); Railway supported as an alternative |
+| Testing / CI | pytest (1,088 test functions, 62 files), GitHub Actions with failure-annotation diagnostics |
 
 ---
 
@@ -149,7 +149,7 @@ Autonomous_Financial_Research_Agent/
 │   ├── rag/                    # Chunking, embeddings, ChromaDB, report generation
 │   ├── reasoning/               # Market movers, model consensus, backtest stats
 │   ├── reporting/               # Report/PDF building, news, institutional ratings
-│   ├── tests/                  # 989 tests across 59 files
+│   ├── tests/                  # 1,088 tests across 62 files
 │   ├── tools/                  # Agent tools (market, valuation, RAG, sentiment, ...)
 │   ├── training/                # GRPO / RLVR fine-tuning pipeline
 │   ├── utils/
@@ -196,7 +196,7 @@ Autonomous_Financial_Research_Agent/
 
 **ML valuation classifier**: Logistic Regression vs. XGBoost/GradientBoosting, trained on realized forward-return outcomes from the platform's own point-in-time backtest (not analyst agreement, avoiding look-ahead bias), evaluated with stratified 5-fold CV *and* a held-out test split with per-class precision/recall. Explicitly display-only — never part of the recommendation composite.
 
-**RLVR / GRPO fine-tuning**: a from-scratch reinforcement-learning pipeline (`app/training/`) that fine-tunes a local LLM to predict Buy/Hold/Sell using realized stock returns as a binary, verifiable reward — built and unit-tested, not yet executed to a trained checkpoint.
+**RLVR / GRPO fine-tuning**: a from-scratch reinforcement-learning pipeline (`app/training/`) that fine-tunes a local LLM (Qwen2.5-7B) to predict Buy/Hold/Sell using realized stock returns as a binary, verifiable reward — built, unit-tested, and executed to real trained checkpoints (`scripts/train_grpo.py`, `scripts/train_sft.py`). A rejection-sampling SFT run improved held-out directional accuracy from a 40.2% base to 43.6% on its own evaluation set; pure GRPO alone plateaued at the base rate, diagnosed as reward-sparsity from too few rollouts per prompt (see `scripts/filter_informative_examples.py`'s own docstring). This is a separate, smaller-scale research track from FinSight's production canonical accuracy metric above — a different model, different evaluation set — and is not yet integrated into the live report pipeline.
 
 **Honest limitations**, documented rather than hidden: the DCF's fixed terminal-growth assumption used to structurally undervalue high-growth compounders relative to mature businesses — a three-stage growth fade plus quality-tiered terminal growth (both ROE-based) and now-sourced CAPM inputs (a live 10Y Treasury yield, Damodaran's published equity risk premium) have closed most of that specific skew, cleanly measured (mega-cap vs. deep-value median intrinsic-value/price went from a ~3x gap to ~1.1x). Whether that also moves overall predictive accuracy is still an open question — a rate-limiting episode during the last full re-run left the sample too small and its baseline too shifted to give a clean answer, and that's stated plainly rather than papered over. FinSight's one canonical accuracy metric — 12-month forward directional accuracy, pooled across two non-overlapping historical windows on a 1,002-ticker universe (`scripts/canonical_accuracy.py`) — currently stands at **36.4% (N=923) vs. a 60.0% naive Always-Buy baseline**, i.e. the model currently loses to doing nothing. This number is surfaced on every generated report, not just in this doc, and is due a clean full-sample re-run once external rate limits recover. Full numbers, methodology, and the reasoning behind every one of these findings are in [EVALUATION.md](EVALUATION.md).
 
@@ -245,7 +245,7 @@ See `.env.example` and `web/.env.example` for the full list of required/optional
 
 ## Deployment
 
-The FastAPI backend previously ran on **Google Cloud Run**, but that GCP project currently has billing disabled (no payment method attached), so the Cloud Run service is down. `infra/` defines an equivalent **AWS Elastic Beanstalk** stack via Terraform as the replacement — see `infra/README.md` for current status. The EC2/EB environment itself is applied and healthy; the CloudFront distribution in front of it (needed for HTTPS, since Single-Instance EB has no load balancer to terminate TLS) is still blocked on a one-time AWS account verification requirement (a support case is open). The Next.js frontend deploys to **Vercel**; the research demo runs separately on **Hugging Face Spaces** (the local model set exceeds Streamlit Community Cloud's free-tier memory limit). Railway remains fully supported as an alternative single-service deploy for the API. The Cloud Run setup steps below are kept for reference since the same Dockerfile-based flow applies to any of these targets.
+The FastAPI backend previously ran on **Google Cloud Run**, but that GCP project currently has billing disabled (no payment method attached), so the Cloud Run service is down. `infra/` defines an equivalent **AWS Elastic Beanstalk** stack via Terraform as the replacement — see `infra/README.md` for current status. The EC2/EB environment is applied and healthy, fronted by a **CloudFront** distribution for HTTPS termination (Single-Instance EB has no load balancer to terminate TLS itself) — live at `https://d3iltp1nnt4rbu.cloudfront.net`. The Next.js frontend deploys to **Vercel**; the research demo runs separately on **Hugging Face Spaces** (the local model set exceeds Streamlit Community Cloud's free-tier memory limit). Railway remains fully supported as an alternative single-service deploy for the API. The Cloud Run setup steps below are kept for reference since the same Dockerfile-based flow applies to any of these targets.
 
 **Research demo (Hugging Face Spaces):**
 1. Create a Space at [huggingface.co/new-space](https://huggingface.co/new-space) — SDK: **Streamlit**, Hardware: **CPU basic (free)**.
@@ -289,7 +289,7 @@ cd web && npx vercel@latest --prod
 
 ## Testing & Quality
 
-989 test functions across 59 files, covering the recommendation engine, valuation pipeline, options pricer (Black-Scholes reference values, put-call parity, implied-vol round-trip), auth, RAG retrieval, the job queue's concurrency behavior, every external API client (SEC EDGAR, NSE India, Sarvam, Finnhub), and the full HTTP API surface — run via `pytest app/tests/`. CI runs on every push via GitHub Actions, with pytest failures re-emitted as annotations so a break is diagnosable from the Checks API without needing repo sign-in.
+1,088 test functions across 62 files, covering the recommendation engine, valuation pipeline, options pricer (Black-Scholes reference values, put-call parity, implied-vol round-trip), auth, RAG retrieval, the job queue's concurrency behavior, every external API client (SEC EDGAR, NSE India, Sarvam, Finnhub), and the full HTTP API surface — run via `pytest app/tests/`. CI runs on every push via GitHub Actions, with pytest failures re-emitted as annotations so a break is diagnosable from the Checks API without needing repo sign-in.
 
 ---
 
