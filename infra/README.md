@@ -7,9 +7,12 @@ All in `eu-north-1` (Stockholm) -- same region and same AWS account as
 DigiNyaya, sharing its already-bootstrapped Terraform state bucket under a
 different key.
 
-**Nothing here has been applied.** This is reviewable code -- read the plan
-(`terraform plan`) before ever running `terraform apply`, and treat every
-`apply` as a real action even though it's sized to cost $0.
+**Status: applied and live** -- EB, ECR, IAM, and CloudFront are all
+provisioned and healthy (`https://d3iltp1nnt4rbu.cloudfront.net`). This is
+still reviewable code if you're using it as a template for your own AWS
+account: read the plan (`terraform plan`) before ever running
+`terraform apply` there, and treat every `apply` as a real action even
+though it's sized to cost $0.
 
 ## Why this exists
 
