@@ -23,7 +23,7 @@ ResearchContext
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 @dataclass
@@ -41,7 +41,7 @@ class ResearchContext:
     ticker: str
     question: str
 
-    request_time: datetime = field(default_factory=datetime.utcnow)
+    request_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # The requesting user's saved risk_tolerance ("Conservative"/
     # "Moderate"/"Aggressive", see app/api/db.py's users.risk_tolerance)
@@ -83,9 +83,15 @@ class ResearchContext:
 
     # Human Readable Summaries
 
-    financial_summary: str = ""
-    valuation_summary: str = ""
-    sentiment_summary: str = ""
+    # Despite the section header, these three are always assigned a
+    # dict (market_data_tool.py/valuation_tool.py/sentiment_tool.py all
+    # call a *SummaryBuilder().build(...) that returns dict[str, Any],
+    # never a str) -- the str type hints were stale from an earlier
+    # design. research_summary below genuinely IS a str (comparison_tool.py/
+    # report_tool.py's builders both return str), so it keeps its own type.
+    financial_summary: Dict[str, Any] = field(default_factory=dict)
+    valuation_summary: Dict[str, Any] = field(default_factory=dict)
+    sentiment_summary: Dict[str, Any] = field(default_factory=dict)
     research_summary: str = ""
     # ==========================================================
     # RAG Pipeline
