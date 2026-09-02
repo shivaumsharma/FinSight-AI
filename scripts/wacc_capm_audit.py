@@ -53,26 +53,25 @@ import yfinance as yf
 from app.core.research_context import ResearchContext
 from app.data.financial_normalizer import FinancialStatementNormaliser
 from app.tools.valuation_tool import ValuationTool
-from app.valuation.wacc_engine import WACCEngine
 
 from phase2_backtest import (
     TICKERS, MARKET_BENCHMARK,
     _tz_naive, _price_on_or_before, _trailing_beta, _point_in_time_statement,
 )
 
-# WACCEngine's own hardcoded defaults (app/valuation/wacc_engine.py,
-# __init__ signature) -- not fetched from any live data source (no
-# Treasury-yield API, no dynamic equity-risk-premium estimate), not
-# overridden by any caller (valuation_pipeline.py constructs
-# WACCEngine with only financial_df/market_cap/beta -- confirmed by
-# reading every WACCEngine(...) call site in app/). Same two numbers
-# for every ticker, every point in time, regardless of actual macro
-# conditions at the as-of date.
-RISK_FREE_RATE_SOURCE = WACCEngine.__init__.__defaults__[0]
-MARKET_RISK_PREMIUM_SOURCE = WACCEngine.__init__.__defaults__[1]
+# Historically this audit read WACCEngine.__init__'s own hardcoded
+# constructor defaults (0.04/0.06) and treated them as "the" CAPM
+# inputs for every row -- accurate when that was genuinely the only
+# source, but valuation_pipeline.py now live-fetches a real Treasury
+# yield and sources a real ERP (see that module's own comments), so
+# those defaults are a stale fallback only, not what any real run
+# actually used. Fixed to read risk_free_rate/market_risk_premium back
+# from each ticker's own ValuationPipeline result instead (see
+# audit_one below) -- the actual value THAT run used, not a second,
+# potentially-drifted copy of the same information.
 
 
-def audit_one(ticker, category, as_of_date, market_history):
+def audit_one(ticker, category, as_of_date, market_history, tnx_history):
     stock = yf.Ticker(ticker)
     price_history = _tz_naive(stock.history(period="10y"))
     if price_history is None or price_history.empty:
@@ -117,11 +116,27 @@ def audit_one(ticker, category, as_of_date, market_history):
     ctx.historical_prices = price_history[price_history.index <= as_of_date]
     ctx.company_info = {"current_price": price_as_of, "market_cap": market_cap_as_of, "beta": beta}
 
+    # Same point-in-time discipline phase2_backtest.py's own run_one()
+    # applies -- without these two, this audit would value every
+    # ticker "as of" a past date using TODAY's live Treasury yield and
+    # TODAY's benchmark/sector levels, a real look-ahead leak (see
+    # valuation_pipeline.py's _live_us_risk_free_rate and
+    # valuation_tool.py's point_in_time_cutoff, both added specifically
+    # to close this same class of bug elsewhere).
+    if tnx_history is not None:
+        tnx_as_of = _price_on_or_before(tnx_history, as_of_date)
+        if tnx_as_of is not None:
+            ctx.risk_free_rate_override = tnx_as_of / 100
+    ctx.point_in_time_cutoff = as_of_date
+
     ValuationTool().run(ctx)
     vr = ctx.valuation_results
 
     intrinsic_value = vr.get("intrinsic_value")
     iv_to_price = (intrinsic_value / price_as_of) if intrinsic_value and price_as_of else None
+
+    risk_free_rate = vr.get("risk_free_rate")
+    market_risk_premium = vr.get("market_risk_premium")
 
     return {
         "ticker": ticker,
@@ -129,9 +144,18 @@ def audit_one(ticker, category, as_of_date, market_history):
         "dcf_available": vr.get("dcf_available"),
         "dcf_unavailable_reason": vr.get("dcf_unavailable_reason"),
         "beta": beta,
-        "risk_free_rate": RISK_FREE_RATE_SOURCE,
-        "equity_risk_premium": MARKET_RISK_PREMIUM_SOURCE,
-        "cost_of_equity": (RISK_FREE_RATE_SOURCE + beta * MARKET_RISK_PREMIUM_SOURCE) if beta is not None else None,
+        # Read back from THIS ticker's own ValuationPipeline result --
+        # the actual value that run used (a live point-in-time Treasury
+        # yield, so this now genuinely varies by as-of date, unlike the
+        # old hardcoded-constant version), not re-derived from a stale
+        # second copy. See this module's own top-of-file comment.
+        "risk_free_rate": risk_free_rate,
+        "equity_risk_premium": market_risk_premium,
+        "cost_of_equity": (
+            (risk_free_rate + beta * market_risk_premium)
+            if risk_free_rate is not None and market_risk_premium is not None and beta is not None
+            else None
+        ),
         "raw_wacc": vr.get("raw_wacc"),
         "wacc_used": vr.get("wacc"),
         "wacc_floored": vr.get("wacc_floored"),
@@ -151,18 +175,22 @@ def main():
     as_of_date = today_date - pd.Timedelta(days=as_of_months_ago * 30)
 
     print(f"Universe: curated ({len(TICKERS)} tickers)   As-of date: {as_of_date.date()}", file=sys.stderr)
-    print(f"CAPM inputs (app/valuation/wacc_engine.py hardcoded defaults, not live-fetched, "
-          f"same for every ticker/date): risk_free_rate={RISK_FREE_RATE_SOURCE:.2%}  "
-          f"equity_risk_premium={MARKET_RISK_PREMIUM_SOURCE:.2%}", file=sys.stderr)
-    print(f"Terminal growth (app/valuation/valuation_pipeline.py DEFAULT_TERMINAL_GROWTH_RATE, "
-          f"same for every ticker regardless of sector): see per-row value below", file=sys.stderr)
+    print(f"CAPM inputs: risk-free rate is now a point-in-time live 10Y Treasury yield (varies by "
+          f"as-of date, same for every ticker within this one run since they share an as-of date -- "
+          f"see per-row RFR column); equity risk premium is a single sourced constant (Damodaran's "
+          f"published implied ERP, see app/valuation/valuation_pipeline.py). Neither is the old "
+          f"hardcoded WACCEngine default anymore.", file=sys.stderr)
+    print(f"Terminal growth: quality-tiered by ROE (app/valuation/fcff_engine.py's "
+          f"quality_terminal_growth_adjustment) -- no longer a single flat value for every ticker "
+          f"regardless of sector; see per-row TermG column below.", file=sys.stderr)
 
     market_history = _tz_naive(yf.Ticker(MARKET_BENCHMARK).history(period="5y"))
+    tnx_history = _tz_naive(yf.Ticker("^TNX").history(period="10y"))
 
     rows = []
     for i, (ticker, category) in enumerate(TICKERS.items(), 1):
         try:
-            row = audit_one(ticker, category, as_of_date, market_history)
+            row = audit_one(ticker, category, as_of_date, market_history, tnx_history)
         except Exception as e:
             row = {"ticker": ticker, "category": category, "error": str(e)}
         rows.append(row)
@@ -171,7 +199,7 @@ def main():
 
     # ---------------- per-ticker table ----------------
     print()
-    header = (f"{'Ticker':<7}{'Category':<32}{'Beta':>6}{'RawWACC':>9}{'WACC':>8}{'Floor?':>7}"
+    header = (f"{'Ticker':<7}{'Category':<32}{'Beta':>6}{'RFR':>7}{'RawWACC':>9}{'WACC':>8}{'Floor?':>7}"
               f"{'TermG':>7}{'CoE':>7}{'IV':>12}{'Price':>10}{'IV/Px':>8}")
     print(header)
     print("-" * len(header))
@@ -183,30 +211,34 @@ def main():
             print(f"{r['ticker']:<7}{r['category']:<32}DCF UNAVAILABLE: {r['dcf_unavailable_reason']}")
             continue
         print(
-            f"{r['ticker']:<7}{r['category']:<32}{r['beta']:>6.2f}"
+            f"{r['ticker']:<7}{r['category']:<32}{r['beta']:>6.2f}{r['risk_free_rate']*100:>6.2f}%"
             f"{r['raw_wacc']*100:>8.2f}%{r['wacc_used']*100:>7.2f}%{str(r['wacc_floored']):>7}"
             f"{r['terminal_growth_rate']*100:>6.1f}%{r['cost_of_equity']*100:>6.2f}%"
             f"{r['intrinsic_value']:>12,.2f}{r['price_as_of']:>10,.2f}{r['iv_to_price']:>8.2f}"
         )
 
     # ---------------- CAPM input sources ----------------
-    print("\nCAPM INPUT SOURCES:")
-    print(f"  Risk-free rate:      {RISK_FREE_RATE_SOURCE:.2%}  -- HARDCODED default in WACCEngine.__init__ "
-          f"(app/valuation/wacc_engine.py); not fetched from any live Treasury-yield source; identical for "
-          f"every ticker and every as-of date tested.")
-    print(f"  Equity risk premium: {MARKET_RISK_PREMIUM_SOURCE:.2%}  -- HARDCODED default in the same "
-          f"WACCEngine.__init__ signature; not sourced from any live/historical ERP estimate; identical "
-          f"for every ticker and every as-of date tested.")
+    rfr_values = sorted({round(r["risk_free_rate"], 4) for r in rows if r.get("risk_free_rate") is not None})
+    erp_values = sorted({round(r["equity_risk_premium"], 4) for r in rows if r.get("equity_risk_premium") is not None})
+    print("\nCAPM INPUT SOURCES (post-fix -- see this file's own top-of-file comment for what changed):")
+    print(f"  Risk-free rate:      point-in-time live 10Y Treasury yield (app/valuation/valuation_pipeline.py's "
+          f"_live_us_risk_free_rate, overridden here to the historical ^TNX close nearest each row's own "
+          f"as-of date -- see this script's audit_one). Observed this run: "
+          f"{', '.join(f'{v:.2%}' for v in rfr_values) if rfr_values else 'n/a'} "
+          f"(one value expected -- every row in a single run shares the same as-of date).")
+    print(f"  Equity risk premium: {', '.join(f'{v:.2%}' for v in erp_values) if erp_values else 'n/a'} "
+          f"-- a single sourced constant (Aswath Damodaran's published US implied ERP, "
+          f"app/valuation/valuation_pipeline.py's MARKET_RISK_PREMIUM_BY_CURRENCY), not fetched live, but "
+          f"cited and dated rather than an unexplained hardcoded guess.")
     print(f"  Beta:                per-ticker, computed by phase2_backtest.py's own _trailing_beta() -- "
           f"OLS-style covariance/variance of trailing daily returns vs. {MARKET_BENCHMARK} ending at the "
           f"as-of date ({250}-trading-day window), falling back to 1.2 if fewer than 60 aligned trading "
           f"days are available. (The live, non-backtest pipeline instead uses yfinance's own reported "
           f"beta when present, same 1.2 fallback otherwise -- see market_data_tool.py.)")
-    print(f"  Terminal growth:     app/valuation/valuation_pipeline.py's DEFAULT_TERMINAL_GROWTH_RATE -- "
-          f"a single fixed value applied to every ticker regardless of sector/company (see per-row TermG "
-          f"column above; that module's own docstring documents this was raised from 3% to 4% after an "
-          f"earlier backtest found a systematic downward bias, explicitly flagged there as unverified "
-          f"whether 4% alone closes the gap).")
+    print(f"  Terminal growth:     quality-tiered by ROE (app/valuation/fcff_engine.py's "
+          f"quality_terminal_growth_adjustment) -- +1pt for ROE>=25%%, -1pt for ROE<15%%, 0 otherwise, "
+          f"applied on top of DEFAULT_TERMINAL_GROWTH_RATE (4%%). No longer a single flat value for every "
+          f"ticker regardless of quality -- see per-row TermG column above.")
 
     # ---------------- intrinsic-value-to-price distribution ----------------
     valid = [r for r in rows if not r.get("error") and r.get("dcf_available") and r.get("iv_to_price") is not None]
