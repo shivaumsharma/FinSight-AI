@@ -529,8 +529,9 @@ export default function ReportView({
                       </div>
                       <p className="mt-2 text-[11px] text-dim">
                         Independent of the DCF above -- values the actual dividend stream, only computed for
-                        consistent dividend payers. Not part of the recommendation; tested and found promising
-                        but on too small a sample to trust yet (see EVALUATION.md).
+                        consistent dividend payers. Not part of the recommendation; tested at scale (753
+                        observations) and found not to improve accuracy -- kept as an independent second read
+                        instead (see EVALUATION.md).
                       </p>
                     </div>
                   )}

@@ -477,6 +477,16 @@ class ValuationPipeline:
     "wacc_floored": wacc_info["floored"],
     "wacc_floor_note": wacc_floor_note,
     "terminal_growth_rate": effective_terminal_growth_rate,
+    # The actual risk_free_rate/market_risk_premium THIS run used --
+    # exposed so a caller can report what was really used per ticker/
+    # date rather than re-deriving it from WACCEngine's own hardcoded
+    # constructor defaults (a second, potentially-stale copy of the
+    # same information; see scripts/wacc_capm_audit.py's own fix for
+    # exactly this bug). risk_free_rate is live-fetched per valuation
+    # (or overridden point-in-time by a backtest caller) so it's not a
+    # fixed constant the way it used to be.
+    "risk_free_rate": self.risk_free_rate,
+    "market_risk_premium": self.market_risk_premium,
     "sensitivity_analysis":sensitivity_analysis,
     "monte_carlo_values": monte_carlo_values,
     "ddm_value": ddm_value,
@@ -498,6 +508,11 @@ class ValuationPipeline:
           "wacc_floored": None,
           "wacc_floor_note": None,
           "terminal_growth_rate": self.terminal_growth_rate,
+          # Already resolved in __init__ regardless of whether DCF goes
+          # on to fail below -- still informative ("this is what would
+          # have been used") rather than None.
+          "risk_free_rate": self.risk_free_rate,
+          "market_risk_premium": self.market_risk_premium,
           "sensitivity_analysis": None,
           "monte_carlo_values": None,
           "ddm_value": None,
