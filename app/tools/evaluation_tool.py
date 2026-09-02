@@ -8,7 +8,7 @@ from streamlit_app.py as it was before.
 
 Latency is derived from `context.request_time`, which
 `ResearchContext` already stamps at construction time via
-`datetime.utcnow()` -- no new bookkeeping needed.
+`datetime.now(timezone.utc)` -- no new bookkeeping needed.
 
 Confidence Scores is one of the report's own 13 sections, but the
 scores it shows can only be known after the report has already been
@@ -19,7 +19,7 @@ into context.report_data and re-renders the PDF afterward, rather than
 leaving the report showing scores it never actually had.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.research_context import ResearchContext
 from app.core.prediction_log import PredictionLogger
@@ -42,7 +42,7 @@ class EvaluationTool(BaseTool):
             context.record_tool(self.name)
             return context
 
-        latency = (datetime.utcnow() - context.request_time).total_seconds()
+        latency = (datetime.now(timezone.utc) - context.request_time).total_seconds()
 
         metrics = EvaluationEngine().evaluate(
             context=context,

@@ -206,12 +206,8 @@ class ValuationTool(BaseTool):
             historical_prices=context.historical_prices,
             beta=context.beta,
             company_info=context.company_info,
-            # financial_summary/sentiment_summary default to "" (an
-            # empty string, not a dict) on a fresh ResearchContext until
-            # their own tools populate them -- see research_context.py's
-            # dataclass fields. Guard rather than assume dict.
-            financial_summary=context.financial_summary if isinstance(context.financial_summary, dict) else {},
-            sentiment_summary=context.sentiment_summary if isinstance(context.sentiment_summary, dict) else {},
+            financial_summary=context.financial_summary,
+            sentiment_summary=context.sentiment_summary,
             news_sentiment_summary=context.news_sentiment_summary or {},
             is_non_us_listing=is_non_us_listing,
             benchmark_history=benchmark_history,

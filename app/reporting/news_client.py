@@ -23,7 +23,7 @@ import os
 import json
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -190,7 +190,7 @@ def fetch_company_news(ticker: str, days: int = DAYS_LOOKBACK) -> List[Dict]:
         return []
 
     try:
-        to_date = datetime.utcnow().date()
+        to_date = datetime.now(timezone.utc).date()
         from_date = to_date - timedelta(days=days)
 
         def _do():

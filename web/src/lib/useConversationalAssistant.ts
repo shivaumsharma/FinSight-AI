@@ -6,6 +6,7 @@ import type { VoiceInputHandle, VoiceState } from "@/components/VoiceInputButton
 import type { ChatMessage } from "@/lib/types";
 import { getNavigationTarget } from "@/lib/chatNavigation";
 import { splitSentences } from "@/lib/splitSentences";
+import { useRealtimeVoiceInput } from "@/lib/useRealtimeVoiceInput";
 
 const VOICE_MODE_STORAGE_KEY = "finsight-voice-mode";
 const MAX_MIC_ERROR_RETRIES = 2;
@@ -36,6 +37,20 @@ export function useConversationalAssistant() {
   const [sessionActive, setSessionActive] = useState(false);
   const [micState, setMicState] = useState<VoiceState>("idle");
   const voiceInputRef = useRef<VoiceInputHandle>(null);
+  // Drives the hands-free session's mic turns via real-time streaming
+  // STT (app/api/main.py's /v1/voice/conversation-listen) instead of
+  // VoiceInputButton's own record-then-upload batch flow -- lower
+  // latency (no waiting out a trailing-silence timer before the backend
+  // even sees the audio) and the actual reason that endpoint was built.
+  // voiceInputRef/VoiceInputButton above stays exactly as it was for
+  // manual tap-to-talk (a direct click, never routed through this) --
+  // this hook is only ever driven imperatively by startSession/
+  // endSession/the re-arm step below, never rendered as its own button.
+  const realtimeVoice = useRealtimeVoiceInput(
+    (text) => handleRealtimeTranscript(text),
+    () => stopSpeaking(),
+    (newState) => handleMicStateChange(newState)
+  );
   // Mirrors sessionActive for use inside async callbacks (audio.onended,
   // the post-reply re-arm) that would otherwise close over a stale
   // `false` from whichever render scheduled them.
@@ -196,20 +211,22 @@ export function useConversationalAssistant() {
     setSessionActive(true);
     setError(null);
     micErrorStreakRef.current = 0;
-    voiceInputRef.current?.start();
+    realtimeVoice.start();
   }
 
   function endSession() {
     sessionActiveRef.current = false;
     setSessionActive(false);
-    voiceInputRef.current?.stop();
+    realtimeVoice.stop();
     stopSpeaking();
   }
 
-  // VoiceInputButton's own state, surfaced here for both the status
-  // readout AND automatic recovery: a failed transcription would
-  // otherwise strand an active session with nothing to re-arm the mic
-  // (see micErrorStreakRef's own comment above). A short delay before
+  // Real-time voice's own state (idle/recording/error -- it never uses
+  // VoiceInputButton's "transcribing" phase, see useRealtimeVoiceInput's
+  // own comment on why), surfaced here for both the status readout AND
+  // automatic recovery: a dropped connection would otherwise strand an
+  // active session with nothing to re-arm the mic (see
+  // micErrorStreakRef's own comment above). A short delay before
   // retrying keeps a genuinely denied permission from hammering
   // getUserMedia in a tight loop.
   function handleMicStateChange(newState: VoiceState) {
@@ -219,12 +236,23 @@ export function useConversationalAssistant() {
     micErrorStreakRef.current += 1;
     if (micErrorStreakRef.current <= MAX_MIC_ERROR_RETRIES) {
       setTimeout(() => {
-        if (sessionActiveRef.current) voiceInputRef.current?.start();
+        if (sessionActiveRef.current) realtimeVoice.start();
       }, 1200);
     } else {
       setError("Voice session paused -- couldn't hear you a few times in a row. Tap Start Voice Session to try again.");
       endSession();
     }
+  }
+
+  // Real-time streaming's own turn result -- always the session-active
+  // behavior (auto-submit), since this hook is only ever driven while a
+  // session is active in the first place (see startSession/endSession
+  // above). handleTranscript below stays the tap-to-talk path
+  // unchanged, still branching on sessionActiveRef for
+  // VoiceInputButton's own (rarer, but still possible) session use.
+  function handleRealtimeTranscript(text: string) {
+    micErrorStreakRef.current = 0;
+    void sendMessage(text);
   }
 
   // Returns only once the whole reply has genuinely finished speaking
@@ -319,9 +347,9 @@ export function useConversationalAssistant() {
     if (endingSession) {
       sessionActiveRef.current = false;
       setSessionActive(false);
-      voiceInputRef.current?.stop();
+      realtimeVoice.stop();
     } else if (sessionActiveRef.current) {
-      voiceInputRef.current?.start();
+      realtimeVoice.start();
     }
   }
 
