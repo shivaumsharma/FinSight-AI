@@ -40,6 +40,12 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 WINDOW_FILES = [
     "backtest_results_curated_asof12mo_exit0mo.json",
     "backtest_results_curated_asof24mo_exit12mo.json",
+    # Added once the broad-universe re-run made this feasible -- 685
+    # DDM-available rows here vs. 71 from curated alone, the sample
+    # size this test actually needed (see this file's own docstring
+    # note about n=71 being too small to trust).
+    "backtest_results_ticker_universe_asof12mo_exit0mo.json",
+    "backtest_results_ticker_universe_asof24mo_exit12mo.json",
 ]
 
 PROD_DCF_RATIO = 0.8

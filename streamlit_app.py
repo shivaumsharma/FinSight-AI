@@ -325,8 +325,8 @@ if "report" in st.session_state:
                 "A genuinely independent valuation lens from the DCF above -- values the actual "
                 "dividend stream, not modeled free cash flow. Only computed for consistent, material "
                 "dividend payers. **Not part of the recommendation above** -- tested for inclusion "
-                "and found promising but on too small a sample (71 point-in-time observations) to "
-                "trust yet; see EVALUATION.md."
+                "at scale (753 point-in-time observations) and found not to improve accuracy; kept "
+                "as an independent second read instead. See EVALUATION.md."
             )
             c1, c2 = st.columns(2)
             c1.metric("DDM Intrinsic Value", f"${ddm['intrinsic_value']:,.2f}")
