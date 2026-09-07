@@ -125,7 +125,7 @@ Every tool reads from and writes to one shared `ResearchContext` object. The pla
 | Orchestration | Hand-rolled controller, plus a LangGraph port kept alongside it as a documented, benchmarked alternative — see [EVALUATION.md](EVALUATION.md) |
 | Caching | Redis — content-addressed for valuation/narrative output, TTL-only for statement fetches; degrades to a no-op if unreachable |
 | Report output | reportlab (downloadable PDF) |
-| Deployment | AWS Elastic Beanstalk (API, Terraform-defined) + CloudFront (HTTPS termination in front of it) + Vercel (frontend); Google Cloud Run supported but currently down (GCP project billing disabled); Hugging Face Spaces (research demo); Railway supported as an alternative |
+| Deployment | AWS Elastic Beanstalk (API, Terraform-defined) + CloudFront (HTTPS termination in front of it) + Vercel (frontend); Google Cloud Run supported but currently down (GCP project billing disabled); Hugging Face Spaces (research demo, free-tier CPU quota shared across all Spaces on the account); Railway and a plain DigitalOcean droplet (`infra/digitalocean_droplet_setup.sh`) both supported as alternatives |
 | Testing / CI | pytest (1,088 test functions, 62 files), GitHub Actions with failure-annotation diagnostics |
 
 ---
@@ -284,6 +284,21 @@ cd web && npx vercel@latest --prod
 ```
 
 **Alternative: Railway** — the committed `Dockerfile`/`railway.json` support a one-service Railway deploy for the API (`railway login`, `railway init`, attach a persistent volume for `jobs.db`/`reports/`, `railway variables set ...` for each `.env.example` key, `railway up`). Potentially simpler for a from-scratch setup, since Railway auto-provisions its own build trigger instead of the manual Cloud Console wizard above.
+
+**Alternative: DigitalOcean droplet** — a plain VM instead of a managed container platform, useful specifically to get off a shared free-tier CPU/GPU quota (e.g. Hugging Face Spaces' free tier, which is shared across every Space on the account and pauses whichever one trips it) onto dedicated, always-on compute. Uses the same platform-agnostic `Dockerfile` as Cloud Run/Railway above, nothing droplet-specific baked into the image itself.
+
+Account-level setup (only the account owner can do this part):
+1. Redeem the DigitalOcean credit from the GitHub Student Developer Pack (`education.github.com` → Student Pack → DigitalOcean offer), which requires a DigitalOcean account with a payment method on file even though the credit covers the cost.
+2. Create a droplet: Ubuntu 24.04 LTS, Basic plan, a size with enough RAM for whichever `LLM_PROVIDER` you're running (`hosted` needs much less than `local`, which runs the model on-box), any region.
+3. SSH into the new droplet.
+
+From there, `infra/digitalocean_droplet_setup.sh` automates the rest — installs Docker if missing, clones the repo, sets up `.env` from `.env.example`, creates a persistent host directory for `jobs.db`/`reports`/`llm_logs` (bind-mounted into the container, so — unlike Cloud Run/HF Spaces — none of it is lost on a redeploy or reboot, since a droplet's own disk isn't ephemeral), and builds/runs the container with `--restart unless-stopped`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shivaumsharma/FinSight-AI/main/infra/digitalocean_droplet_setup.sh | bash
+```
+
+The script prints exactly what's still needed afterward (filling in real `.env` values, opening the port in the droplet's firewall, and pointing a domain at it with nginx + certbot for HTTPS) — see the script's own comments for why those specific steps aren't automated (they need a real, already-provisioned droplet and, for the domain step, actual DNS propagation to verify against).
 
 ---
 
