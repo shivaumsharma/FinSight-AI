@@ -204,9 +204,26 @@ The reranker (`cross-encoder/ms-marco-MiniLM-L-6-v2`) makes retrieval *worse* on
 | NDCG@5 | **0.752** | 0.517 |
 | MRR | **0.786** | 0.417 |
 
-The fine-tune made retrieval worse on every metric — a second, independent instance of the same pattern as the reranker above. The likely cause: 194 pairs over 4 epochs on a base model this size is a small, easy-to-overfit training run, and `MultipleNegativesRankingLoss`'s in-batch-negatives approach needs enough batch diversity to avoid the model collapsing toward trivial shortcuts rather than genuine semantic separation. This wasn't a wasted exercise, though — it's exactly why the fine-tuned model was never wired into `app/rag/chroma_store.py` in the first place (which still points at the untouched `BAAI/bge-base-en-v1.5`); the eval script existed specifically so that decision would be evidence-based rather than assumed. Next step to actually improve on baseline: a meaningfully larger training set and/or explicit hard-negative mining instead of relying on in-batch negatives alone.
+The fine-tune made retrieval worse on every metric — a second, independent instance of the same pattern as the reranker above. This wasn't a wasted exercise, though — it's exactly why the fine-tuned model was never wired into `app/rag/chroma_store.py` in the first place (which still points at the untouched `BAAI/bge-base-en-v1.5`); the eval script existed specifically so that decision would be evidence-based rather than assumed.
 
-**Reproduce:** `python scripts/finetune_embeddings.py && python scripts/evaluate_embedding_finetune.py`
+**Root-caused, not guessed at, and partially (not fully) fixed.** Two hypothesized causes were checked directly against the actual training data in `scripts/embedding_training_pairs.jsonl`, not assumed:
+
+1. **Too little data**: 194 pairs, `batch_size=16` → ~12 batches/epoch, a small in-batch-negative pool for `MultipleNegativesRankingLoss` to learn fine-grained distinctions from.
+2. **Leaked answers, confirmed by direct inspection**: **31% of the 194 questions (60 of them) contained a number that also appeared verbatim in its own answer chunk** — e.g. `"What is the reported overhead ratio of 48%..."` asked about a chunk whose answer *is* 48%. A question that hands over its own answer trains the model to match on literal number/keyword overlap, not semantic understanding — precisely the "collapsing toward trivial shortcuts" failure this section already suspected, now with a number attached.
+
+**Fixed both** (`scripts/generate_embedding_training_data.py`): a stronger prompt instruction against restating numbers, plus a post-generation QC filter (`_leaks_answer`) that discards any pair where a leak slips through anyway — necessary, not redundant: even with the improved prompt, **31% of freshly-generated questions still leaked** (confirmed live), so the filter is doing real work, not backstopping a already-solved problem. Also expanded from 15 to 25 training tickers and raised the per-ticker chunk cap (20→35). Result: **328 clean, leak-free pairs**, up from 194.
+
+**Re-tested — genuine improvement, still not enough to beat baseline:**
+
+| Metric | Baseline BGE | Original fine-tune (194 pairs, 31% leaked) | Fixed fine-tune (328 clean pairs) |
+|---|---:|---:|---:|
+| Precision@5 | 0.545 | 0.467 | **0.488** |
+| NDCG@5 | 0.754 | 0.517 | **0.576** |
+| MRR | 0.786 | 0.417 | **0.548** |
+
+Both diagnosed causes were real, and fixing them closed roughly a quarter to a third of the gap to baseline on every metric (MRR's gap shrank from -0.369 to -0.238, the largest recovery) — not noise, a real, measured improvement from a real, confirmed fix. But the fine-tuned model still loses to the untouched baseline on every metric, so **it still does not go into production**. 328 pairs is still small by normal embedding-fine-tuning standards (datasets an order of magnitude larger are typical), and `MultipleNegativesRankingLoss` at `batch_size=16` still gives a fairly weak per-step negative signal regardless of total dataset size. Next lever, unchanged from before but now with more confidence it's the right one: a substantially larger training set (thousands, not hundreds, of pairs) and/or explicit hard-negative mining instead of relying on in-batch negatives alone — the two-fix, two-test cycle here narrowed the problem, it didn't solve it.
+
+**Reproduce:** `python scripts/generate_embedding_training_data.py && python scripts/finetune_embeddings.py && python scripts/evaluate_embedding_finetune.py`
 
 ---
 
