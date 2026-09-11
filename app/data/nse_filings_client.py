@@ -56,6 +56,7 @@ import logging
 import re
 from datetime import datetime, timedelta
 from typing import Optional
+from urllib.parse import urlparse
 
 import pypdf
 import requests
@@ -68,6 +69,25 @@ logger = logging.getLogger(__name__)
 CACHE_DIR = DATA_DIR / "filings_cache"
 
 ANNOUNCEMENTS_URL = "https://www.nseindia.com/api/corporate-announcements"
+
+# `attchmntFile` below comes straight from ANNOUNCEMENTS_URL's JSON
+# response with no validation before this module fetches it -- and
+# that endpoint is explicitly reverse-engineered, not a documented,
+# stable NSE contract (see this module's own docstring). A compromised
+# response, or NSE simply changing what that field means, would
+# otherwise make this server fetch an attacker-chosen URL (SSRF) and/or
+# hand end users a citation link that looks legitimate but isn't. Only
+# ever fetch (or surface as a citation) a URL on NSE's own archive
+# hosts.
+_ALLOWED_PDF_HOSTS = {"nsearchives.nseindia.com", "archives.nseindia.com", "www.nseindia.com", "nseindia.com"}
+
+
+def _is_allowed_nse_host(url: str) -> bool:
+    try:
+        host = urlparse(url).hostname or ""
+    except ValueError:
+        return False
+    return host.lower() in _ALLOWED_PDF_HOSTS
 
 # A real browser User-Agent, not an identifying one -- see this module's
 # own docstring: the identifying UA sec_edgar_client.py's HEADERS uses
@@ -141,6 +161,9 @@ def _fetch_json(url: str, params: dict) -> object:
 
 
 def _fetch_pdf_bytes(url: str) -> bytes:
+    if not _is_allowed_nse_host(url):
+        raise ValueError(f"Refusing to fetch a PDF from a non-NSE host: {url!r}")
+
     def _do():
         resp = _get_session().get(url, headers=_PDF_HEADERS, timeout=30)
         resp.raise_for_status()
