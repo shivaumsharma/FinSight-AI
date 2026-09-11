@@ -528,7 +528,16 @@ class FinancialAnalysisBuilder:
 
         revenues = financial_df["revenue"].dropna()
 
-        if len(revenues) >= 3:
+        # start > 0 (not just != 0, unlike this section's FCF Growth
+        # sibling above): a negative starting revenue still produces
+        # garbage here, since (end/start) with a negative denominator
+        # raised to a fractional exponent (1/years) returns a complex
+        # number in Python, which then crashes round() below rather
+        # than degrading. A $0-or-negative starting year is realistic
+        # for a pre-revenue/restated company (confirmed: this crashed
+        # outright with ZeroDivisionError on a real [0, 0, 2M, 8M]
+        # revenue history before this guard existed).
+        if len(revenues) >= 3 and revenues.iloc[0] > 0 and revenues.iloc[-1] > 0:
 
             start = revenues.iloc[0]
             end = revenues.iloc[-1]
