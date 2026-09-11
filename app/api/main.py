@@ -42,6 +42,7 @@ plain on-demand endpoints, triggered by a free external cron (see
 alive between requests.
 """
 
+import hmac
 import logging
 import os
 import re
@@ -191,7 +192,11 @@ async def require_api_key(request: Request, call_next):
         _API_KEY
         and request.url.path.startswith("/v1")
         and request.method != "OPTIONS"
-        and request.headers.get("X-API-Key") != _API_KEY
+        # Constant-time, matching every other secret comparison in this
+        # codebase (auth.py's password/PDF-share/voice-token checks) --
+        # a naive `!=` leaks how many leading bytes of a guess matched
+        # via response timing.
+        and not hmac.compare_digest(request.headers.get("X-API-Key") or "", _API_KEY)
     ):
         return JSONResponse(
             status_code=401,
