@@ -88,3 +88,11 @@ python-multipart==0.0.32
 # which uvicorn's WebSocketProtocol auto-detects for serving our own
 # WS endpoint -- no separate declaration needed.
 sarvamai==0.1.33
+
+# Optional Snowflake storage target for scripts/canonical_accuracy.py's
+# per-call backtest rows (scripts/snowflake_accuracy_store.py) -- NOT a
+# persistence-layer migration, SQLite (app/api/db.py) keeps owning
+# everything else. Only ever imported by that one script; the live app
+# never touches it. No-ops entirely (see snowflake_accuracy_store.py's
+# connect()) when the SNOWFLAKE_* env vars aren't set.
+snowflake-connector-python==4.7.3

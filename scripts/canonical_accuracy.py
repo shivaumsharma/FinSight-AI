@@ -62,6 +62,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.analysis.baseline_scoring import score_rating
+from scripts import snowflake_accuracy_store
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -108,11 +109,13 @@ def load_source(filename: str):
 
 def main():
     pooled_rows = []
+    rows_by_source = {}
     sources_meta = []
 
     for filename in SOURCE_FILES:
         rows = load_source(filename)
         pooled_rows.extend(rows)
+        rows_by_source[filename] = rows
         as_of_dates = sorted({r["as_of_date"] for r in rows if r.get("as_of_date")})
         sources_meta.append({
             "file": filename,
@@ -179,6 +182,28 @@ def main():
     for s in sources_meta:
         print(f"  - {s['file']}: n={s['n_scored']}, as-of range {s['as_of_range']}")
     print(f"\nWritten to {OUTPUT_PATH}")
+
+    # In addition to, not instead of, the JSON file above -- that file
+    # is what report_data_builder.py actually reads at report-generation
+    # time, and nothing about this step may put that at risk. Snowflake
+    # is purely an optional analysis target for the per-call rows
+    # (sector/Buy-vs-Sell precision, accuracy trend over time -- see
+    # snowflake_accuracy_store.py's own module docstring for why one
+    # aggregate JSON file can't answer those). connect() itself no-ops
+    # to None with no env vars set; a configured-but-failing connection
+    # is surfaced here (not silently swallowed, since the user
+    # explicitly asked for this write) but never blocks the JSON
+    # artifact above, which has already been written by this point.
+    conn = snowflake_accuracy_store.connect()
+    if conn is not None:
+        try:
+            snowflake_accuracy_store.ensure_table(conn)
+            n_written = snowflake_accuracy_store.write_rows(conn, rows_by_source)
+            print(f"Wrote {n_written} per-call rows to Snowflake ({snowflake_accuracy_store.TABLE_NAME}).")
+        except Exception as e:
+            print(f"Snowflake write failed (JSON artifact above is unaffected): {e}")
+        finally:
+            conn.close()
 
 
 if __name__ == "__main__":
