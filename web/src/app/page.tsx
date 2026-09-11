@@ -18,6 +18,7 @@ import OrderTicket from "@/components/OrderTicket";
 import MarketNews from "@/components/MarketNews";
 import MarketMovers from "@/components/MarketMovers";
 import ScoreboardHomeCard from "@/components/ScoreboardHomeCard";
+import AccuracyTearsheetHomeCard from "@/components/AccuracyTearsheetHomeCard";
 import SentimentGauge from "@/components/SentimentGauge";
 import VoiceInputButton from "@/components/VoiceInputButton";
 import HomeAssistant from "@/components/HomeAssistant";
@@ -303,6 +304,8 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
         />
 
         <ScoreboardHomeCard />
+
+        <AccuracyTearsheetHomeCard />
 
         <IndicesCarousel />
 

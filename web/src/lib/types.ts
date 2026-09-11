@@ -316,6 +316,49 @@ export interface ScoreboardResponse {
   generated_at: number;
 }
 
+// GET /v1/accuracy-tearsheet's response shape (see
+// app/reporting/accuracy_tearsheet.py). Distinct from Scoreboard above:
+// Scoreboard is live production calls in recent (7/30/90-day) windows;
+// this is the one canonical BACKTESTED number (scripts/canonical_accuracy.py,
+// a broad 1,000+ ticker historical evaluation, not live production
+// traffic) plus, when Snowflake is configured, live per-sector/Buy-vs-
+// Sell/trend-over-time breakdowns of that same backtest population.
+export interface AccuracyTearsheetSource {
+  file: string;
+  n_scored: number;
+  as_of_range: [string, string] | null;
+}
+
+export interface AccuracyTearsheetCanonical {
+  metric: string;
+  methodology: string;
+  n: number;
+  model_accuracy_pct: number;
+  model_ci_95: [number, number];
+  always_buy_baseline_pct: number;
+  always_buy_ci_95: [number, number];
+  beats_baseline: boolean;
+  sources: AccuracyTearsheetSource[];
+  live_tracker_n: number;
+  live_tracker_note: string;
+  generated_at: string;
+  reproduce: string;
+  summary_line: string;
+}
+
+// Each row is a tuple whose shape depends on which named query
+// produced it -- see snowflake_accuracy_store.py's VALIDATION_QUERIES
+// (precision_by_sector: [universe, n_calls, n_correct, precision_pct];
+// buy_vs_sell_precision: [call, n_calls, n_correct, precision_pct];
+// accuracy_trend_by_run_date: [run_date, n_calls, accuracy_pct]) --
+// left as unknown[][] rather than named per-query types since the
+// frontend only ever indexes into these positionally by column.
+export interface AccuracyTearsheetResponse {
+  available: boolean;
+  canonical: AccuracyTearsheetCanonical | null;
+  live_breakdowns: Record<string, unknown[][]> | null;
+}
+
 // GET /v1/stocks/{ticker}/overview's response shape -- powers
 // web/src/app/stock/[ticker]/page.tsx's header/price-statistics/
 // fundamentals/company-info cards. Every numeric field here is null

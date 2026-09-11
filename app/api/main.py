@@ -85,6 +85,7 @@ from app.reasoning.real_estate_guidance import get_real_estate_guidance
 from app.reporting.news_client import fetch_company_news, fetch_market_news
 from app.reporting.corporate_actions_feed import build_corporate_actions_feed
 from app.reporting.portfolio_summary import build_portfolio_view
+from app.reporting.accuracy_tearsheet import build_accuracy_tearsheet
 from app.valuation import what_if_dcf
 from app.valuation.fcff_engine import FCFFEngine
 from app.valuation.what_if_dcf import compute_what_if
@@ -1433,6 +1434,16 @@ def get_market_sentiment(current_user: str = Depends(auth.get_current_user)):
         "sell_count": sell,
         "total_rated": buy + hold + sell,
     }
+
+
+@app.get("/v1/accuracy-tearsheet")
+def get_accuracy_tearsheet(current_user: str = Depends(auth.get_current_user)):
+    # Body extracted to app/reporting/accuracy_tearsheet.py, same
+    # reasoning as build_corporate_actions_feed/build_portfolio_view's
+    # own module docstrings. Not a per-user metric -- the backtest is
+    # global, same "one number for the whole model" scope
+    # report_data_builder.py's _load_track_record() already commits to.
+    return build_accuracy_tearsheet()
 
 
 @app.get("/v1/stocks/{ticker}/overview")
