@@ -25,6 +25,7 @@ import numpy as np
 
 from app.core.currency import currency_symbol
 from app.core.research_context import ResearchContext
+from app.reporting.calibrated_confidence import build_calibrated_confidence
 
 
 def _is_nan(value) -> bool:
@@ -1011,6 +1012,15 @@ def build_report_data(context: ResearchContext) -> Dict[str, Any]:
         # pipeline's historical track record. None if the artifact
         # hasn't been generated yet (see _load_track_record's docstring).
         "track_record": _load_track_record(),
+
+        # UNLIKE track_record above, this IS specific to this report --
+        # how often a call THIS TYPE (Buy/Hold/Sell), in THIS sector,
+        # has actually been right historically. None whenever there
+        # isn't enough sector-specific (or even overall-by-rating) data
+        # to back a real number -- see calibrated_confidence.py's own
+        # docstring for the sample-size floor and the yfinance-vs-GICS
+        # sector-naming mismatch this has to bridge.
+        "calibrated_confidence": build_calibrated_confidence(info.get("sector"), recommendation["rating"]),
 
         "references": _references(context),
 

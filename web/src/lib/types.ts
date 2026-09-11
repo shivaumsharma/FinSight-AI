@@ -149,6 +149,19 @@ export interface TrackRecord {
   reproduce: string;
 }
 
+// From app/reporting/calibrated_confidence.py -- UNLIKE TrackRecord
+// above, this IS specific to this report: how often a call THIS TYPE
+// (Buy/Hold/Sell), in THIS sector, has actually been right
+// historically. null whenever there isn't enough sector-specific (or
+// even overall-by-rating) sample size to back a real number.
+export interface CalibratedConfidence {
+  accuracy_pct: number;
+  n: number;
+  scope: "sector" | "overall";
+  sector: string | null;
+  rating: "Buy" | "Hold" | "Sell";
+}
+
 export interface ReportData {
   currency?: string;
   currency_symbol?: string;
@@ -163,6 +176,7 @@ export interface ReportData {
   };
   signal_quality?: SignalQuality;
   track_record?: TrackRecord | null;
+  calibrated_confidence?: CalibratedConfidence | null;
   narrative?: Partial<Record<NarrativeSection, string>>;
   market_earnings_snapshot?: MarketEarningsSnapshot;
   valuation_analysis?: ValuationAnalysis;

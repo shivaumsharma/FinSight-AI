@@ -299,6 +299,15 @@ if "report" in st.session_state:
             f"**Model track record (12-month forward accuracy, backtested):** "
             f"{_md_escape(track_record['summary_line'])}. Full methodology in EVALUATION.md."
         )
+
+    calibrated = report_data.get("calibrated_confidence")
+    if calibrated:
+        scope_note = f"in {calibrated['sector']}" if calibrated["scope"] == "sector" else "across all sectors"
+        st.caption(
+            f"**Calibrated confidence:** {calibrated['rating']} calls {scope_note} have historically been right "
+            f"{calibrated['accuracy_pct']}% of the time (n={calibrated['n']}, 12-month backtest)."
+        )
+
     _render_snowflake_accuracy_trend()
 
     col1, col2 = st.columns([1, 2])
