@@ -10,3 +10,8 @@ pytest>=8.0
 # server running anywhere. Not needed by the pytest suite itself (which
 # mocks cache_get/cache_set directly for the deterministic tests).
 fakeredis
+
+# Lint gate (.github/workflows/tests.yml's `lint` job) -- not needed to
+# run the app or the test suite, only CI's lint step and a developer
+# running the same check locally.
+ruff
