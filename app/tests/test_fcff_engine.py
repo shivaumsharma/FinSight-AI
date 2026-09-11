@@ -56,6 +56,29 @@ def test_forecast_revenue_compounds_at_cagr():
     assert forecast["forecast_revenue"].iloc[1] == pytest.approx(110 * (1 + cagr) ** 2)
 
 
+def test_calculate_tax_rate_excludes_a_break_even_or_loss_year():
+    # A pretax_income<=0 year has no meaningful effective tax rate --
+    # tax_expense/pretax_income for such a year isn't real, and letting
+    # it through used to clip to a fabricated 50% ceiling (this was the
+    # bug wacc_engine.py's own calculate_tax_rate already guarded
+    # against but fcff_engine.py's duplicate copy didn't). Shared
+    # app.valuation.tax_rate.calculate_tax_rate now excludes it
+    # entirely for both engines.
+    df = _df(tax_expense=[-10, 40], pretax_income=[0, 200])
+    engine = FCFFEngine(df)
+    tax_rate = engine.calculate_tax_rate()
+    assert len(tax_rate) == 1
+    assert tax_rate.iloc[0] == pytest.approx(40 / 200)
+
+
+def test_calculate_nopat_excludes_a_break_even_year_instead_of_a_fabricated_tax_rate():
+    df = _df(ebit=[30, 250], tax_expense=[-10, 40], pretax_income=[0, 200])
+    engine = FCFFEngine(df)
+    nopat = engine.calculate_nopat()
+    assert len(nopat) == 1
+    assert nopat.iloc[0] == pytest.approx(250 * (1 - 40 / 200))
+
+
 def test_normalized_capex_uses_multi_year_average_ratio_not_latest_year():
     # Ratios: 10/100=0.10, 40/200=0.20 (an outlier capex spike) -> avg 0.15
     # applied to the CURRENT (latest) revenue of 200.

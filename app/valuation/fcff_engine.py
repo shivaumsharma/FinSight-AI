@@ -1,5 +1,7 @@
 import pandas as pd
-import numpy as np 
+import numpy as np
+
+from app.valuation.tax_rate import calculate_tax_rate
 
 class FCFFEngine:
 
@@ -57,16 +59,7 @@ class FCFFEngine:
 
 
     def calculate_tax_rate(self):
-        tax_expense=(self.financial_df["tax_expense"].dropna())
-        pretax_income=(self.financial_df["pretax_income"].dropna())
-        aligned_df=pd.concat([tax_expense,pretax_income],axis=1).dropna()
-        aligned_df.columns=["tax_expense","pretax_income"]
-
-        aligned_df["tax_rate"]=(aligned_df["tax_expense"]/aligned_df["pretax_income"])
-
-        aligned_df["tax_rate"]=(aligned_df["tax_rate"].clip(0,0.5))
-
-        return aligned_df["tax_rate"]
+        return calculate_tax_rate(self.financial_df)
     
     def calculate_nopat(self):
         ebit=(self.financial_df["ebit"].dropna())
