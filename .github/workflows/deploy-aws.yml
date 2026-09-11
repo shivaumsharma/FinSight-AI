@@ -31,6 +31,15 @@ jobs:
     permissions:
       id-token: write # required for AWS OIDC role assumption
       contents: read
+    # No required-reviewer gate exists yet -- this `environment:` reference
+    # is what makes one configurable at all (a job can't be gated by
+    # environment protection rules without targeting a named environment
+    # first). Configuring the actual gate is a one-time manual step this
+    # workflow can't do for itself: GitHub repo Settings -> Environments ->
+    # production -> add required reviewers. Until that's done, this line
+    # is a no-op and every push that passes tests.yml still deploys
+    # automatically, exactly as today.
+    environment: production
     steps:
       # workflow_run's default checkout would use the deploy workflow FILE's
       # own ref (main's latest), not necessarily the exact commit tests.yml
@@ -73,6 +82,28 @@ jobs:
             docker push "$IMAGE_URI"
           fi
           echo "uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+
+      # Warn-only for now: confirmed live against a real build of this
+      # exact image -- ~110 CRITICAL/HIGH CVEs across the base OS
+      # packages and bundled Go binaries, none yet triaged. exit-code 0
+      # reports without blocking the deploy; flip to '1' once a
+      # maintainer has reviewed the first report. This same live scan is
+      # also what caught a real secret-leak bug: infra/terraform.tfvars
+      # (gitignored, holds a real private key + API secrets for local
+      # Terraform runs) was getting copied into the image via COPY . .
+      # and flagged by Trivy's own secret scanner -- fixed by adding
+      # infra/ to .dockerignore (COPY . . doesn't consult .gitignore at
+      # all, so gitignored-but-locally-present files were never actually
+      # protected from this). Runs against the just-pushed ECR image
+      # (not a local `docker build` output) so this also covers the
+      # "image already existed, build/push was skipped" branch above.
+      - name: Scan image for known vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.ecr_image.outputs.uri }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "0"
 
       - name: Render Dockerrun.aws.json with the freshly-pushed image
         run: |
