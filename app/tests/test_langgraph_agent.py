@@ -9,8 +9,6 @@ right nodes, in the right order, for a given plan) -- not any real
 tool's behavior, which is already covered by each tool's own tests.
 """
 
-import pytest
-
 from app.agents.langgraph_agent import (
     EVIDENCE_TOOLS, GraphState, build_graph, _evidence_dispatch,
 )
