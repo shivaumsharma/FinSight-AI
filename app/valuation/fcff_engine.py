@@ -292,6 +292,24 @@ class FCFFEngine:
     TERMINAL_GROWTH_ADJUSTMENT_HIGH_QUALITY = 0.01
     TERMINAL_GROWTH_ADJUSTMENT_LOW_QUALITY = -0.01
 
+    # Ceiling on the growth rate Stage 1 holds at for up to
+    # HOLD_YEARS_HIGH_QUALITY years -- mirrors MonteCarloDCFEngine's own
+    # GROWTH_RATE_CLIP upper bound (0.30), which samples FROM this same
+    # method but clips its growth samples before ever calling in.
+    # forecast_fcff's own deterministic path had no equivalent cap: a
+    # raw historical revenue CAGR is unbounded, and a hypergrowth name
+    # (e.g. revenue roughly quadrupling over 4 years, ~78% CAGR) held at
+    # its own uncapped rate for up to 5 years compounds base FCFF
+    # ~17.7x before the fade even starts -- feeding directly into the
+    # 80%-weighted composite score. DDM's own cap (MAX_SUSTAINABLE_DPS_
+    # GROWTH = 0.06) is deliberately far more conservative and NOT
+    # reused here -- that ceiling is calibrated to a "forever" dividend
+    # assumption with no multi-stage fade to lean on, whereas this is
+    # only Stage 1 of a fade that already declines toward
+    # terminal_growth_rate afterward, so Monte Carlo's less restrictive
+    # bound is the correct sibling to mirror, not DDM's.
+    MAX_INITIAL_GROWTH_RATE = 0.30
+
     def quality_terminal_growth_adjustment(self):
         """Public (unlike _quality_hold_years) -- ValuationPipeline
         calls this once and applies the resulting adjusted terminal
@@ -338,6 +356,14 @@ class FCFFEngine:
        # crash.
        if base_fcff is None or initial_growth_rate is None:
            return None
+
+       # See MAX_INITIAL_GROWTH_RATE's own comment -- applied
+       # unconditionally (not just on the freshly-computed path) so the
+       # fade math below never compounds a growth rate above the
+       # ceiling regardless of caller, including a future
+       # initial_growth_rate_override that doesn't already clip its own
+       # input the way MonteCarloDCFEngine's sampler currently does.
+       initial_growth_rate = min(initial_growth_rate, self.MAX_INITIAL_GROWTH_RATE)
 
        # Three-stage fade, not a single linear fade across the whole
        # window. A high-growth mega-cap doesn't decelerate to terminal
