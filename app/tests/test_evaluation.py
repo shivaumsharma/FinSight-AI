@@ -90,6 +90,21 @@ def test_citation_evaluator_marks_unused_citation_as_unused():
     assert result.citation_coverage == 0.0
 
 
+def test_citation_coverage_is_not_inflated_by_a_numerically_adjacent_citation():
+    # Regression: _explicitly_referenced used to do a bare substring
+    # check ("evidence 1" in report_norm), so a report tagging
+    # "[Evidence 11]" also matched that check for citation 1 -- "evidence
+    # 1" is a literal substring of "evidence 11" -- silently crediting
+    # citation 1 as used even though only citation 11 was ever
+    # referenced. Filler text below has no word >3 chars in common with
+    # the report, so paraphrase-overlap fallback can't mask the bug.
+    citations = [{"text": f"unrelated filler statement number {i} about litigation risk"} for i in range(1, 12)]
+    report = "Margins expanded this quarter [Evidence 11]."
+    result = CitationEvaluator().evaluate(citations, report)
+    assert result.citations_used == 1
+    assert result.citation_coverage == pytest.approx(100 / 11, abs=0.01)
+
+
 def test_citation_evaluator_news_uses_news_tag_convention():
     articles = [{"headline": "Company faces antitrust probe", "summary": "Regulators opened an inquiry."}]
     report = "The business faces regulatory scrutiny [News 1]."
