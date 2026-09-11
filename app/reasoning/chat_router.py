@@ -596,7 +596,12 @@ def _handle_portfolio_status(user_id: str, message: str, history: list) -> str:
     pnl = view["summary"]["total_unrealized_pnl"]
     pnl_pct = view["summary"]["total_unrealized_pnl_pct"]
     if total_value is not None:
-        if pnl is not None:
+        # Both, not just pnl -- portfolio_summary.py can produce a real
+        # 0.0 pnl with pnl_pct still None (zero cost basis), same
+        # mismatch daily_briefing.py's own _portfolio_line already
+        # guards against. Checking only pnl here crashed formatting
+        # pnl_pct as None below.
+        if pnl is not None and pnl_pct is not None:
             direction = "up" if pnl >= 0 else "down"
             lines.append(f"Total value: ${total_value:,.2f} (USD equiv.), {direction} ${abs(pnl):,.2f} ({pnl_pct:+.1f}%) overall.")
         else:

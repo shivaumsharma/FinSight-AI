@@ -181,6 +181,30 @@ def test_handle_portfolio_status_falls_back_to_the_raw_summary_on_llm_outage(mon
     assert "800.00" in result
 
 
+def test_handle_portfolio_status_does_not_crash_on_a_real_zero_pnl_with_no_pnl_pct(monkeypatch):
+    # Regression test: portfolio_summary.py's total_unrealized_pnl_pct
+    # is None whenever total_cost_basis is 0 (falsy), even though
+    # total_unrealized_pnl itself can be a real 0.0 -- same mismatch
+    # daily_briefing.py's _portfolio_line already guards against. The
+    # old `if pnl is not None:` check here let pnl=0.0 through and then
+    # crashed formatting pnl_pct=None as f"{pnl_pct:+.1f}".
+    view = {
+        "holdings": [
+            {"ticker": "AAPL", "quantity": 4, "price": 200.0, "currency": "USD", "rating": "Buy"},
+        ],
+        "summary": {"total_market_value": 800.0, "total_unrealized_pnl": 0.0, "total_unrealized_pnl_pct": None},
+    }
+    monkeypatch.setattr(cr, "build_portfolio_view", lambda user_id: view)
+    monkeypatch.setattr(cr.db, "get_portfolio_holdings", lambda user_id: [{"ticker": "AAPL", "quantity": 4}])
+    monkeypatch.setattr(cr, "get_portfolio_sector_allocation", lambda holdings: {})
+    monkeypatch.setattr(cr, "HostedProvider", _RaisingProvider)  # exercise the fallback path
+
+    result = cr._handle_portfolio_status("u1", "hows my portfolio", [])
+
+    assert "800.00" in result
+    assert "AAPL" in result
+
+
 # ---------------------------------------------------------------- _handle_ticker_question
 
 def test_handle_ticker_question_grounds_the_llm_in_real_insights_and_the_actual_question(monkeypatch):
