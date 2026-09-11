@@ -8,6 +8,8 @@ same "never hit real network, patch main.get_quote directly" principle
 as test_portfolio.py/test_watchlist.py.
 """
 
+import threading
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -86,6 +88,48 @@ def test_execute_order_sell_that_zeroes_out_removes_the_holding(temp_db):
     temp_db.execute_order(user_id, "AAPL", "SELL", 10, 150.0, "USD")
 
     assert temp_db.get_portfolio_holdings(user_id) == []
+
+
+def test_execute_order_double_sell_race_never_oversells(temp_db):
+    # Regression test for the TOCTOU race in execute_order: see its own
+    # docstring for the mechanism (a read-then-write with no atomicity
+    # let two concurrent SELL requests both read the same pre-write
+    # quantity and both pass the "can't sell more than held" check).
+    # Same threaded-concurrency approach as test_api.py's
+    # test_create_job_if_under_limit_is_race_free_under_concurrency --
+    # sequential testing cannot expose this class of bug at all, only
+    # real concurrent callers hitting the same connection-per-call
+    # SQLite file can.
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    temp_db.execute_order(user_id, "AAPL", "BUY", 10, 100.0, "USD")
+
+    n_threads = 20
+    results = [None] * n_threads
+
+    def _attempt(i):
+        try:
+            temp_db.execute_order(user_id, "AAPL", "SELL", 8, 150.0, "USD")
+            results[i] = "ok"
+        except ValueError:
+            results[i] = "rejected"
+
+    threads = [threading.Thread(target=_attempt, args=(i,)) for i in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    succeeded = [r for r in results if r == "ok"]
+    # Only the FIRST SELL-8 can legitimately succeed against a 10-share
+    # position (10-8=2 left, and every other attempt needs 8 > 2 shares
+    # held) -- every other concurrent attempt must be rejected, not
+    # silently allowed to oversell.
+    assert len(succeeded) == 1
+
+    holdings = {h["ticker"]: h for h in temp_db.get_portfolio_holdings(user_id)}
+    assert holdings["AAPL"]["quantity"] == 2  # exactly 10 - 8, not negative or double-decremented
+    sells = [o for o in temp_db.list_orders(user_id) if o["side"] == "SELL"]
+    assert len(sells) == 1  # only the one successful sell was ever recorded (plus the initial BUY)
 
 
 def test_execute_order_sell_more_than_held_raises_value_error(temp_db):
