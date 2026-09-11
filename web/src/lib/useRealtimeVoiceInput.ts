@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { VoiceState } from "@/components/VoiceInputButton";
 import { GetUserMediaTimeoutError, getUserMediaWithTimeout } from "@/lib/getUserMediaWithTimeout";
 
@@ -201,6 +201,25 @@ export function useRealtimeVoiceInput(
 
   const stop = useCallback(() => {
     endTurn(null, null);
+  }, []);
+
+  // Unmount cleanup -- nothing previously released the mic/AudioContext/
+  // WebSocket if the owning component unmounted mid-turn (e.g. the user
+  // navigates away via BottomNav while a voice session is live) rather
+  // than calling stop() itself. Deliberately calls teardownAudio()
+  // directly rather than endTurn(null, null): endTurn also calls
+  // setState/setErrorMessage/onTranscript, which are pointless (and in
+  // some React versions warn) on an already-unmounting component --
+  // this only needs to release the real resources, not update state
+  // nobody will see.
+  useEffect(() => {
+    return () => {
+      if (!turnEndedRef.current) {
+        turnEndedRef.current = true;
+        teardownAudio();
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return { state, errorMessage, start, stop };
