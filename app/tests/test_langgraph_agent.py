@@ -27,6 +27,14 @@ class _StubTool:
         return context
 
 
+class _FailingStubTool:
+    def __init__(self, name):
+        self.name = name
+
+    def run(self, context):
+        raise RuntimeError(f"{self.name} exploded")
+
+
 class _StubPlanner:
     def __init__(self, plan):
         self._plan = list(plan)
@@ -148,3 +156,40 @@ def test_graph_tool_trace_matches_research_agent_for_the_same_plan():
     final_state = graph.invoke({"context": context, "plan": [], "step": 0})
 
     assert final_state["context"].tool_trace == expected_trace
+
+
+# ---------------------------------------------------------- per-tool isolation
+
+def test_a_failing_evidence_tool_does_not_stop_the_rest_of_the_plan():
+    # Regression test, mirrors research_agent.py's own isolation fix
+    # (see ResearchAgent.run()'s comment): a bug in one tool must not
+    # crash the whole graph and lose every OTHER node's already-
+    # gathered evidence.
+    plan = ["market_data_tool", "valuation_tool", "rag_tool"]
+    tools = _stub_tools()
+    tools["valuation_tool"] = _FailingStubTool("valuation_tool")
+    graph = build_graph(tools=tools, planner=_StubPlanner(plan))
+
+    context = ResearchContext(ticker="AAPL", question="Should I invest in Apple?")
+    final_state = graph.invoke({"context": context, "plan": [], "step": 0})
+
+    result_context = final_state["context"]
+    assert result_context.tool_trace == ["market_data_tool", "rag_tool"] + TRAILING_TOOLS
+    assert result_context.metadata["tool_errors"] == [{"tool": "valuation_tool", "error": "valuation_tool exploded"}]
+
+
+def test_a_failing_trailing_tool_does_not_stop_evaluation_tool_from_running():
+    plan = ["market_data_tool"]
+    tools = _stub_tools()
+    tools["news_tool"] = _FailingStubTool("news_tool")
+    graph = build_graph(tools=tools, planner=_StubPlanner(plan))
+
+    context = ResearchContext(ticker="AAPL", question="Should I invest in Apple?")
+    final_state = graph.invoke({"context": context, "plan": [], "step": 0})
+
+    result_context = final_state["context"]
+    assert "news_tool" not in result_context.tool_trace
+    assert result_context.tool_trace == [
+        "market_data_tool", "institutional_consensus_tool", "report_tool", "evaluation_tool",
+    ]
+    assert result_context.metadata["tool_errors"] == [{"tool": "news_tool", "error": "news_tool exploded"}]
