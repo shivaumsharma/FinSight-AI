@@ -6,7 +6,7 @@ import ModelCompare from "./ModelCompare";
 import RatingBadge, { ratingColorClass } from "./RatingBadge";
 import Tabs from "./Tabs";
 import WhatIfPanel from "./WhatIfPanel";
-import type { NewsSources, ResearchResult, SignalQuality, TrackRecord } from "@/lib/types";
+import type { CalibratedConfidence, NewsSources, ResearchResult, SignalQuality, TrackRecord } from "@/lib/types";
 
 function ShareButton({ jobId }: { jobId: string }) {
   const [state, setState] = useState<"idle" | "sharing" | "copied" | "error">("idle");
@@ -146,6 +146,22 @@ function TrackRecordBlock({ trackRecord }: { trackRecord: TrackRecord | null | u
       <strong className="text-text">Model track record ({trackRecord.metric}):</strong>{" "}
       {trackRecord.summary_line}. {trackRecord.beats_baseline ? "Beats" : "Currently loses to"} the naive baseline.{" "}
       <span className="text-dim">Full methodology in EVALUATION.md.</span>
+    </div>
+  );
+}
+
+// UNLIKE TrackRecordBlock above (one number, same on every report),
+// this is specific to THIS report's own call -- see
+// app/reporting/calibrated_confidence.py's own docstring.
+function CalibratedConfidenceBlock({ calibrated }: { calibrated: CalibratedConfidence | null | undefined }) {
+  if (!calibrated) return null;
+  const scopeNote = calibrated.scope === "sector" ? `in ${calibrated.sector}` : "across all sectors";
+
+  return (
+    <div className="mt-2 rounded-lg border border-border bg-card px-3 py-2 text-[11px] text-muted">
+      <strong className="text-text">Calibrated confidence:</strong> {calibrated.rating} calls {scopeNote} have
+      historically been right <strong className="text-text">{calibrated.accuracy_pct}%</strong> of the time (n=
+      {calibrated.n}, 12-month backtest).
     </div>
   );
 }
@@ -365,6 +381,7 @@ export default function ReportView({
         investment decisions.
       </div>
       <TrackRecordBlock trackRecord={rd.track_record} />
+      <CalibratedConfidenceBlock calibrated={rd.calibrated_confidence} />
 
       {/* Verdict card -- border color set inline since it's chosen from
           a runtime value (rating); a Tailwind class built via template
