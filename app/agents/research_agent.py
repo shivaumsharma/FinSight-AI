@@ -27,6 +27,7 @@ The rewritten agent:
     reasoning on a decision that has only one sane answer.
 """
 
+import logging
 from typing import Callable, Optional
 
 from app.core.research_context import ResearchContext
@@ -34,6 +35,8 @@ from app.core.company_resolver import resolve_companies, is_comparison_question
 from app.planner import Planner
 from app.tools.tool_registry import ToolRegistry
 from app.agents.agent_constants import TRAILING_TOOLS, NoCompanyDetectedError
+
+logger = logging.getLogger(__name__)
 
 
 class ResearchAgent:
@@ -96,6 +99,22 @@ class ResearchAgent:
                 continue
             if on_step:
                 on_step(tool_name)
-            tool.run(context)
+            # One tool's failure must not crash the whole run and lose
+            # every OTHER tool's already-gathered evidence -- previously
+            # an unhandled exception from any single tool took down the
+            # entire request, even though report_tool/evaluation_tool
+            # (always last, see TRAILING_TOOLS) would otherwise have
+            # produced a real report from whatever context the earlier
+            # tools DID populate. report_tool/evaluation_tool are
+            # themselves already resilient to a missing upstream piece
+            # (see report_validator.py's own handling of an absent/
+            # failed narrative section) so isolating every tool the
+            # same way, trailing ones included, is safe, not just
+            # convenient.
+            try:
+                tool.run(context)
+            except Exception as e:
+                logger.warning(f"[research_agent] {tool_name} failed for '{question}' (non-fatal, continuing): {e}")
+                context.metadata.setdefault("tool_errors", []).append({"tool": tool_name, "error": str(e)})
 
         return context
