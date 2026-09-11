@@ -16,7 +16,6 @@ import pytest
 
 from app.agents import research_agent as ra
 from app.agents.agent_constants import TRAILING_TOOLS, NoCompanyDetectedError
-from app.core.research_context import ResearchContext
 
 
 class _StubTool:

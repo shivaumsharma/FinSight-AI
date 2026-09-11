@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 
 from app.valuation.tax_rate import calculate_tax_rate
 
