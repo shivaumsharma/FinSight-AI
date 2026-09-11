@@ -81,11 +81,15 @@ jobs:
       - name: Install test dependencies
         run: pip install pandas numpy langgraph==1.2.9 redis fastapi httpx yfinance rapidfuzz python-dotenv pywebpush joblib scikit-learn python-multipart pypdf sarvamai xgboost shap -r requirements-dev.txt
 
-      # test_finbert.py and test_rag.py are manual smoke tests (see
-      # their own docstrings) -- they need the full model stack and
-      # live network access (SEC EDGAR, Hugging Face), so they're
-      # excluded from CI and left for a developer to run locally.
-      # test_company_resolver.py belongs in that same category and was
+      # test_finbert.py is a manual smoke test (see its own docstring)
+      # -- needs the full model stack and live network access (Hugging
+      # Face), so it's excluded from CI and left for a developer to run
+      # locally. test_rag.py used to be in the same category (a
+      # __main__-gated script with zero real assertions, needing live
+      # SEC EDGAR network access) but was rewritten to mock at
+      # RAGPipeline's three constructor seams -- it's a real,
+      # fast, no-network test file now, so it runs here like any other.
+      # test_company_resolver.py belongs in the still-excluded category and was
       # missed when this exclusion list was first drawn up: it has zero
       # mocking and builds its US/NSE company indices from a genuinely
       # live fetch on every run (see company_resolver.py's
@@ -108,7 +112,7 @@ jobs:
       - name: Run unit tests
         run: |
           set +e
-          pytest app/tests/ --ignore=app/tests/test_finbert.py --ignore=app/tests/test_rag.py --ignore=app/tests/test_company_resolver.py --tb=short 2>&1 | tee pytest_output.txt
+          pytest app/tests/ --ignore=app/tests/test_finbert.py --ignore=app/tests/test_company_resolver.py --tb=short 2>&1 | tee pytest_output.txt
           exit_code=${PIPESTATUS[0]}
           if [ "$exit_code" -ne 0 ]; then
             summary=$(tail -150 pytest_output.txt | awk '{gsub(/%/,"%25"); gsub(/\r/,"%0D"); printf "%s%%0A", $0}')
