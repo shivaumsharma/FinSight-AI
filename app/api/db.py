@@ -1024,6 +1024,49 @@ def mark_price_alert_triggered(alert_id: str) -> None:
         )
 
 
+def claim_price_alert(alert_id: str) -> bool:
+    """Same UPDATE ... WHERE triggered_at IS NULL as
+    mark_price_alert_triggered above, but called BEFORE the alert's
+    trade/notification fires, not after -- and returns whether THIS
+    call actually claimed it (via cursor.rowcount), so the caller can
+    tell "I own this alert" from "someone else already does."
+
+    sweep_price_alerts() used to fire first and call
+    mark_price_alert_triggered() only afterward -- two overlapping
+    sweep invocations (a real possibility: this is a cron-triggered
+    HTTP endpoint, not an in-process scheduler, specifically because
+    Cloud Run can't host one) could both read the same untriggered
+    alert before either marked it, and both fire the trade/notification
+    independently. mark_price_alert_triggered's own one-shot guard only
+    protected the UPDATE itself from double-applying -- by the time it
+    ran, the double-fire had already happened. Claiming first closes
+    that window: only the sweep whose UPDATE actually matched a row
+    (rowcount > 0) proceeds to fire anything.
+    """
+    with _connect() as conn:
+        cur = conn.execute(
+            "UPDATE price_alerts SET triggered_at=? WHERE alert_id=? AND triggered_at IS NULL",
+            (time.time(), alert_id),
+        )
+        return cur.rowcount > 0
+
+
+def unclaim_price_alert(alert_id: str) -> None:
+    """Reverts a claim_price_alert() claim -- used when the claim
+    succeeded but the trade/notification that was supposed to follow it
+    then failed, so a future sweep retries this alert instead of it
+    being silently marked "handled" with nothing having actually
+    happened. Preserves the same "only mark it seen once the write
+    itself has actually succeeded" guarantee sweep_price_alerts always
+    had, just implemented as claim-then-rollback instead of fire-then-
+    mark."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE price_alerts SET triggered_at=NULL WHERE alert_id=?",
+            (alert_id,),
+        )
+
+
 def get_all_distinct_watchlist_tickers() -> list:
     """Every ticker on ANY user's watchlist, deduplicated -- part of
     Market Movers' "tracked universe" (the other part is the static
