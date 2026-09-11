@@ -31,6 +31,16 @@ web/
 mlruns/
 Data_Comparison/
 
+# Terraform IaC -- never needed inside the application image, and
+# infra/terraform.tfvars (gitignored, never committed -- see
+# infra/.gitignore) can hold real plaintext secrets for local runs.
+# .gitignore keeps it out of the repo, but COPY . . doesn't consult
+# .gitignore at all -- confirmed live via a real Trivy scan of a build
+# from this directory: a local tfvars file's private key and API
+# secrets ended up baked into the image layers. Excluding the whole
+# directory here closes that regardless of what's gitignored.
+infra/
+
 scripts/finetuned_bge_embeddings/
 
 .streamlit/
