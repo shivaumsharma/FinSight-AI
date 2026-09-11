@@ -25,10 +25,12 @@ would use it. Nothing here imports the agent/tool stack anymore.
 import os
 import time
 
+import pandas as pd
 import requests
 import streamlit as st
 
 from app.api.serialization import financial_df_from_json
+from scripts import snowflake_accuracy_store
 from app.valuation.what_if_dcf import (
     compute_what_if, GROWTH_RATE_MIN, GROWTH_RATE_MAX,
     TERMINAL_GROWTH_RATE_BY_CURRENCY, TERMINAL_GROWTH_BOUNDS_BY_CURRENCY, WACC_OFFSET,
@@ -70,6 +72,44 @@ def _md_escape(text: str) -> str:
     (st.write/st.markdown/st.caption/st.warning/st.info).
     """
     return text.replace("$", "\\$")
+
+
+@st.cache_data(ttl=3600)
+def _fetch_snowflake_accuracy_trend() -> "pd.DataFrame | None":
+    """Live accuracy-over-time, read straight from Snowflake instead of
+    the one static summary line in canonical_accuracy_result.json --
+    see scripts/snowflake_accuracy_store.py's own module docstring for
+    why this exists as an addition, not a replacement (SQLite/that JSON
+    file stay the source of truth for everything else).
+
+    None whenever Snowflake isn't configured or the query fails for any
+    reason -- this is a "nice to have if it's there" panel, never a
+    reason to break the report page underneath it. Cached for an hour
+    (st.cache_data) since this reruns on every Streamlit interaction on
+    the page, not just once per report.
+    """
+    conn = snowflake_accuracy_store.connect()
+    if conn is None:
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute(snowflake_accuracy_store.VALIDATION_QUERIES["accuracy_trend_by_run_date"])
+            rows = cur.fetchall()
+            columns = [c[0] for c in cur.description]
+        return pd.DataFrame(rows, columns=columns)
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
+def _render_snowflake_accuracy_trend() -> None:
+    df = _fetch_snowflake_accuracy_trend()
+    if df is None or df.empty:
+        return
+    with st.expander("Accuracy trend over time (live, from Snowflake)"):
+        st.line_chart(df.set_index(df.columns[0])[df.columns[-1]])
+        st.dataframe(df, hide_index=True)
 
 # ---------------------------------------------------
 # INTRODUCTION
@@ -259,6 +299,7 @@ if "report" in st.session_state:
             f"**Model track record (12-month forward accuracy, backtested):** "
             f"{_md_escape(track_record['summary_line'])}. Full methodology in EVALUATION.md."
         )
+    _render_snowflake_accuracy_trend()
 
     col1, col2 = st.columns([1, 2])
     with col1:
