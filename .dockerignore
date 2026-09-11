@@ -43,6 +43,14 @@ infra/
 
 scripts/finetuned_bge_embeddings/
 
+# RLVR/GRPO training run checkpoints -- local training artifacts, not
+# runtime code (scripts/*.py that read/write these are on-demand
+# training scripts, same category as scripts/finetuned_bge_embeddings/
+# above). Confirmed live via the same Trivy scan: ~540MB across 5
+# checkpoint dirs, each holding multiple 10MB+ tokenizer.json/model
+# files, was getting copied into the image for no reason.
+scripts/grpo_output*/
+
 .streamlit/
 .idea/
 .vscode/
