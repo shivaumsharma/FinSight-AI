@@ -104,6 +104,14 @@ def rate_limit_exceeded(daily_limit: int) -> APIError:
     )
 
 
+def ticker_resolution_rate_limit_exceeded(daily_limit: int) -> APIError:
+    return APIError(
+        RATE_LIMIT_EXCEEDED,
+        f"Too many unrecognized ticker/company lookups today (limit: {daily_limit}). Please try again tomorrow.",
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+    )
+
+
 def ticker_not_found(ticker: str) -> APIError:
     return APIError(
         TICKER_NOT_FOUND,

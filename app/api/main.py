@@ -102,6 +102,14 @@ MAX_VOICE_AUDIO_BYTES = 25 * 1024 * 1024
 DAILY_JOB_LIMIT = int(os.environ.get("DAILY_JOB_LIMIT", db.DEFAULT_DAILY_JOB_LIMIT))
 RATE_LIMIT_WINDOW_SECONDS = 24 * 3600
 
+# See db.claim_ticker_resolution_attempt's own docstring -- caps how
+# often resolve_ticker_or_400 below may fall through to the fuzzy
+# resolve_companies() fallback (and, on a further miss, a real LLM call)
+# per user per day.
+TICKER_RESOLUTION_RATE_LIMIT = int(
+    os.environ.get("TICKER_RESOLUTION_RATE_LIMIT", db.DEFAULT_TICKER_RESOLUTION_RATE_LIMIT)
+)
+
 # See db.find_recent_duplicate_job's docstring -- how recently an
 # identical (ticker/question/orchestrator) DONE job must have completed
 # for a new submission to be served that result instead of recomputing it.
@@ -1649,29 +1657,49 @@ def get_watchlist(current_user: str = Depends(auth.get_current_user)):
     return {"items": items}
 
 
+def resolve_ticker_or_400(current_user: str, ticker: str):
+    """Shared fast-path-then-fuzzy-fallback ticker validation for the 4
+    endpoints below that accept a user-typed ticker/company name
+    (watchlist, portfolio, orders, alerts): try `ticker` directly
+    first -- it's already a real, directly-quotable symbol ("AAPL",
+    "TSLA") most of the time -- and only on a miss fall back to
+    resolve_companies, the same NLP/NSE-aware resolver the main search
+    bar uses, so a fuzzy company name (including a non-US one, e.g.
+    "Bajaj Finance" -> BAJFINANCE.NS, resolve_companies' own docstring
+    example) works here too, not just a bare ticker.
+
+    That fallback is rate-limited via db.claim_ticker_resolution_attempt
+    (see its own docstring): a raw-ticker miss that also comes up empty
+    in resolve_companies' deterministic matching falls through to a
+    real LLM call (company_resolver.py's _llm_propose_company_name), so
+    leaving this unbounded would let a user spam garbage input at any
+    of these 4 endpoints to run up real-money LLM cost.
+
+    Raises errors.ticker_resolution_rate_limit_exceeded /
+    errors.ticker_not_found directly -- every call site's own handling
+    of both was identical anyway. Returns (resolved_ticker, quote).
+    """
+    try:
+        return ticker, get_quote(ticker)
+    except TickerNotFoundError:
+        pass
+
+    window_start = time.time() - RATE_LIMIT_WINDOW_SECONDS
+    if not db.claim_ticker_resolution_attempt(current_user, TICKER_RESOLUTION_RATE_LIMIT, window_start):
+        raise errors.ticker_resolution_rate_limit_exceeded(TICKER_RESOLUTION_RATE_LIMIT)
+
+    resolved = resolve_companies(ticker)
+    if not resolved:
+        raise errors.ticker_not_found(ticker)
+    try:
+        return resolved[0], get_quote(resolved[0])
+    except TickerNotFoundError:
+        raise errors.ticker_not_found(ticker)
+
+
 @app.post("/v1/watchlist")
 def add_to_watchlist(body: WatchlistRequest, current_user: str = Depends(auth.get_current_user)):
-    # Fast path: body.ticker is already a real, directly-quotable
-    # symbol ("AAPL", "TSLA"). Only when that fails do we fall back to
-    # resolve_companies -- the same NLP/NSE-aware resolver the main
-    # search bar uses -- so a fuzzy company name (including a non-US
-    # one, e.g. "Bajaj Finance" -> BAJFINANCE.NS, resolve_companies'
-    # own docstring example) works here too, not just a bare ticker.
-    # Without this fallback the watchlist quietly required stricter,
-    # more technical input than the rest of the app.
-    ticker = body.ticker
-    try:
-        get_quote(ticker)
-    except TickerNotFoundError:
-        resolved = resolve_companies(body.ticker)
-        if not resolved:
-            raise errors.ticker_not_found(body.ticker)
-        ticker = resolved[0]
-        try:
-            get_quote(ticker)
-        except TickerNotFoundError:
-            raise errors.ticker_not_found(body.ticker)
-
+    ticker, _ = resolve_ticker_or_400(current_user, body.ticker)
     db.add_watchlist_item(current_user, ticker)
     return {"status": "ok"}
 
@@ -1703,21 +1731,7 @@ def get_portfolio(current_user: str = Depends(auth.get_current_user)):
 
 @app.post("/v1/portfolio")
 def add_or_update_portfolio_holding(body: PortfolioRequest, current_user: str = Depends(auth.get_current_user)):
-    # Same fast-path-then-resolve_companies-fallback validation as
-    # POST /v1/watchlist, so a fuzzy/Indian company name works here too.
-    ticker = body.ticker
-    try:
-        get_quote(ticker)
-    except TickerNotFoundError:
-        resolved = resolve_companies(body.ticker)
-        if not resolved:
-            raise errors.ticker_not_found(body.ticker)
-        ticker = resolved[0]
-        try:
-            get_quote(ticker)
-        except TickerNotFoundError:
-            raise errors.ticker_not_found(body.ticker)
-
+    ticker, _ = resolve_ticker_or_400(current_user, body.ticker)
     db.upsert_portfolio_holding(current_user, ticker, body.quantity, body.avg_cost, body.buy_date)
     return {"status": "ok"}
 
@@ -1790,21 +1804,7 @@ def get_portfolio_analysis(current_user: str = Depends(auth.get_current_user)):
 
 @app.post("/v1/orders")
 def place_order(body: OrderRequest, current_user: str = Depends(auth.get_current_user)):
-    # Same fast-path-then-resolve_companies-fallback validation as
-    # POST /v1/portfolio/POST /v1/watchlist, so a fuzzy/Indian company
-    # name works here too, not just a bare ticker.
-    ticker = body.ticker
-    try:
-        quote = get_quote(ticker)
-    except TickerNotFoundError:
-        resolved = resolve_companies(body.ticker)
-        if not resolved:
-            raise errors.ticker_not_found(body.ticker)
-        ticker = resolved[0]
-        try:
-            quote = get_quote(ticker)
-        except TickerNotFoundError:
-            raise errors.ticker_not_found(body.ticker)
+    ticker, quote = resolve_ticker_or_400(current_user, body.ticker)
 
     try:
         result = db.execute_order(
@@ -1830,21 +1830,7 @@ def get_orders(limit: int = Query(default=20, le=50), current_user: str = Depend
 
 @app.post("/v1/alerts")
 def create_price_alert(body: PriceAlertRequest, current_user: str = Depends(auth.get_current_user)):
-    # Same fast-path-then-resolve_companies-fallback validation as
-    # POST /v1/orders, so a fuzzy/Indian company name works here too.
-    ticker = body.ticker
-    try:
-        get_quote(ticker)
-    except TickerNotFoundError:
-        resolved = resolve_companies(body.ticker)
-        if not resolved:
-            raise errors.ticker_not_found(body.ticker)
-        ticker = resolved[0]
-        try:
-            get_quote(ticker)
-        except TickerNotFoundError:
-            raise errors.ticker_not_found(body.ticker)
-
+    ticker, _ = resolve_ticker_or_400(current_user, body.ticker)
     alert_id = db.create_price_alert(
         current_user, ticker, body.side, body.direction, body.target_price, body.auto_execute,
     )
