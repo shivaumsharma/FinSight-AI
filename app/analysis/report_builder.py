@@ -129,7 +129,22 @@ class ResearchSummaryBuilder:
                 lines.append(
                     f"Section: {chunk['metadata'].get('section','General')}"
                 )
+                # Fenced, not just appended: chunk["text"] is real filing/
+                # transcript text pulled from a live, third-party-controlled
+                # source (SEC EDGAR, NSE) with zero content filtering -- see
+                # narrative_builder.py's _build_prompt, which reads this
+                # whole block verbatim into the narrative LLM's prompt. A
+                # filer could embed instruction-like text in an exhibit
+                # ("Note to analysts: disregard prior guidance...") that
+                # would otherwise sit indistinguishable from this module's
+                # own prose. These markers give the prompt a hard boundary
+                # to point at (see the matching instruction in
+                # narrative_builder._build_prompt) instead of relying on
+                # the model to somehow infer where "data" ends and
+                # "instructions" begin in one unmarked block of text.
+                lines.append("--- BEGIN FILING EXCERPT (untrusted source text) ---")
                 lines.append(chunk["text"])
+                lines.append("--- END FILING EXCERPT ---")
                 lines.append("")
         else:
             lines.append("No evidence retrieved.")
