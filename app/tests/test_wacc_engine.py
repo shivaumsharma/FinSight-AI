@@ -5,6 +5,7 @@ No network, no models -- pure pandas/numpy math against small
 hand-built fixtures, so these run in milliseconds and belong in CI.
 """
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -60,6 +61,44 @@ def test_tax_rate_ignores_non_positive_pretax_income():
     df = _financial_df(tax_expense=[10, 120], pretax_income=[-500, 600])
     engine = WACCEngine(financial_df=df, market_cap=10_000, beta=1.0)
     assert engine.calculate_tax_rate() == pytest.approx(120 / 600)
+
+
+def test_calculate_debt_value_returns_zero_when_total_debt_is_entirely_missing():
+    # Every reported year is NaN (not zero -- genuinely absent from the
+    # data provider), unlike test_cost_of_debt_excludes_zero_debt_years'
+    # explicit 0s. Used to raise IndexError on an empty post-dropna
+    # series instead of degrading like every other structurally-missing
+    # input in this engine.
+    df = _financial_df(total_debt=[np.nan, np.nan])
+    engine = WACCEngine(financial_df=df, market_cap=10_000, beta=1.0)
+    assert engine.calculate_debt_value() == 0.0
+
+
+def test_wacc_is_cost_of_equity_only_for_a_debt_free_company():
+    # A company with zero debt every year should get the textbook
+    # debt-free WACC (= cost of equity), not NaN. Before the fix,
+    # calculate_cost_of_debt() returned NaN (mean of an empty
+    # total_debt>0 frame) and 0 * NaN = NaN poisoned the whole result
+    # even though debt_weight was legitimately 0.
+    df = _financial_df(total_debt=[0, 0], interest_expense=[0, 0])
+    engine = WACCEngine(financial_df=df, market_cap=10_000, beta=1.5,
+                         risk_free_rate=0.04, market_risk_premium=0.06)
+    wacc = engine.calculate_wacc()
+    assert not pd.isna(wacc)
+    assert wacc == pytest.approx(engine.calculate_cost_of_equity())
+
+
+def test_wacc_is_cost_of_equity_only_when_debt_history_is_entirely_missing():
+    # Same outcome as the explicit-zero case above, but for a company
+    # whose debt data was simply never reported (all-NaN), not one
+    # confirmed to have zero debt -- calculate_debt_value() collapses
+    # both to 0.0, so calculate_wacc() must handle both the same way.
+    df = _financial_df(total_debt=[np.nan, np.nan], interest_expense=[np.nan, np.nan])
+    engine = WACCEngine(financial_df=df, market_cap=10_000, beta=1.5,
+                         risk_free_rate=0.04, market_risk_premium=0.06)
+    wacc = engine.calculate_wacc()
+    assert not pd.isna(wacc)
+    assert wacc == pytest.approx(engine.calculate_cost_of_equity())
 
 
 def test_wacc_blends_equity_and_debt_by_market_weight():

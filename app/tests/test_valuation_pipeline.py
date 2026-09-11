@@ -15,6 +15,7 @@ for the full calibration evidence (a stark, unambiguous gap across the
 0.9%/2.4%, every legitimate company at 44.1%+).
 """
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -86,6 +87,47 @@ def test_valuation_unavailable_when_market_cap_is_none():
     assert result["enterprise_value"] is None
     assert result["equity_value"] is None
     assert "market capitalization" in result["dcf_unavailable_reason"].lower()
+
+
+# ---------------------------------------------------------------- NaN total_debt/cash
+
+def test_a_nan_latest_year_total_debt_falls_back_to_the_last_available_year():
+    # Real yfinance gap: the newest fiscal year is missing an XBRL tag
+    # while older years have real values. Before the fix, a bare
+    # .iloc[-1] with no .dropna() grabbed this NaN directly, which then
+    # produced a NaN equity_value that silently evaded the leverage
+    # guard below (NaN comparisons are always False in Python). Now it
+    # should fall back to the latest YEAR THAT ACTUALLY HAS a value,
+    # same as _get_shares_outstanding's own pattern, and produce a real
+    # (non-NaN) result.
+    df = _financial_df(total_debt=[50, np.nan], cash=[40, 42])
+    result = ValuationPipeline(financial_df=df, market_cap=5000, beta=1.1, ticker="TEST").run_valuation()
+
+    assert result["dcf_available"] is True
+    assert result["equity_value"] is not None
+    assert not pd.isna(result["equity_value"])
+
+
+def test_all_nan_total_debt_degrades_to_unavailable_not_a_silent_nan():
+    # No year has a usable total_debt value at all -- must route to the
+    # same explicit "DCF is not applicable" result every other
+    # structurally-missing-input case in this pipeline uses, not a NaN
+    # equity_value/intrinsic_value that reaches the user as if it were
+    # a real, vetted number.
+    df = _financial_df(total_debt=[np.nan, np.nan], cash=[40, 42])
+    result = ValuationPipeline(financial_df=df, market_cap=5000, beta=1.1, ticker="TEST").run_valuation()
+
+    assert result["dcf_available"] is False
+    assert result["equity_value"] is None
+    assert "debt" in result["dcf_unavailable_reason"].lower()
+
+
+def test_all_nan_cash_degrades_to_unavailable_not_a_silent_nan():
+    df = _financial_df(total_debt=[50, 55], cash=[np.nan, np.nan])
+    result = ValuationPipeline(financial_df=df, market_cap=5000, beta=1.1, ticker="TEST").run_valuation()
+
+    assert result["dcf_available"] is False
+    assert result["equity_value"] is None
 
 
 # ---------------------------------------------------------------- risk_tolerance -> WACC/intrinsic value
