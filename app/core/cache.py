@@ -35,11 +35,31 @@ when their own dependencies are unavailable.
 """
 
 import hashlib
+import hmac
 import os
 import pickle
+import secrets
 from typing import Any, Optional
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+
+# Same fallback pattern as app/api/auth.py's _PDF_SHARE_SECRET/
+# _REALTIME_VOICE_SECRET -- a real env var in any deployment that cares
+# about cache entries surviving a process restart, a fresh random
+# secret otherwise (safe: it just means a restart invalidates every
+# existing cache entry instead of trusting them, which is the correct
+# behavior anyway since a restart can also mean a code/schema change).
+#
+# Every value stored here is unpickled on the next cache_get -- a raw
+# pickle.loads() on Redis-sourced bytes is arbitrary code execution the
+# moment anything else can write to this Redis instance under the
+# `finsight:` key namespace (a misconfigured "internal only" Redis
+# reachable from outside, or a leaked/shared managed-Redis credential).
+# The cache key itself is fully deterministic from make_key()'s inputs,
+# so it's guessable -- this HMAC is what makes cache_get refuse to
+# unpickle anything this process didn't itself write.
+_CACHE_HMAC_SECRET = os.environ.get("CACHE_HMAC_SECRET") or secrets.token_urlsafe(32)
+_SIG_LEN = hashlib.sha256().digest_size  # 32 bytes
 
 # Connection attempts are retried at most this often -- avoids a
 # per-request connection-timeout stall (socket_connect_timeout below)
@@ -101,10 +121,17 @@ def cache_get(key: str) -> Optional[Any]:
         raw = client.get(key)
     except Exception:
         return None
-    if raw is None:
+    if raw is None or len(raw) <= _SIG_LEN:
+        return None
+    sig, payload = raw[:_SIG_LEN], raw[_SIG_LEN:]
+    expected = hmac.new(_CACHE_HMAC_SECRET.encode("utf-8"), payload, hashlib.sha256).digest()
+    if not hmac.compare_digest(sig, expected):
+        # Unsigned, tampered-with, or written by a process with a
+        # different secret (e.g. a restart) -- never unpickle this.
+        # Treated the same as a miss, not an error.
         return None
     try:
-        return pickle.loads(raw)
+        return pickle.loads(payload)
     except Exception:
         # Corrupt/incompatible entry (e.g. a schema change since it was
         # written) -- treat as a miss rather than crashing the report.
@@ -116,6 +143,8 @@ def cache_set(key: str, value: Any, ttl_seconds: int) -> None:
     if client is None:
         return
     try:
-        client.setex(key, ttl_seconds, pickle.dumps(value))
+        payload = pickle.dumps(value)
+        sig = hmac.new(_CACHE_HMAC_SECRET.encode("utf-8"), payload, hashlib.sha256).digest()
+        client.setex(key, ttl_seconds, sig + payload)
     except Exception:
         pass
