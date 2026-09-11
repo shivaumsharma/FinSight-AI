@@ -104,7 +104,16 @@ export function useConversationalAssistant() {
     // useState's initializer, so server-rendered and first-client-
     // rendered markup match; localStorage doesn't exist during SSR).
     setVoiceMode(localStorage.getItem(VOICE_MODE_STORAGE_KEY) === "1");
-    return () => stopSpeaking();
+    return () => {
+      stopSpeaking();
+      // Belt-and-suspenders, not the actual fix -- useRealtimeVoiceInput
+      // now tears down its own mic/AudioContext/WebSocket on its OWN
+      // unmount regardless of whether anything here calls stop() (see
+      // that hook's own cleanup effect), so this fires automatically
+      // either way. Kept explicit anyway so the intent is visible here
+      // too, not just implicitly relied on one file away.
+      realtimeVoice.stop();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

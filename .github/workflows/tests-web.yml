@@ -1,0 +1,42 @@
+name: tests-web
+
+# Companion to tests.yml (the Python backend suite) -- separate
+# workflow, not a job folded into that one, since the two have nothing
+# in common (different toolchain, different working directory) and a
+# failure in one shouldn't block collecting results from the other.
+#
+# Runs web/'s Vitest suite -- started specifically to regression-test
+# useRealtimeVoiceInput.ts/useWakeWordListener.ts's unmount cleanup
+# (see those files' own comments), the first real frontend test
+# coverage this project has had. Scope this workflow up as more of
+# web/ gets covered; there's nothing else to add to it yet.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  vitest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Run Vitest suite
+        run: npm test
