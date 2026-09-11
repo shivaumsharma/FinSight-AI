@@ -5,21 +5,41 @@ name: deploy-aws
 # set (from `terraform output github_actions_role_arn`, see infra/README.md).
 # Missing/empty is expected and this whole workflow just no-ops until then --
 # same gating pattern DigiNyaya's ci.yml already uses.
+#
+# Triggered by tests.yml COMPLETING on main, not by push directly -- the two
+# used to fire independently on the same push event, which meant a commit
+# that failed pytest would still deploy to production in parallel (confirmed:
+# no `needs`/gating existed between them at all). workflow_run only fires
+# after tests.yml finishes, and the `if:` below additionally requires it to
+# have actually passed. workflow_dispatch is kept as a manual override (e.g.
+# to redeploy an already-tested commit without re-running the suite) and
+# skips the conclusion check since there's no workflow_run event to check.
 
 on:
-  push:
+  workflow_run:
+    workflows: ["tests"]
+    types: [completed]
     branches: [main]
   workflow_dispatch: {}
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    if: vars.AWS_DEPLOY_ROLE_ARN != ''
+    if: >
+      vars.AWS_DEPLOY_ROLE_ARN != '' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
     permissions:
       id-token: write # required for AWS OIDC role assumption
       contents: read
     steps:
+      # workflow_run's default checkout would use the deploy workflow FILE's
+      # own ref (main's latest), not necessarily the exact commit tests.yml
+      # just validated -- pin to that commit's SHA explicitly so what's
+      # deployed is what was actually tested, not whatever main has moved to
+      # by the time this job starts.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -33,8 +53,9 @@ jobs:
         id: ecr_image
         env:
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
-          IMAGE_URI="$ECR_REGISTRY/finsight-backend:${{ github.sha }}"
+          IMAGE_URI="$ECR_REGISTRY/finsight-backend:$DEPLOY_SHA"
           # ECR tags are immutable -- re-running this workflow for a commit
           # whose image was already pushed (e.g. manually re-triggering
           # after the EB deploy step below failed for an unrelated reason,
@@ -45,7 +66,7 @@ jobs:
           # already-pushed commit after a hung EC2 instance broke the first
           # attempt's later steps. Checking first makes this step
           # idempotent -- reuse the existing image instead of erroring.
-          if aws ecr describe-images --repository-name finsight-backend --image-ids imageTag="${{ github.sha }}" >/dev/null 2>&1; then
+          if aws ecr describe-images --repository-name finsight-backend --image-ids imageTag="$DEPLOY_SHA" >/dev/null 2>&1; then
             echo "Image already exists in ECR for this commit -- skipping build/push."
           else
             docker build -t "$IMAGE_URI" .
@@ -73,7 +94,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION || 'eu-north-1' }}
           application-name: ${{ vars.EB_APPLICATION_NAME || 'finsight' }}
           environment-name: ${{ vars.EB_ENVIRONMENT_NAME || 'finsight-backend-prod' }}
-          version-label: ${{ github.sha }}
+          version-label: ${{ github.event.workflow_run.head_sha || github.sha }}
           deployment-package-path: Dockerrun.aws.json
           # Both already exist (created by infra/'s Terraform) -- never
           # let this action create a second, untracked copy alongside
