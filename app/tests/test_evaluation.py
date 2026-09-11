@@ -104,27 +104,82 @@ def test_citation_evaluator_handles_empty_citation_list():
 
 
 # ---------------------------------------------------------------- completeness
+#
+# validate() takes the per-section {name: text} dict
+# (context.report_data["narrative"]), not the flattened report string
+# -- see report_validator.py's own module docstring for why checking
+# the flattened string (report_tool.py always writes every section's
+# heading regardless of whether the narrative actually generated)
+# could never detect a missing section at all.
 
 def test_report_validator_flags_no_missing_sections_when_all_present():
-    report = "\n".join([
-        "# Executive Summary\ntext", "# Business Analysis\ntext",
-        "# Market and Earnings Analysis\ntext", "# Risk Analysis\ntext",
-        "# Investment Thesis\ntext",
-    ])
-    result = ReportValidator().validate(report)
+    narrative = {
+        "Executive Summary": "Real content.",
+        "Business Analysis": "Real content.",
+        "Market and Earnings Analysis": "Real content.",
+        "Risk Analysis": "Real content.",
+        "Investment Thesis": "Real content.",
+    }
+    result = ReportValidator().validate(narrative)
     assert result.complete is True
     assert result.missing_sections == []
     assert result.completeness_score == 100.0
 
 
 def test_report_validator_flags_missing_sections():
-    # Only 2 of the 5 required sections are present.
-    report = "# Executive Summary\ntext\n# Risk Analysis\ntext"
-    result = ReportValidator().validate(report)
+    # Only 2 of the 5 required sections are present in the dict at all.
+    narrative = {"Executive Summary": "Real content.", "Risk Analysis": "Real content."}
+    result = ReportValidator().validate(narrative)
     assert result.complete is False
     assert "Business Analysis" in result.missing_sections
     assert len(result.missing_sections) == 3
     assert result.completeness_score == pytest.approx(2 / 5 * 100)
+
+
+def test_report_validator_flags_sections_present_only_as_the_fallback_placeholder():
+    """Regression test for the completeness_score-always-100 bug: every
+    key exists (report_tool.py's f-string always writes a heading for
+    every NARRATIVE_SECTIONS entry), but the VALUE is narrative_builder's
+    own "model failed to produce this section" placeholder, not real
+    content. Before the fix, checking the flattened string for the
+    section NAME as a substring would find "Executive Summary" (the
+    heading) regardless of what followed it, and this would have wrongly
+    validated as complete=True, completeness_score=100.0."""
+    from app.reporting.narrative_builder import NARRATIVE_SECTION_FALLBACK
+
+    narrative = {
+        "Executive Summary": NARRATIVE_SECTION_FALLBACK,
+        "Business Analysis": "Real content.",
+        "Market and Earnings Analysis": NARRATIVE_SECTION_FALLBACK,
+        "Risk Analysis": "Real content.",
+        "Investment Thesis": "Real content.",
+    }
+    result = ReportValidator().validate(narrative)
+    assert result.complete is False
+    assert result.missing_sections == ["Executive Summary", "Market and Earnings Analysis"]
+    assert result.completeness_score == pytest.approx(3 / 5 * 100)
+
+
+def test_report_validator_flags_completely_failed_generation():
+    # Every section is the fallback placeholder -- the exact scenario
+    # that used to validate as a perfect 100.0 score.
+    from app.reporting.narrative_builder import NARRATIVE_SECTION_FALLBACK, NARRATIVE_SECTIONS
+
+    narrative = {section: NARRATIVE_SECTION_FALLBACK for section in NARRATIVE_SECTIONS}
+    result = ReportValidator().validate(narrative)
+    assert result.complete is False
+    assert result.completeness_score == 0.0
+    assert len(result.missing_sections) == 5
+
+
+def test_report_validator_handles_a_none_or_empty_narrative_without_raising():
+    result = ReportValidator().validate(None)
+    assert result.complete is False
+    assert result.completeness_score == 0.0
+
+    result = ReportValidator().validate({})
+    assert result.complete is False
+    assert result.completeness_score == 0.0
 
 
 # ---------------------------------------------------------------- retrieval + aggregate
