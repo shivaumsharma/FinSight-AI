@@ -1289,10 +1289,23 @@ def pop_pending_order(user_id: str) -> Optional[dict]:
     """Same shape as get_pending_order, but atomically clears the row
     too -- for the two call sites that consume the pending order
     (confirmed execution, explicit cancellation, or an unrelated
-    message superseding it) rather than just checking it."""
+    message superseding it) rather than just checking it.
+
+    A single DELETE ... RETURNING statement, not a separate SELECT then
+    DELETE -- the previous two-statement version's SELECT was an
+    unlocked read on its own connection, so two concurrent callers (a
+    double-tap on "Confirm," or a client retry after a perceived
+    timeout) could both SELECT the same still-present row before
+    either's DELETE committed, and both would proceed to execute the
+    same trade. A single statement is atomic: whichever caller's DELETE
+    actually runs first gets the row back; the second caller's DELETE
+    finds nothing left to delete and correctly gets None, exactly like
+    calling this when nothing was ever pending.
+    """
     with _connect() as conn:
-        row = conn.execute("SELECT legs_json FROM pending_orders WHERE user_id=?", (user_id,)).fetchone()
-        conn.execute("DELETE FROM pending_orders WHERE user_id=?", (user_id,))
+        row = conn.execute(
+            "DELETE FROM pending_orders WHERE user_id=? RETURNING legs_json", (user_id,)
+        ).fetchone()
     return {"legs": json.loads(row[0])} if row is not None else None
 
 

@@ -4,6 +4,8 @@ monkeypatched to a fake class per test (same convention as
 test_model_consensus.py) -- never hits real network.
 """
 
+import threading
+
 import pytest
 
 from app.api import db
@@ -1277,6 +1279,36 @@ def test_execute_pending_order_reports_a_failed_leg_by_message(temp_db):
 
     assert "Couldn't place that order" in result
     assert db.get_pending_order(user_id) is None
+
+
+def test_pop_pending_order_double_tap_race_only_one_caller_gets_it(temp_db):
+    # Regression test for the TOCTOU race db.pop_pending_order's own
+    # docstring describes: a double-tap on "Confirm," or a client retry
+    # after a perceived timeout, both calling pop_pending_order for the
+    # same user concurrently. Same threaded-concurrency approach as
+    # test_orders.py's test_execute_order_double_sell_race_never_oversells.
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    db.set_pending_order(
+        user_id,
+        [{"ticker": "TCS", "side": "BUY", "quantity": 10.0, "price": 4000.0, "currency": "INR", "rationale": None}],
+    )
+
+    n_threads = 20
+    results = [None] * n_threads
+
+    def _attempt(i):
+        results[i] = db.pop_pending_order(user_id)
+
+    threads = [threading.Thread(target=_attempt, args=(i,)) for i in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    non_none = [r for r in results if r is not None]
+    assert len(non_none) == 1  # exactly one caller got the real legs back
+    assert non_none[0]["legs"][0]["ticker"] == "TCS"
+    assert db.get_pending_order(user_id) is None  # cleared, not left dangling
 
 
 # ---------------------------------------------------------------- add_holding
