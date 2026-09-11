@@ -22,6 +22,15 @@ narrative_comparison/
 llm_logs/
 *.db
 
+# Frontend, MLflow tracking data, and a local scratch data dir -- none
+# of this backend-only image needs any of it, and each was silently
+# bloating the build context by 500MB-1.5GB+ (confirmed live: web/'s
+# node_modules alone is ~1.3GB, mlruns/ ~490MB), turning "load build
+# context" into the slowest step of the whole build.
+web/
+mlruns/
+Data_Comparison/
+
 scripts/finetuned_bge_embeddings/
 
 .streamlit/

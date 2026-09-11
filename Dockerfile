@@ -51,6 +51,18 @@ COPY --from=builder /install /usr/local
 WORKDIR /app
 COPY . .
 
+# Non-root: the app writes its persistent state (jobs.db, reports/,
+# llm_logs/, logs/, filings_cache/, vector_db/, and mlruns/ if a
+# training script ever runs here) directly under WORKDIR by default --
+# see app/core/paths.py's own DATA_DIR docstring: DATA_DIR only points
+# elsewhere (a mounted volume) when explicitly set, and defaults to the
+# repo root otherwise. chown the whole tree rather than enumerating
+# each write path individually, since a new one could be added later
+# without this Dockerfile being updated to match.
+RUN useradd --create-home --shell /bin/false appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
