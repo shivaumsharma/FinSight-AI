@@ -1173,52 +1173,81 @@ def execute_order(
     "price alert at $180 triggered", etc.). None for an order placed
     with no proposal behind it (e.g. the OrderTicket/TradeBar UI form)
     -- a missing reason is honest; a fabricated one wouldn't be.
+
+    Same BEGIN IMMEDIATE pattern as create_job_if_under_limit's own
+    docstring describes, for the identical reason: the read-then-write
+    below (SELECT current quantity, compute a new one in Python, then
+    write it) is not atomic under _connect()'s plain sqlite3.connect(),
+    which only implicitly opens a transaction on the first WRITE
+    statement -- not the read. Two concurrent orders for the same
+    (user_id, ticker) could otherwise both read the same pre-write
+    quantity, both pass the "can't sell more than held" check
+    independently, and both write their own independently-computed
+    new_quantity -- e.g. two concurrent SELL-8 requests against a
+    10-share position (a double-tap, or a client retry on a perceived
+    timeout) could both see current_quantity=10, both pass "8>10?"
+    No", and both commit new_quantity=2, silently recording 16 shares
+    "sold" from a 10-share position.
     """
     if side not in ("BUY", "SELL"):
         raise ValueError(f"Invalid order side: {side!r}")
 
     order_id = str(uuid.uuid4())
     now = time.time()
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT quantity, avg_cost FROM portfolio_holdings WHERE user_id=? AND ticker=?",
-            (user_id, ticker),
-        ).fetchone()
-        current_quantity = row[0] if row else 0.0
-        current_avg_cost = row[1] if row else 0.0
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.isolation_level = None
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT quantity, avg_cost FROM portfolio_holdings WHERE user_id=? AND ticker=?",
+                (user_id, ticker),
+            ).fetchone()
+            current_quantity = row[0] if row else 0.0
+            current_avg_cost = row[1] if row else 0.0
 
-        if side == "BUY":
-            new_quantity = current_quantity + quantity
-            new_avg_cost = (current_quantity * current_avg_cost + quantity * execution_price) / new_quantity
-        else:
-            if quantity > current_quantity:
-                raise ValueError(
-                    f"Cannot sell {quantity} shares of {ticker}: only {current_quantity} held."
+            if side == "BUY":
+                new_quantity = current_quantity + quantity
+                new_avg_cost = (current_quantity * current_avg_cost + quantity * execution_price) / new_quantity
+            else:
+                if quantity > current_quantity:
+                    conn.execute("ROLLBACK")
+                    raise ValueError(
+                        f"Cannot sell {quantity} shares of {ticker}: only {current_quantity} held."
+                    )
+                new_quantity = current_quantity - quantity
+                new_avg_cost = current_avg_cost
+
+            if new_quantity > 0:
+                conn.execute(
+                    """
+                    INSERT INTO portfolio_holdings (user_id, ticker, quantity, avg_cost, added_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id, ticker) DO UPDATE SET
+                        quantity=excluded.quantity,
+                        avg_cost=excluded.avg_cost
+                    """,
+                    (user_id, ticker, new_quantity, new_avg_cost, now),
                 )
-            new_quantity = current_quantity - quantity
-            new_avg_cost = current_avg_cost
+            else:
+                conn.execute("DELETE FROM portfolio_holdings WHERE user_id=? AND ticker=?", (user_id, ticker))
 
-        if new_quantity > 0:
             conn.execute(
                 """
-                INSERT INTO portfolio_holdings (user_id, ticker, quantity, avg_cost, added_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(user_id, ticker) DO UPDATE SET
-                    quantity=excluded.quantity,
-                    avg_cost=excluded.avg_cost
+                INSERT INTO orders (order_id, user_id, ticker, side, quantity, execution_price, currency, executed_at, rationale)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (user_id, ticker, new_quantity, new_avg_cost, now),
+                (order_id, user_id, ticker, side, quantity, execution_price, currency, now, rationale),
             )
-        else:
-            conn.execute("DELETE FROM portfolio_holdings WHERE user_id=? AND ticker=?", (user_id, ticker))
-
-        conn.execute(
-            """
-            INSERT INTO orders (order_id, user_id, ticker, side, quantity, execution_price, currency, executed_at, rationale)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (order_id, user_id, ticker, side, quantity, execution_price, currency, now, rationale),
-        )
+            conn.execute("COMMIT")
+        except Exception:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.OperationalError:
+                pass  # already rolled back above (the SELL-quantity ValueError path)
+            raise
+    finally:
+        conn.close()
 
     return {
         "order_id": order_id,
