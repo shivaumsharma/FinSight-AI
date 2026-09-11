@@ -13,6 +13,18 @@ retries any other exception, or an HTTPError on any other 4xx status --
 those are permanent (bad auth, bad request, not found) and retrying them
 just delays a failure that was already certain from the first attempt.
 
+Also retries curl_cffi's equivalents of those three, and yfinance's own
+YFRateLimitError. Confirmed live (yfinance 1.2.0): yfinance.data
+imports `from curl_cffi import requests`, not the stdlib `requests`
+this module was originally written against -- curl_cffi.requests.
+exceptions.Timeout/ConnectionError/HTTPError share no base with
+requests.exceptions' classes of the same name beyond OSError/Exception,
+so every yfinance call through market_data.py silently got ZERO
+retries: none of its real transient exceptions ever matched the
+except clauses below. YFRateLimitError is yfinance's own explicit
+"got a 429" signal (raised directly, not wrapped in an HTTPError) --
+see yfinance.data's cookie/crumb-fetching and get() methods.
+
 On exhaustion, re-raises the LAST real exception as-is rather than
 wrapping it in a new type -- sec_edgar_client.py/news_client.py's own
 broad `except (requests.RequestException, ValueError)` clauses already
@@ -25,6 +37,8 @@ import time
 from typing import Callable, Optional, TypeVar
 
 import requests
+from curl_cffi.requests import exceptions as curl_exceptions
+from yfinance.exceptions import YFRateLimitError
 
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_BACKOFF_BASE_SECONDS = 1.0
@@ -69,12 +83,25 @@ def retry_on_transient_error(
     for attempt in range(max_retries + 1):
         try:
             return fn()
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+        except (
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+            curl_exceptions.Timeout,
+            curl_exceptions.ConnectionError,
+        ) as e:
             last_error = e
-        except requests.exceptions.HTTPError as e:
+        except (requests.exceptions.HTTPError, curl_exceptions.HTTPError) as e:
             status = e.response.status_code if e.response is not None else None
             if status != 429 and (status is None or status < 500):
                 raise
+            last_error = e
+        except YFRateLimitError as e:
+            # No .response to read a Retry-After header from (see this
+            # module's docstring: yfinance raises it directly, not as
+            # a wrapped HTTPError) -- _backoff_delay's
+            # `response=None` path (a plain exponential fallback)
+            # handles that the same way an HTTPError with no response
+            # already does below.
             last_error = e
 
         if attempt < max_retries:
