@@ -212,6 +212,14 @@ def test_one_bad_ticker_does_not_500_the_whole_portfolio(client, monkeypatch, au
     # tickers with a live quote, not silently include None.
     summary = resp.json()["summary"]
     assert summary["total_market_value"] == 2000.0
+    # Regression: total_cost_basis must exclude MSFT too, the same as
+    # total_market_value does -- previously it was added unconditionally
+    # (cost basis is "knowable even without a live quote"), which
+    # understated total_unrealized_pnl by counting MSFT's cost without
+    # its offsetting value. AAPL alone: cost_basis=1000, market_value=2000.
+    assert summary["total_cost_basis"] == 1000.0
+    assert summary["total_unrealized_pnl"] == 1000.0
+    assert summary["excluded_from_summary"] is True
 
 
 # ---------------------------------------------------------------- buy_date

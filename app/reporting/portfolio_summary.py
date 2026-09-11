@@ -57,11 +57,16 @@ def build_portfolio_view(user_id: str) -> dict:
         today_pnl = quantity * (price - previous_close) if price is not None and previous_close else None
 
         usd_rate = get_usd_conversion_rate(currency)
-        if usd_rate is None:
+        # A holding with no price (failed quote) is excluded from the
+        # summary entirely, the same as one with no FX rate -- adding
+        # its cost_basis to the total while leaving its market_value
+        # out understated total_unrealized_pnl (cost counted, value
+        # not), same guard portfolio_fit.py's sector allocation already
+        # applies via its own `if price is None: continue`.
+        if usd_rate is None or market_value is None:
             any_excluded_from_summary = True
         else:
-            if market_value is not None:
-                total_market_value += market_value * usd_rate
+            total_market_value += market_value * usd_rate
             total_cost_basis += cost_basis * usd_rate
             if today_pnl is not None:
                 total_today_pnl += today_pnl * usd_rate
