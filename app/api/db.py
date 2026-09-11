@@ -61,6 +61,13 @@ ERROR_TIMEOUT = "TIMEOUT"
 DEFAULT_SESSION_TTL_SECONDS = 30 * 24 * 3600
 DEFAULT_DAILY_JOB_LIMIT = 20
 
+# Ceiling on how many times per day a user can fall through to
+# resolve_companies' fuzzy fallback (a raw ticker lookup miss) -- see
+# claim_ticker_resolution_attempt's own docstring for why this exists
+# at all. Looser than DEFAULT_DAILY_JOB_LIMIT since a real user just
+# fat-fingering a company name a few times a day is normal, not abuse.
+DEFAULT_TICKER_RESOLUTION_RATE_LIMIT = 30
+
 # How recently a user's own identical (same ticker/question/orchestrator)
 # DONE job must have completed for a new submission to be served that
 # result instead of recomputing it -- see find_recent_duplicate_job below.
@@ -437,6 +444,18 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ticker_resolution_attempts (
+                user_id TEXT NOT NULL,
+                attempted_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ticker_resolution_attempts_user "
+            "ON ticker_resolution_attempts(user_id, attempted_at)"
+        )
 
 
 # ---------------------------------------------------------------- users/sessions
@@ -769,6 +788,48 @@ def create_job_if_under_limit(
     finally:
         conn.close()
     return job_id
+
+
+def claim_ticker_resolution_attempt(user_id: str, limit: int, window_start: float) -> bool:
+    """Same atomic count-then-insert as create_job_if_under_limit above
+    (see its own docstring for why a separate count-then-insert races
+    under concurrency), gating a different resource: main.py's
+    resolve_ticker_or_400, called from every endpoint that accepts a
+    user-typed ticker/company name (watchlist, portfolio, orders,
+    alerts). A raw ticker lookup miss there falls through to
+    resolve_companies' fuzzy NLP matching, which -- if even THAT comes
+    up empty -- calls a real LLM (company_resolver.py's
+    _llm_propose_company_name). Without this, a user spamming garbage
+    input at any of those 4 endpoints could run up unbounded real-money
+    LLM cost with no limit at all.
+
+    Returns False (no attempt recorded, caller should reject) if
+    user_id already has `limit` or more recorded attempts since
+    window_start; True (and records this attempt) otherwise.
+    """
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.isolation_level = None
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM ticker_resolution_attempts WHERE user_id=? AND attempted_at > ?",
+                (user_id, window_start),
+            ).fetchone()
+            if row[0] >= limit:
+                conn.execute("ROLLBACK")
+                return False
+            conn.execute(
+                "INSERT INTO ticker_resolution_attempts (user_id, attempted_at) VALUES (?, ?)",
+                (user_id, time.time()),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+    return True
 
 
 def find_recent_duplicate_job(
