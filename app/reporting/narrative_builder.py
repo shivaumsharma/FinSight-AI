@@ -73,6 +73,15 @@ NARRATIVE_SECTIONS = [
     "Investment Thesis",
 ]
 
+# Shared with report_validator.py (imported, not duplicated as a second
+# literal) -- ReportValidator needs to recognize this exact placeholder
+# to tell "the model actually wrote this section" from "it didn't, and
+# this is standing in for it," and a second hand-typed copy of the
+# string would be exactly the kind of silent-drift risk this codebase
+# avoids elsewhere (see FCFFEngine.quality_terminal_growth_adjustment's
+# own comment on the same principle).
+NARRATIVE_SECTION_FALLBACK = "Not available for this report."
+
 _DRIFT_MARKERS = (
     "please provide", "assessment:", "response:", "suggestions:",
     "let me know", "your response should", "for example:",
@@ -504,7 +513,7 @@ def build_narrative_sections(context: ResearchContext, report_data: dict) -> Dic
         pass
 
     for section in NARRATIVE_SECTIONS:
-        sections.setdefault(section, "Not available for this report.")
+        sections.setdefault(section, NARRATIVE_SECTION_FALLBACK)
 
     sections = _apply_contradiction_guardrail(sections, report_data["recommendation"])
 

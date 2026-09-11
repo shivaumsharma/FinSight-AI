@@ -91,8 +91,15 @@ class EvaluationEngine:
         # Report Validation
         # ============================================
 
+        # The per-SECTION dict (report_tool.py sets this on
+        # context.report_data before context.generated_answer is even
+        # built), not the flattened generated_report string above --
+        # see report_validator.py's own module docstring for why
+        # checking the flattened string could never actually detect a
+        # missing/failed section.
+        narrative = (context.report_data or {}).get("narrative") or {}
         report = self.report_validator.validate(
-            generated_report
+            narrative
         )
 
         # ============================================
