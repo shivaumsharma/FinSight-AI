@@ -8,7 +8,6 @@ still exercising the real HTTP layer, the real background-thread job
 runner, and the real SQLite persistence (pointed at a per-test temp file).
 """
 
-import io
 import threading
 import time
 

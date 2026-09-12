@@ -17,7 +17,6 @@ for the full calibration evidence (a stark, unambiguous gap across the
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from app.valuation.valuation_pipeline import (
     ValuationPipeline,

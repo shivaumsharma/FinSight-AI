@@ -8,8 +8,6 @@ worth its own weight here -- the risk lives in the formatting logic,
 not in constructing Paragraph/Table objects).
 """
 
-import pytest
-
 from app.reporting.pdf_report_builder import _alpha_factor_value, _fmt_number, _fmt_percent
 
 
