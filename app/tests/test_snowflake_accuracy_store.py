@@ -6,8 +6,6 @@ run_validation_queries are exercised against a fake cursor/connection
 object instead of a real snowflake.connector.Connection.
 """
 
-import pytest
-
 from scripts import snowflake_accuracy_store as sas
 
 

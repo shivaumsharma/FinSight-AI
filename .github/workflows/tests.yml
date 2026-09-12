@@ -78,8 +78,17 @@ jobs:
       # mlflow is NOT added here: confirmed only imported by
       # scripts/train_ml_classifier.py (an on-demand training script),
       # which nothing under app/tests/ imports.
+      #
+      # reportlab: same recurring gap, a fifth time -- confirmed live
+      # on the first real push after this session's own work, which is
+      # exactly the "truly isolated venv" scenario the comment above
+      # warns local testing can miss. app/reporting/pdf_report_builder.py
+      # imports it at module level; test_pdf_report_builder.py (this
+      # session's own addition) was the first test to ever import that
+      # module, so nothing had caught the gap until then. No torch/
+      # chromadb dependency -- pure Python, cheap to add.
       - name: Install test dependencies
-        run: pip install pandas numpy langgraph==1.2.9 redis fastapi httpx yfinance rapidfuzz python-dotenv pywebpush joblib scikit-learn python-multipart pypdf sarvamai xgboost shap -r requirements-dev.txt
+        run: pip install pandas numpy langgraph==1.2.9 redis fastapi httpx yfinance rapidfuzz python-dotenv pywebpush joblib scikit-learn python-multipart pypdf sarvamai xgboost shap reportlab -r requirements-dev.txt
 
       # test_finbert.py is a manual smoke test (see its own docstring)
       # -- needs the full model stack and live network access (Hugging
@@ -102,6 +111,21 @@ jobs:
       # requests from cloud-datacenter IP ranges, the same class of
       # issue already diagnosed for Yahoo Finance against Cloud Run
       # earlier this project (see market_movers.py's own docstring).
+      # test_research_agent.py (this session's own addition) is
+      # excluded for a different reason than the two above: it's fast
+      # and mocks everything, but importing it imports
+      # app/agents/research_agent.py, which -- unlike
+      # app/agents/langgraph_agent.py's own deliberately-deferred
+      # ToolRegistry import (see that module's own comment) -- pulls in
+      # ToolRegistry at MODULE level, which pulls in SentimentTool ->
+      # FinBERT -> transformers. That's exactly the multi-GB stack this
+      # whole install list exists to avoid (see the top comment above),
+      # so this test can't run here without contradicting this
+      # workflow's own design -- confirmed live via the actual CI
+      # failure (ModuleNotFoundError: transformers) this exclusion
+      # fixes. Runs fine locally with the full dev environment; kept
+      # for a developer to run there, same as test_finbert.py.
+      #
       # Runs with --tb=short (not -x, so one CI round-trip surfaces
       # every failure, not just the first) and re-emits the actual
       # pytest output (not just its exit code) as a GitHub Actions error
@@ -112,7 +136,7 @@ jobs:
       - name: Run unit tests
         run: |
           set +e
-          pytest app/tests/ --ignore=app/tests/test_finbert.py --ignore=app/tests/test_company_resolver.py --tb=short 2>&1 | tee pytest_output.txt
+          pytest app/tests/ --ignore=app/tests/test_finbert.py --ignore=app/tests/test_company_resolver.py --ignore=app/tests/test_research_agent.py --tb=short 2>&1 | tee pytest_output.txt
           exit_code=${PIPESTATUS[0]}
           if [ "$exit_code" -ne 0 ]; then
             summary=$(tail -150 pytest_output.txt | awk '{gsub(/%/,"%25"); gsub(/\r/,"%0D"); printf "%s%%0A", $0}')

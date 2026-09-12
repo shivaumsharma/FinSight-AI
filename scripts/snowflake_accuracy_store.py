@@ -25,7 +25,7 @@ since nothing in this project's scope asked for it yet.
 """
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 TABLE_NAME = "ACCURACY_BACKTEST_CALLS"
 

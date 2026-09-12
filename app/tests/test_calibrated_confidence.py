@@ -4,8 +4,6 @@ Tests for app/reporting/calibrated_confidence.py.
 
 import json
 
-import pytest
-
 from app.reporting import calibrated_confidence as cc
 
 

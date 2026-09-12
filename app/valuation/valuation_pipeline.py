@@ -313,7 +313,6 @@ class ValuationPipeline:
     # risk a real discontinuity, not just an inconsistency.
     effective_terminal_growth_rate = self.terminal_growth_rate + fcff_engine.quality_terminal_growth_adjustment()
 
-    revenue_forecasts=fcff_engine.forecast_revenue()
     fcff_forecasts=fcff_engine.forecast_fcff(terminal_growth_rate=effective_terminal_growth_rate)
 
     # forecast_fcff() returns None (not a crash) when the revenue CAGR
