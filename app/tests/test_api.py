@@ -1287,6 +1287,68 @@ def test_model_compare_requires_a_session(client):
     assert resp.status_code == 401
 
 
+# ---------------------------------------------------------------- what-if
+
+class _WhatIfStubAgent(_StubAgent):
+    """Adds the fields what_if() actually reads (valuation_results.raw_wacc,
+    market_earnings_snapshot.current_price, recommendation.relative_score)
+    on top of _StubAgent's own baseline -- no other existing test needed
+    these, so the shared stub never set them."""
+
+    def run(self, question):
+        context = super().run(question)
+        context.normalized_financials = pd.DataFrame({
+            "revenue": [100.0, 110.0],
+            "shares_outstanding": [1000.0, 1000.0],
+            "total_debt": [500.0, 500.0],
+            "cash": [200.0, 200.0],
+        }, index=pd.to_datetime(["2024-12-31", "2025-12-31"]))
+        context.valuation_results = {"raw_wacc": 0.09}
+        context.report_data["market_earnings_snapshot"] = {"current_price": 150.0}
+        context.report_data["recommendation"]["relative_score"] = 5.0
+        return context
+
+
+def test_what_if_response_includes_the_scoring_block(client, monkeypatch, auth_headers):
+    # compute_what_if's own DCF math is exercised elsewhere (its own
+    # module) -- this test is about what.py's endpoint wiring the
+    # composite-score formula's constants into the response correctly,
+    # not re-deriving a real FCFF forecast, so compute_what_if itself
+    # is stubbed to a fixed result.
+    monkeypatch.setattr(jobs, "ORCHESTRATORS", {**jobs.ORCHESTRATORS, "hand_rolled": _WhatIfStubAgent})
+    monkeypatch.setattr(
+        main, "compute_what_if",
+        lambda **kwargs: {
+            "intrinsic_value": 160.0, "upside_percent": 6.7,
+            "dcf_score": 10.0, "relative_score": 5.0, "composite_score": 9.0,
+            "rating": "Buy", "wacc_used": 0.09, "wacc_floored": False,
+        },
+    )
+    job_id = client.post(
+        "/v1/research", json={"question": "Should I invest in AAPL?"}, headers=auth_headers
+    ).json()["job_id"]
+    _poll_until_terminal(client, job_id, auth_headers)
+
+    resp = client.post(f"/v1/research/{job_id}/what-if", json={}, headers=auth_headers)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["available"] is True
+    assert body["result"]["composite_score"] == 9.0
+    assert body["scoring"] == {
+        "buy_threshold": main.BUY_THRESHOLD,
+        "sell_threshold": main.SELL_THRESHOLD,
+        "dcf_weight": main.DCF_WEIGHT,
+        "relative_weight": main.RELATIVE_WEIGHT,
+        "score_cap": main.SCORE_CAP,
+    }
+
+
+def test_what_if_requires_a_session(client):
+    resp = client.post("/v1/research/some-job-id/what-if", json={})
+    assert resp.status_code == 401
+
+
 def test_model_compare_404s_for_an_unknown_job(client, auth_headers):
     resp = client.post("/v1/research/does-not-exist/model-compare", headers=auth_headers)
     assert resp.status_code == 404

@@ -241,6 +241,19 @@ export interface WhatIfResponse {
     terminal_growth_pct: number;
   };
   result?: WhatIfResult;
+  // The composite-score formula/thresholds themselves (see
+  // app/reporting/report_data_builder.py's own BUY_THRESHOLD/
+  // SELL_THRESHOLD/DCF_WEIGHT/RELATIVE_WEIGHT/SCORE_CAP constants) --
+  // sourced from the backend rather than re-typed here, so the
+  // composite-score breakdown UI can never silently drift from the
+  // real scoring formula.
+  scoring?: {
+    buy_threshold: number;
+    sell_threshold: number;
+    dcf_weight: number;
+    relative_weight: number;
+    score_cap: number;
+  };
 }
 
 // POST /v1/research/{job_id}/model-compare's response shape -- an

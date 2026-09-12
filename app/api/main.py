@@ -86,6 +86,9 @@ from app.reporting.news_client import fetch_company_news, fetch_market_news
 from app.reporting.corporate_actions_feed import build_corporate_actions_feed
 from app.reporting.portfolio_summary import build_portfolio_view
 from app.reporting.accuracy_tearsheet import build_accuracy_tearsheet
+from app.reporting.report_data_builder import (
+    BUY_THRESHOLD, SELL_THRESHOLD, DCF_WEIGHT, RELATIVE_WEIGHT, SCORE_CAP,
+)
 from app.valuation import what_if_dcf
 from app.valuation.fcff_engine import FCFFEngine
 from app.valuation.what_if_dcf import compute_what_if
@@ -1215,6 +1218,21 @@ def what_if(job_id: str, body: WhatIfRequest, current_user: str = Depends(auth.g
             "terminal_growth_pct": terminal_growth_pct,
         },
         "result": computed,
+        # The composite-score formula/thresholds themselves, sourced
+        # directly from report_data_builder.py's own constants (not
+        # re-typed here) -- lets the frontend render an accurate
+        # composite-score breakdown (component weights, Buy/Hold/Sell
+        # zone boundaries) without a second, driftable copy of numbers
+        # that already live in one place. See what_if_dcf.py's own
+        # module docstring for why this whole endpoint avoids
+        # reimplementing the scoring math a second time.
+        "scoring": {
+            "buy_threshold": BUY_THRESHOLD,
+            "sell_threshold": SELL_THRESHOLD,
+            "dcf_weight": DCF_WEIGHT,
+            "relative_weight": RELATIVE_WEIGHT,
+            "score_cap": SCORE_CAP,
+        },
     }
 
 
