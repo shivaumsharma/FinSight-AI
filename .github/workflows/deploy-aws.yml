@@ -98,7 +98,7 @@ jobs:
       # (not a local `docker build` output) so this also covers the
       # "image already existed, build/push was skipped" branch above.
       - name: Scan image for known vulnerabilities
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ steps.ecr_image.outputs.uri }}
           format: table
