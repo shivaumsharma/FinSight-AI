@@ -147,9 +147,22 @@ data "aws_iam_policy_document" "github_actions_assume_role" {
       values   = ["sts.amazonaws.com"]
     }
     condition {
+      # Two, not one -- confirmed via CloudTrail that a job declaring
+      # `environment: production` (deploy-aws.yml) gets its OIDC sub
+      # claim rewritten by GitHub Actions from the usual
+      # "repo:OWNER/REPO:ref:refs/heads/BRANCH" to
+      # "repo:OWNER/REPO:environment:NAME" instead -- a side effect the
+      # `environment:` reference's own comment (added to make required-
+      # reviewer gating configurable later) didn't anticipate, and which
+      # broke every deploy the moment it landed since this condition
+      # only matched the ref-based form. Listing both keeps deploys
+      # working whether or not `environment:` stays on the job.
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:shivaumsharma/FinSight-AI:ref:refs/heads/main"]
+      values = [
+        "repo:shivaumsharma/FinSight-AI:ref:refs/heads/main",
+        "repo:shivaumsharma/FinSight-AI:environment:production",
+      ]
     }
   }
 }
