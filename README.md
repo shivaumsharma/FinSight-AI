@@ -42,7 +42,6 @@ The longer-term direction is a full voice-driven research copilot — "Hey FinSi
 - Voice input/output: tap-to-talk mic button (Sarvam AI Speech-to-Text, auto-stops on silence) plus opt-in spoken replies (Sarvam AI Text-to-Speech) and a hands-free continuous voice session on Chat and Home
 - Voice-driven onboarding: new users can answer the risk-tolerance/goals questionnaire by voice, classified against the expected answer set
 - A shared conversational assistant (multi-turn memory, portfolio-grounded answers) surfaced both as a full Chat page and a compact always-active widget on Home
-- Real Black-Scholes-Merton options pricing: Greeks (delta/gamma/theta/vega/rho) and implied volatility solved numerically against **live** option chains, alongside realized volatility — a separate, from-scratch quantitative model, not a third-party pricing API
 - Full auth system (PBKDF2, HMAC-signed share links), Progressive Web App with offline support and Web Push notifications
 - Point-in-time backtesting harness with explicit no-look-ahead controls, run across 1,000+ tickers
 
@@ -55,9 +54,6 @@ Ask a question, get back a 14-section institutional-style report — company ove
 
 ### Predictive & Quantitative Analytics
 A custom WACC/FCFF/DCF engine, a Logistic Regression vs. XGBoost valuation classifier (display-only, honestly gated on training-set size), and a 31-factor quantitative scorecard spanning financial, quality, valuation, market, risk, sentiment, and macro signals.
-
-### Options & Derivatives
-A from-scratch Black-Scholes-Merton pricer (`app/derivatives/options_pricer.py`) computes theoretical price and the five Greeks against every strike in a ticker's real, live option chain, near the money. Implied volatility is solved numerically per contract (Newton-Raphson with a bisection fallback) against the option's actual market price — not read off a third-party field — then cross-checked alongside realized volatility from historical returns. Degrades honestly: a quote priced below its own intrinsic value returns `null` Greeks rather than a fabricated number, and a ticker with no listed options market (most non-US listings) returns a clear "unavailable" state, not an error.
 
 ### Evaluation Framework
 Every report is scored, not just produced — grounding (40%), retrieval quality (20%), citation coverage (20%), and completeness (20%). A dedicated benchmark harness checks prompt/retrieval/model changes against a fixed baseline instead of eyeballing them. Full methodology and results — including the ones that didn't come out as hoped — in [EVALUATION.md](EVALUATION.md).
@@ -126,7 +122,7 @@ Every tool reads from and writes to one shared `ResearchContext` object. The pla
 | Caching | Redis — content-addressed for valuation/narrative output, TTL-only for statement fetches; degrades to a no-op if unreachable |
 | Report output | reportlab (downloadable PDF) |
 | Deployment | AWS Elastic Beanstalk (API, Terraform-defined) + CloudFront (HTTPS termination in front of it) + Vercel (frontend); Google Cloud Run supported but currently down (GCP project billing disabled); Hugging Face Spaces (research demo, free-tier CPU quota shared across all Spaces on the account); Railway and a plain DigitalOcean droplet (`infra/digitalocean_droplet_setup.sh`) both supported as alternatives |
-| Testing / CI | pytest (1,088 test functions, 62 files), GitHub Actions with failure-annotation diagnostics |
+| Testing / CI | pytest (1,040 test functions, 61 files), GitHub Actions with failure-annotation diagnostics |
 
 ---
 
@@ -142,14 +138,13 @@ Autonomous_Financial_Research_Agent/
 │   ├── benchmarks/               # Fixed evaluation benchmark sets
 │   ├── core/                   # LLM provider abstraction, retry, cache, currency
 │   ├── data/                   # SEC EDGAR, NSE India, Sarvam STT/TTS, market data clients
-│   ├── derivatives/               # Black-Scholes options pricer, Greeks, implied vol
 │   ├── evaluation/               # Grounding / citation / retrieval scorers
 │   ├── nlp/                    # Sentiment summarization
 │   ├── planner/                 # LLM + rule-based tool planning
 │   ├── rag/                    # Chunking, embeddings, ChromaDB, report generation
 │   ├── reasoning/               # Market movers, model consensus, backtest stats
 │   ├── reporting/               # Report/PDF building, news, institutional ratings
-│   ├── tests/                  # 1,088 tests across 62 files
+│   ├── tests/                  # 1,040 tests across 61 files
 │   ├── tools/                  # Agent tools (market, valuation, RAG, sentiment, ...)
 │   ├── training/                # GRPO / RLVR fine-tuning pipeline
 │   ├── utils/
@@ -186,7 +181,6 @@ Autonomous_Financial_Research_Agent/
 - Reverse-engineered a live, undocumented NSE India filings API through a manual endpoint spike (not guesswork), correctly identifying which subdomains required browser-spoofed headers — verified end-to-end against the production deployment before shipping.
 - Diagnosed a 3-day silent CI outage by building a GitHub Actions failure-annotation mechanism rather than guessing at fixes, tracing it to a live-network test blocked by GitHub's own IP ranges.
 - Added a two-tier Redis caching layer (content-addressed for correctness-sensitive output, TTL-only for genuinely time-bound data) and measured real 500–1,700x cache-hit speedups — after catching a cross-contamination bug in the benchmark's own methodology first.
-- Built a Black-Scholes-Merton options pricer from scratch (no third-party pricing library) with a numerically-solved implied-volatility root-finder against live market quotes, not a pre-computed vendor field; verified against textbook reference values to 4 decimal places and, separately, against a real live option chain where theoretical price matched market price to the cent everywhere the solver converged.
 
 ---
 
@@ -304,13 +298,13 @@ The script prints exactly what's still needed afterward (filling in real `.env` 
 
 ## Testing & Quality
 
-1,088 test functions across 62 files, covering the recommendation engine, valuation pipeline, options pricer (Black-Scholes reference values, put-call parity, implied-vol round-trip), auth, RAG retrieval, the job queue's concurrency behavior, every external API client (SEC EDGAR, NSE India, Sarvam, Finnhub), and the full HTTP API surface — run via `pytest app/tests/`. CI runs on every push via GitHub Actions, with pytest failures re-emitted as annotations so a break is diagnosable from the Checks API without needing repo sign-in.
+1,040 test functions across 61 files, covering the recommendation engine, valuation pipeline, auth, RAG retrieval, the job queue's concurrency behavior, every external API client (SEC EDGAR, NSE India, Sarvam, Finnhub), and the full HTTP API surface — run via `pytest app/tests/`. CI runs on every push via GitHub Actions, with pytest failures re-emitted as annotations so a break is diagnosable from the Checks API without needing repo sign-in.
 
 ---
 
 ## Roadmap
 
-**Completed:** financial statement normalization, DCF/FCFF/WACC engines, live SEC EDGAR + NSE India sourcing, ChromaDB retrieval, query intent classification, FinBERT sentiment, agentic LLM+rule-based tool planning, self-evaluation scoring, a benchmarked LangGraph orchestration alternative, Redis caching, full auth + PWA + Web Push, a simulated paper-trading platform, a 31-signal Alpha Factors scorecard, a Black-Scholes options-pricing/Greeks engine, two-way voice (input + spoken replies), voice-driven onboarding, and a shared multi-turn conversational assistant on both Chat and Home.
+**Completed:** financial statement normalization, DCF/FCFF/WACC engines, live SEC EDGAR + NSE India sourcing, ChromaDB retrieval, query intent classification, FinBERT sentiment, agentic LLM+rule-based tool planning, self-evaluation scoring, a benchmarked LangGraph orchestration alternative, Redis caching, full auth + PWA + Web Push, a simulated paper-trading platform, a 31-signal Alpha Factors scorecard, two-way voice (input + spoken replies), voice-driven onboarding, and a shared multi-turn conversational assistant on both Chat and Home.
 
 **Planned:** hybrid retrieval (vector + BM25), multi-quarter financial reasoning, an automated evaluation dashboard, portfolio-level analysis, a trained RLVR checkpoint, further voice-driven app navigation, Postgres migration, request-level rate limiting, a committed CD pipeline.
 

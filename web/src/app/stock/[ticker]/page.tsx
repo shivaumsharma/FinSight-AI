@@ -13,7 +13,6 @@ import FundamentalsCard from "@/components/FundamentalsCard";
 import GrowthMetrics from "@/components/GrowthMetrics";
 import ModelCompare from "@/components/ModelCompare";
 import NewsTab from "@/components/NewsTab";
-import OptionsPanel from "@/components/OptionsPanel";
 import PeerComparisonTable from "@/components/PeerComparisonTable";
 import PerformanceDashboard from "@/components/PerformanceDashboard";
 import PortfolioFitCard from "@/components/PortfolioFitCard";
@@ -151,10 +150,6 @@ function StockDetailContent({ ticker }: { ticker: string }) {
                     <TechnicalsPanel ticker={overview.ticker} currency={overview.currency} />
                   </div>
                 ),
-              },
-              {
-                label: "Options",
-                content: <OptionsPanel ticker={overview.ticker} />,
               },
               {
                 label: "News",

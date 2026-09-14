@@ -7,8 +7,7 @@
 // real-world rate, e.g., is set quarterly by the RBI and changes) --
 // every rate is a required user input with a placeholder nudging them to
 // check the current number, matching this app's own "never fabricate a
-// number that could silently go stale" posture elsewhere (see e.g.
-// app/derivatives/options_pricer.py's degrade-honestly comments).
+// number that could silently go stale" posture elsewhere.
 
 export interface GrowthResult {
   investedAmount: number;
