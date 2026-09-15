@@ -12,18 +12,26 @@ import pytest
 
 from app.valuation import ml_evaluation
 from app.valuation.ml_features import FEATURE_COLUMNS
-from app.valuation.ml_valuation_classifier import build_logreg, train_and_evaluate
+from app.valuation.ml_valuation_classifier import build_logreg
 
 
 def make_synthetic_training_df(n_per_label: int = 10) -> pd.DataFrame:
     rng = np.random.default_rng(42)
     labels = ["UNDERVALUED", "FAIRLY VALUED", "OVERVALUED"]
     rows = []
+    ticker_counter = 0
     for label in labels:
         offset = {"UNDERVALUED": 1.0, "FAIRLY VALUED": 0.0, "OVERVALUED": -1.0}[label]
-        for _ in range(n_per_label):
+        for i in range(n_per_label):
             row = {col: float(rng.normal(loc=offset, scale=0.5)) for col in FEATURE_COLUMNS}
             row["realized_label"] = label
+            # "ticker" is required by train_and_evaluate/run_feature_ablations'
+            # group-aware split (see ml_valuation_classifier.py) -- every
+            # other row repeats the previous ticker so the fixture
+            # actually has something to leak if the split weren't group-safe.
+            if i % 2 == 0:
+                ticker_counter += 1
+            row["ticker"] = f"SYN{ticker_counter}"
             rows.append(row)
     return pd.DataFrame(rows)
 
