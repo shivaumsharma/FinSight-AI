@@ -43,7 +43,7 @@ The longer-term direction is a full voice-driven research copilot — "Hey FinSi
 - Voice-driven onboarding: new users can answer the risk-tolerance/goals questionnaire by voice, classified against the expected answer set
 - A shared conversational assistant (multi-turn memory, portfolio-grounded answers) surfaced both as a full Chat page and a compact always-active widget on Home
 - Full auth system (PBKDF2, HMAC-signed share links), Progressive Web App with offline support and Web Push notifications
-- Point-in-time backtesting harness with explicit no-look-ahead controls, run across 1,000+ tickers
+- Point-in-time backtesting harness with explicit no-look-ahead controls, run across 1,000+ tickers, plus a walk-forward portfolio backtest (quarterly rebalancing, transaction costs, Sharpe/Sortino/max drawdown) against S&P 500 and no-signal-baseline comparators
 
 ---
 
@@ -304,7 +304,7 @@ The script prints exactly what's still needed afterward (filling in real `.env` 
 
 ## Roadmap
 
-**Completed:** financial statement normalization, DCF/FCFF/WACC engines, live SEC EDGAR + NSE India sourcing, ChromaDB retrieval, query intent classification, FinBERT sentiment, agentic LLM+rule-based tool planning, self-evaluation scoring, a benchmarked LangGraph orchestration alternative, Redis caching, full auth + PWA + Web Push, a simulated paper-trading platform, a 31-signal Alpha Factors scorecard, two-way voice (input + spoken replies), voice-driven onboarding, and a shared multi-turn conversational assistant on both Chat and Home.
+**Completed:** financial statement normalization, DCF/FCFF/WACC engines, live SEC EDGAR + NSE India sourcing, ChromaDB retrieval, query intent classification, FinBERT sentiment, agentic LLM+rule-based tool planning, self-evaluation scoring, a benchmarked LangGraph orchestration alternative, Redis caching, full auth + PWA + Web Push, a simulated paper-trading platform, a 31-signal Alpha Factors scorecard, two-way voice (input + spoken replies), voice-driven onboarding, a shared multi-turn conversational assistant on both Chat and Home, and a walk-forward portfolio backtest with transaction costs and risk-adjusted return metrics.
 
 **Planned:** hybrid retrieval (vector + BM25), multi-quarter financial reasoning, an automated evaluation dashboard, portfolio-level analysis, a trained RLVR checkpoint, further voice-driven app navigation, Postgres migration, request-level rate limiting, a committed CD pipeline.
 

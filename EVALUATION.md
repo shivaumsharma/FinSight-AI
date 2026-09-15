@@ -318,7 +318,31 @@ Both numbers are from independent tickers specifically to avoid a methodology bu
 
 ---
 
-## 9. Known limitations
+## 9. Walk-forward portfolio backtest (transaction costs, Sharpe/Sortino/drawdown)
+
+Every other backtest in this document answers "was a single Buy/Hold/Sell call directionally correct 12 months later" (Section 0/1). This one asks the question a quant or PM audience actually asks: if you'd traded this pipeline's calls as an actual portfolio — rebalancing periodically, paying real transaction costs — how would the *portfolio* have performed, on the metrics that matter (CAGR, risk-adjusted return, drawdown), against realistic comparators?
+
+**Method** (`scripts/walkforward_backtest.py`): 13 rebalance dates, quarterly, spanning the last 3 years. At each date, a sector-stratified sample of 275 tickers from `scripts/ticker_universe.json` is scored point-in-time (reusing `phase2_backtest.py`'s entire no-look-ahead machinery — filing-lag filter, trailing beta, point-in-time cutoff, historical risk-free rate — via a new `_fetch_raw_ticker_data`/`_score_ticker_at_date` split that fetches each ticker's data ONCE and reuses it across all 13 dates, not once per rebalance, avoiding a 13x multiplication of exactly the rate-limit risk that has degraded every past attempt to scale this project's backtests). The top 25 Buy-rated tickers by `composite_score` are held equal-weighted, long-only, until the next rebalance; a 10bps round-trip transaction cost (commission + spread + slippage combined into one documented assumption, not calibrated against real historical bid/ask data — this project has none to calibrate against) is charged on turnover at every rebalance. Two comparators, built the same way: **S&P 500 buy-and-hold** (bought once, held, zero trading) and a **naive factor baseline** (equal-weight the entire 275-ticker sample every quarter — no valuation signal at all, this backtest's answer to "Always-Buy"). Portfolio metrics (`app/analysis/portfolio_metrics.py`, hand-rolled, no new dependency — CAGR, annualized volatility, Sharpe, Sortino, max drawdown, hit rate, profit factor) computed identically for all three.
+
+**A real bug caught and fixed before this was trustworthy:** the first working version of this script measured turnover by comparing each rebalance's target weights to the *previous rebalance's target* weights — which is wrong the moment a strategy's target doesn't change (the naive factor baseline holds the same 275 tickers every quarter by design). That comparison silently reported 0% turnover after the very first rebalance, even though individual tickers' prices had obviously drifted apart in between — caught directly in this script's own smoke test, not assumed correct. Fixed by tracking each period's *drifted* weights (what was actually held, after that period's price moves) and comparing the new target against those, not against the stale prior target.
+
+**Result — the strategy loses to both comparators, on every metric:**
+
+| | CAGR | Sharpe | Sortino | Max Drawdown | Hit Rate | Final value ($1M start) |
+|---|---:|---:|---:|---:|---:|---:|
+| **Strategy** (top-25 Buy by composite_score) | 16.3% | 0.93 | 1.88 | **-22.7%** | 66.7% | $1,560,853 |
+| Naive factor baseline (equal-weight all 275) | 19.1% | 1.61 | 8.69 | -18.8% | 83.3% | $1,675,627 |
+| S&P 500 buy-and-hold | 21.5% | 1.00 | 3.05 | -18.9% | 66.7% | $1,776,886 |
+
+The strategy has the WORST drawdown of the three (deeper than even buy-and-hold), a lower Sharpe than both comparators, and the lowest final value. Most strikingly: the naive factor baseline — which contains zero valuation signal, it's just "own everything, rebalance to equal weight" — beats the composite-score-driven stock-picking strategy on every single metric in this table. Concentrating into the 25 tickers the pipeline judges most undervalued produced a *worse* risk-adjusted outcome than simply not picking at all, over this specific 3-year window. This is consistent with, and now extends to the portfolio level, Section 0's finding that the model's per-ticker Sell calls carry essentially no signal and its Buy calls carry real but modest signal — not enough, it turns out, to overcome the extra volatility and transaction costs concentration into 25 names (vs. 275) introduces. `avg_turnover_per_rebalance` makes the cost of that concentration concrete: 38.5% for the strategy vs. 10.1% for the naive baseline — nearly 4x the trading, for a worse outcome.
+
+**Scope, stated plainly, not silently omitted:** this is one 3-year window, not multiple non-overlapping windows the way Section 0's per-ticker metric is — a single walk-forward run is one data point, not proof the strategy loses in every regime, just this one (which, per Section 0's own finding, was a broadly rising market — the same regime where the per-ticker Sell signal was already shown not to work). The composite formula's own weights/thresholds (`DCF_WEIGHT`/`RELATIVE_WEIGHT`/`BUY_THRESHOLD`/`SELL_THRESHOLD`) were NOT re-tuned per rolling window here — this tests a frozen strategy rolled forward through real time and real costs, not a "retrain each fold" walk-forward; genuine parameter re-optimization per fold is a natural next step, not done here.
+
+**Reproduce:** `python scripts/walkforward_backtest.py` (writes `scripts/walkforward_results_ticker_universe_sample_3y_quarterly.json`, the full equity curve/holdings/trade log behind the table above).
+
+---
+
+## 10. Known limitations
 
 Documented here rather than left implicit, in the same spirit as the rest of this file.
 
@@ -361,3 +385,4 @@ Numbers that survive a follow-up question are worth more than a single flatterin
 - Rewrote a report-faithfulness evaluator after realizing its v1 metric was structurally unsatisfiable (penalizing exactly the paraphrasing behavior the generation prompt asked for) — an example of debugging an eval, not just a model.
 - Ported the agent's planner-dispatches-tools control flow onto LangGraph as a StateGraph, kept alongside the original hand-rolled controller, and benchmarked the two — including catching and discarding a misleading first result (network I/O variance masquerading as a 30x orchestration difference) before reporting the real, isolated ~7-13ms dispatch-overhead number.
 - Added a Redis caching layer with two deliberately different strategies (content-addressed for correctness-sensitive valuation/narrative output, TTL-only for genuinely time-bound statement data) and measured real 500-1,700x speedups on cache hits — after catching a cross-contamination bug in the benchmark's own methodology first.
+- Built a walk-forward portfolio backtest (quarterly rebalancing, transaction costs, Sharpe/Sortino/max-drawdown, 275 tickers over 3 years) rather than stopping at per-ticker directional accuracy, reusing the existing point-in-time discipline by splitting the fetch/score steps so each ticker is priced once and reused across all 13 rebalance dates instead of re-fetched — and reported the honest result: the composite-score-driven strategy underperformed a no-signal equal-weight baseline on every metric, a finding that directly shaped the project's move away from "predicts stocks" positioning.

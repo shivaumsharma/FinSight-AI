@@ -49,7 +49,7 @@ import json
 import random
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -170,15 +170,38 @@ def _point_in_time_statement(raw_df, as_of_date):
     return raw_df[keep_cols]
 
 
-def run_one(ticker, category, as_of_date, today_date, market_history, tnx_history=None):
-    stock = yf.Ticker(ticker)
+def _fetch_raw_ticker_data(ticker):
+    """The expensive part of run_one, isolated: 4 network calls, no
+    as-of-date dependence at all -- the SAME raw data (10y price
+    history + current financial statements) is valid input for scoring
+    a ticker at any number of different as-of dates. Split out so a
+    caller that needs multiple as-of dates per ticker (e.g. a
+    walk-forward backtest rolling through several rebalance dates) can
+    fetch once and re-score many times, instead of paying this cost
+    once per (ticker, as_of_date) pair -- see
+    scripts/walkforward_backtest.py, which is exactly that caller.
 
-    # 10y, not 2y: RelativeValuationEngine looks up a year-end close
-    # for each fiscal year in the point-in-time financials (up to ~4
-    # years back from the as-of date), not just the as-of/today pair
-    # -- a shorter window silently starves it of data and it returns
-    # None for every ticker (caught in an earlier run of this script).
-    price_history = _tz_naive(stock.history(period="10y"))
+    10y, not 2y: RelativeValuationEngine looks up a year-end close for
+    each fiscal year in the point-in-time financials (up to ~4 years
+    back from the as-of date), not just the as-of/today pair -- a
+    shorter window silently starves it of data and it returns None for
+    every ticker (caught in an earlier run of this script)."""
+    stock = yf.Ticker(ticker)
+    return {
+        "price_history": _tz_naive(stock.history(period="10y")),
+        "income": stock.financials,
+        "balance": stock.balance_sheet,
+        "cashflow": stock.cashflow,
+    }
+
+
+def _score_ticker_at_date(ticker, category, raw_data, as_of_date, today_date, market_history, tnx_history=None):
+    """Everything run_one used to do AFTER its 4 network fetches --
+    pure computation over already-fetched raw_data (see
+    _fetch_raw_ticker_data) plus an as_of_date. No network calls of its
+    own, so calling this many times for the same ticker at different
+    as_of_dates costs nothing beyond the one shared fetch."""
+    price_history = raw_data["price_history"]
     if price_history is None or price_history.empty:
         raise ValueError("no price history available")
 
@@ -191,9 +214,9 @@ def run_one(ticker, category, as_of_date, today_date, market_history, tnx_histor
 
     beta = _trailing_beta(price_history, market_history, as_of_date) or 1.2
 
-    income = stock.financials
-    balance = stock.balance_sheet
-    cashflow = stock.cashflow
+    income = raw_data["income"]
+    balance = raw_data["balance"]
+    cashflow = raw_data["cashflow"]
     if income.empty or balance.empty or cashflow.empty:
         raise ValueError("financial statements unavailable")
 
@@ -310,6 +333,17 @@ def run_one(ticker, category, as_of_date, today_date, market_history, tnx_histor
         "ml_features": ml_features,
         "error": None,
     }
+
+
+def run_one(ticker, category, as_of_date, today_date, market_history, tnx_history=None):
+    """Fetch + score for one ticker at one as-of date -- unchanged
+    signature/behavior for every existing caller (build_ml_training_set.py,
+    the canonical-accuracy pipeline). A caller that needs the same
+    ticker scored at several as-of dates should call
+    _fetch_raw_ticker_data once and _score_ticker_at_date directly per
+    date instead of this wrapper, to avoid re-fetching."""
+    raw_data = _fetch_raw_ticker_data(ticker)
+    return _score_ticker_at_date(ticker, category, raw_data, as_of_date, today_date, market_history, tnx_history)
 
 
 def score(row):
@@ -604,9 +638,9 @@ def main():
         print(f"  {'Random (uniform)':<18} {random_acc:5.1f}%  (2000-trial Monte Carlo, seed=42 -- "
               f"theoretical expectation is exactly 33.3% on any sample, since Buy/Hold/Sell's bands "
               f"are mutually exclusive and exhaustive)")
-        print(f"  (Always-Buy/Hold/Sell above are exactly the BASE RATE percentages, restated as "
-              f"accuracy against the model's own scoring rule -- this is what the model has to beat "
-              f"to mean anything more than \"the market did X anyway.\")")
+        print("  (Always-Buy/Hold/Sell above are exactly the BASE RATE percentages, restated as "
+              "accuracy against the model's own scoring rule -- this is what the model has to beat "
+              "to mean anything more than \"the market did X anyway.\")")
         best_fixed_baseline = max(v for v in fixed_baseline_accs.values() if v is not None)
         print(f"  Model vs. best naive baseline: {overall_acc - best_fixed_baseline:+.1f} points")
 
