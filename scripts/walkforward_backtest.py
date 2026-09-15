@@ -198,6 +198,37 @@ def _uniform_weights(tickers) -> dict:
     return {ticker: weight for ticker in tickers}
 
 
+def _rank_tilt_weights(scores: dict) -> dict:
+    """Full-universe, rank-based tilt -- every successfully-scored
+    ticker gets a positive weight proportional to its composite_score
+    RANK this period (1 = lowest score, N = highest), never hard-
+    excluded regardless of Buy/Hold/Sell label. Built specifically to
+    test EVALUATION.md section 9's "Root-causing the loss" finding:
+    every top-N Buy-only portfolio tested there lost precisely because
+    a Sell rating is a permanent exclusion, and 45% of this sample's
+    20 biggest single-period winners were rated Sell. This construction
+    can never fully exclude a future winner just for scoring low --
+    it can only underweight it -- so it isolates whether the weak-but-
+    real IC (finding 1, composite_score IC +0.093) adds value once the
+    hard-exclusion mechanism is removed, rather than being swamped by
+    it the way top_n_buy_weights structurally is.
+
+    Rank, not raw score, as the tilt basis -- composite_score is
+    itself a percentile-rank score against a fixed historical
+    reference table (report_data_builder.py's own "Percentile-based
+    normalization" comment), not a stable absolute scale across
+    periods/universes, so ranking within THIS period's cross-section is
+    the more principled basis for relative position sizing than the
+    raw score value would be."""
+    scored = [(ticker, row["composite_score"]) for ticker, row in scores.items() if row.get("composite_score") is not None]
+    if not scored:
+        return {}
+    scored.sort(key=lambda t: t[1])  # ascending: lowest score first -> rank 1
+    n = len(scored)
+    total_rank = n * (n + 1) / 2
+    return {ticker: (rank + 1) / total_rank for rank, (ticker, _) in enumerate(scored)}
+
+
 def _equity_segment(weights: dict, raw_by_ticker: dict, start_date: pd.Timestamp, end_date: pd.Timestamp,
                      calendar_index: pd.DatetimeIndex, starting_value: float):
     """Portfolio value path from start_date to end_date (inclusive),
@@ -385,6 +416,12 @@ def _parse_args():
     # signal itself has genuine edge -- directly testable by re-running
     # with a larger --top-n and comparing Sharpe/drawdown, not guessed at.
     parser.add_argument("--top-n", type=int, default=TOP_N_HOLDINGS)
+    parser.add_argument(
+        "--strategy", choices=["top_n", "rank_tilt"], default="top_n",
+        help="top_n: hard Buy-only top-N cutoff (original). rank_tilt: full-universe, "
+             "rank-weighted by composite_score, never hard-excludes a Sell-rated ticker "
+             "-- see _rank_tilt_weights' own docstring and EVALUATION.md section 9.",
+    )
     return parser.parse_args()
 
 
@@ -413,11 +450,18 @@ def main():
     raw_by_ticker = _fetch_all(categories, args.workers)
     print(f"{len(raw_by_ticker)}/{len(categories)} tickers fetched successfully", file=sys.stderr)
 
-    print(f"\n=== Strategy: top-{args.top_n} Buy-rated by composite_score ===", file=sys.stderr)
-    strategy_result = _run_strategy(
-        "strategy", rebalance_dates, raw_by_ticker, categories, market_history, tnx_history,
-        weight_fn=lambda scores, _raw: _top_n_buy_weights(scores, args.top_n),
-    )
+    if args.strategy == "rank_tilt":
+        print("\n=== Strategy: full-universe rank tilt by composite_score (no hard exclusion) ===", file=sys.stderr)
+        strategy_result = _run_strategy(
+            "strategy_rank_tilt", rebalance_dates, raw_by_ticker, categories, market_history, tnx_history,
+            weight_fn=lambda scores, _raw: _rank_tilt_weights(scores),
+        )
+    else:
+        print(f"\n=== Strategy: top-{args.top_n} Buy-rated by composite_score ===", file=sys.stderr)
+        strategy_result = _run_strategy(
+            "strategy", rebalance_dates, raw_by_ticker, categories, market_history, tnx_history,
+            weight_fn=lambda scores, _raw: _top_n_buy_weights(scores, args.top_n),
+        )
 
     print("\n=== Naive factor baseline: equal-weight the whole sampled universe ===", file=sys.stderr)
     naive_result = _run_strategy(
@@ -429,20 +473,29 @@ def main():
     spy_result = _spy_buyhold(rebalance_dates, market_history, tnx_history)
 
     universe_tag = "ticker_universe_sample"
-    output_path = str(SCRIPT_DIR / f"walkforward_results_{universe_tag}_{YEARS_BACK}y_quarterly_top{args.top_n}.json")
+    strategy_tag = "rank_tilt" if args.strategy == "rank_tilt" else f"top{args.top_n}"
+    output_path = str(SCRIPT_DIR / f"walkforward_results_{universe_tag}_{YEARS_BACK}y_quarterly_{strategy_tag}.json")
+    if args.strategy == "rank_tilt":
+        strategy_desc = (
+            "full-universe rank-tilt (every scored ticker weighted proportional to its "
+            "composite_score rank, no hard Buy/Sell exclusion)"
+        )
+    else:
+        strategy_desc = f"long-only equal-weight top {args.top_n} Buy-rated tickers by composite_score"
     output = {
         "methodology": (
             f"Walk-forward portfolio backtest: {len(rebalance_dates)} rebalance dates every "
-            f"{REBALANCE_MONTHS} months over {YEARS_BACK} years, long-only equal-weight top "
-            f"{args.top_n} Buy-rated tickers by composite_score at each rebalance, "
-            f"{TRANSACTION_COST_BPS}bps round-trip transaction cost on turnover, against a "
-            f"sector-stratified {len(categories)}-ticker sample of scripts/ticker_universe.json."
+            f"{REBALANCE_MONTHS} months over {YEARS_BACK} years, {strategy_desc} at each "
+            f"rebalance, {TRANSACTION_COST_BPS}bps round-trip transaction cost on turnover, "
+            f"against a sector-stratified {len(categories)}-ticker sample of "
+            f"scripts/ticker_universe.json."
         ),
+        "strategy_type": args.strategy,
         "universe_size": len(categories),
         "universe_fetched_ok": len(raw_by_ticker),
         "rebalance_dates": [d.date().isoformat() for d in rebalance_dates],
         "transaction_cost_bps": TRANSACTION_COST_BPS,
-        "top_n_holdings": args.top_n,
+        "top_n_holdings": args.top_n if args.strategy == "top_n" else None,
         "starting_capital": STARTING_CAPITAL,
         "strategy": strategy_result,
         "naive_factor_baseline": naive_result,
