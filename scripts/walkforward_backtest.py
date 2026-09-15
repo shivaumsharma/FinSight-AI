@@ -377,6 +377,14 @@ def _parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--universe-size", type=int, default=275)
     parser.add_argument("--workers", type=int, default=10)
+    # Configurable, not just TOP_N_HOLDINGS, specifically to test the
+    # diversification hypothesis EVALUATION.md section 9 raises: a
+    # weak-but-real signal (IC ~0.08-0.09, see
+    # composite_score_ic_analysis.py) concentrated into too few names
+    # can lose to a wider, less concentrated portfolio even though the
+    # signal itself has genuine edge -- directly testable by re-running
+    # with a larger --top-n and comparing Sharpe/drawdown, not guessed at.
+    parser.add_argument("--top-n", type=int, default=TOP_N_HOLDINGS)
     return parser.parse_args()
 
 
@@ -405,10 +413,10 @@ def main():
     raw_by_ticker = _fetch_all(categories, args.workers)
     print(f"{len(raw_by_ticker)}/{len(categories)} tickers fetched successfully", file=sys.stderr)
 
-    print("\n=== Strategy: top-N Buy-rated by composite_score ===", file=sys.stderr)
+    print(f"\n=== Strategy: top-{args.top_n} Buy-rated by composite_score ===", file=sys.stderr)
     strategy_result = _run_strategy(
         "strategy", rebalance_dates, raw_by_ticker, categories, market_history, tnx_history,
-        weight_fn=lambda scores, _raw: _top_n_buy_weights(scores, TOP_N_HOLDINGS),
+        weight_fn=lambda scores, _raw: _top_n_buy_weights(scores, args.top_n),
     )
 
     print("\n=== Naive factor baseline: equal-weight the whole sampled universe ===", file=sys.stderr)
@@ -421,12 +429,12 @@ def main():
     spy_result = _spy_buyhold(rebalance_dates, market_history, tnx_history)
 
     universe_tag = "ticker_universe_sample"
-    output_path = str(SCRIPT_DIR / f"walkforward_results_{universe_tag}_{YEARS_BACK}y_quarterly.json")
+    output_path = str(SCRIPT_DIR / f"walkforward_results_{universe_tag}_{YEARS_BACK}y_quarterly_top{args.top_n}.json")
     output = {
         "methodology": (
             f"Walk-forward portfolio backtest: {len(rebalance_dates)} rebalance dates every "
             f"{REBALANCE_MONTHS} months over {YEARS_BACK} years, long-only equal-weight top "
-            f"{TOP_N_HOLDINGS} Buy-rated tickers by composite_score at each rebalance, "
+            f"{args.top_n} Buy-rated tickers by composite_score at each rebalance, "
             f"{TRANSACTION_COST_BPS}bps round-trip transaction cost on turnover, against a "
             f"sector-stratified {len(categories)}-ticker sample of scripts/ticker_universe.json."
         ),
@@ -434,7 +442,7 @@ def main():
         "universe_fetched_ok": len(raw_by_ticker),
         "rebalance_dates": [d.date().isoformat() for d in rebalance_dates],
         "transaction_cost_bps": TRANSACTION_COST_BPS,
-        "top_n_holdings": TOP_N_HOLDINGS,
+        "top_n_holdings": args.top_n,
         "starting_capital": STARTING_CAPITAL,
         "strategy": strategy_result,
         "naive_factor_baseline": naive_result,

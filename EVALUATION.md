@@ -338,7 +338,28 @@ The strategy has the WORST drawdown of the three (deeper than even buy-and-hold)
 
 **Scope, stated plainly, not silently omitted:** this is one 3-year window, not multiple non-overlapping windows the way Section 0's per-ticker metric is — a single walk-forward run is one data point, not proof the strategy loses in every regime, just this one (which, per Section 0's own finding, was a broadly rising market — the same regime where the per-ticker Sell signal was already shown not to work). The composite formula's own weights/thresholds (`DCF_WEIGHT`/`RELATIVE_WEIGHT`/`BUY_THRESHOLD`/`SELL_THRESHOLD`) were NOT re-tuned per rolling window here — this tests a frozen strategy rolled forward through real time and real costs, not a "retrain each fold" walk-forward; genuine parameter re-optimization per fold is a natural next step, not done here.
 
-**Reproduce:** `python scripts/walkforward_backtest.py` (writes `scripts/walkforward_results_ticker_universe_sample_3y_quarterly.json`, the full equity curve/holdings/trade log behind the table above).
+### Root-causing the loss: Information Coefficient, breadth sweep, and winner/loser attribution
+
+The result above says the strategy loses; it doesn't say why. Three follow-up analyses, all reusing the same fetch/score split (`scripts/composite_score_ic_analysis.py`), root-cause it rather than guessing.
+
+**1. The signal is real but weak, and the DCF leg carries almost all of it.** Spearman rank IC (`composite_score` vs. realized forward return) across all 1,499 (ticker, period) pairs in the sampled universe: **pooled IC = +0.093, mean per-period IC = +0.075 (std 0.260 across the 11 measurable periods)**. An IC in this range is a genuine, textbook-weak equity signal — not zero, not inverted — but the std being 3.5x the mean means its sign and strength swing hard period to period, not a stable edge. Decomposed: `dcf_score` alone carries essentially the whole thing (IC +0.095); `relative_score` is meaningfully weaker (+0.041) — the existing 80/20 DCF/relative weighting (`report_data_builder.py`) is already pointed the right direction, this isn't a blend-weight bug. The decile table (mean forward return by composite_score decile, pooled) confirms a noisy, non-monotonic-but-roughly-upward pattern (1.2%, 0.8%, 2.0%, 5.9%, 1.7%, 1.9%, 4.0%, 3.3%, 4.5%, 5.9% from lowest to highest decile) with a **15-21% stdev inside every single decile** — 3-4x the entire top-to-bottom decile spread. Individual-stock noise dwarfs the signal.
+
+**2. Widening the portfolio made it WORSE, not better — refuting the obvious "just diversify more" fix before it shipped.** Re-ran the walk-forward backtest at three breadths (`--top-n 25/75/150`, same universe/dates/costs):
+
+| Top-N | CAGR | Sharpe | Max Drawdown |
+|---|---:|---:|---:|
+| 25 | 16.3% | 0.93 | -22.7% |
+| 75 | 12.0% | 0.73 | -18.8% |
+| 150 | 11.0% | 0.65 | -19.3% |
+| 275 (naive, no filter) | **19.1%** | **1.61** | -18.8% |
+
+CAGR and Sharpe fall monotonically from 25 to 150 — the opposite of what "concentration is the problem, add breadth" predicts — and only abandoning the score filter entirely (275) wins. This ruled out breadth/diversification as the fix and pointed at the portfolio-construction RULE itself, not the position count.
+
+**3. The actual mechanism: the strategy is Buy-only, and Sell calls are specifically wrong on the biggest winners.** Pulled the 20 largest single-period gains in the sampled universe (`composite_score_ic_rows.csv`, 60-101% moves each) and checked what the model said about each at the time: **9 of 20 (45%) were rated Sell.** Their score-decile distribution is close to uniform (roughly as many in decile 1-3 as in decile 8-10) — at the extremes, where a handful of huge movers disproportionately drive a bull market's total return, the model has essentially no discriminating power, and its worst calls (Sell on a future 60-100%+ gainer) land about as often as its best ones. Every top-N portfolio tested (25/75/150) is long-only and Buy-filtered, so a Sell rating means permanent exclusion, full stop — structurally forfeiting close to half of this window's extreme-winner exposure. The naive baseline's edge isn't really about breadth; it's that it's the only one of the four that never excludes a stock for being Sell-rated. Widening N (finding 2) made things worse specifically because it kept the Buy-only exclusion rule while diluting the concentrated top picks with weaker ones, without ever recovering the excluded Sell-side winners.
+
+**Implication for where the fix actually is:** not blend weights (finding 1), not position count (finding 2) — the hard Buy-only exclusion rule itself is the most likely lever, given a Sell signal this unreliable at the extremes. A tilt-based construction (down-weight low scorers across the full universe rather than hard-excluding them) is the natural next test, not yet run.
+
+**Reproduce:** `python scripts/walkforward_backtest.py [--top-n N]` (equity curve/holdings/trade log); `python scripts/composite_score_ic_analysis.py` (IC/decile CSVs behind findings 1 and 3 above).
 
 ---
 
