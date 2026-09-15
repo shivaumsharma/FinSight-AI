@@ -8,90 +8,90 @@
   },
   "cross_validation": {
     "logistic_regression": {
-      "cv_accuracy_mean": 0.37058823529411766,
-      "cv_accuracy_std": 0.04083895284167007,
-      "cv_f1_macro_mean": 0.34955142900730796,
-      "cv_f1_macro_std": 0.03632822571332258,
+      "cv_accuracy_mean": 0.3676470588235294,
+      "cv_accuracy_std": 0.026633485700404167,
+      "cv_f1_macro_mean": 0.3448695245289385,
+      "cv_f1_macro_std": 0.02930504749976352,
       "n_splits": 5
     },
     "xgboost": {
-      "cv_accuracy_mean": 0.48058823529411765,
-      "cv_accuracy_std": 0.04013816966878112,
-      "cv_f1_macro_mean": 0.41533473000965915,
-      "cv_f1_macro_std": 0.03956748921147657,
+      "cv_accuracy_mean": 0.4276470588235294,
+      "cv_accuracy_std": 0.032251176851465405,
+      "cv_f1_macro_mean": 0.3525708612560001,
+      "cv_f1_macro_std": 0.028110076121936972,
       "n_splits": 5
     }
   },
   "held_out_test": {
     "logistic_regression": {
-      "test_f1_macro": 0.35968069465706126,
+      "test_f1_macro": 0.3459022884310241,
       "classification_report": {
         "UNDERVALUED": {
-          "precision": 0.6530612244897959,
-          "recall": 0.3779527559055118,
-          "f1-score": 0.47880299251870323,
-          "support": 254.0
+          "precision": 0.6307692307692307,
+          "recall": 0.3319838056680162,
+          "f1-score": 0.4350132625994695,
+          "support": 247.0
         },
         "FAIRLY VALUED": {
-          "precision": 0.16666666666666666,
-          "recall": 0.5625,
-          "f1-score": 0.2571428571428571,
-          "support": 48.0
+          "precision": 0.20945945945945946,
+          "recall": 0.62,
+          "f1-score": 0.31313131313131315,
+          "support": 50.0
         },
         "OVERVALUED": {
-          "precision": 0.35344827586206895,
-          "recall": 0.3333333333333333,
-          "f1-score": 0.34309623430962344,
-          "support": 123.0
+          "precision": 0.2721518987341772,
+          "recall": 0.30935251798561153,
+          "f1-score": 0.2895622895622896,
+          "support": 139.0
         },
-        "accuracy": 0.38588235294117645,
+        "accuracy": 0.3577981651376147,
         "macro avg": {
-          "precision": 0.3910587223395105,
-          "recall": 0.42459536307961504,
-          "f1-score": 0.3596806946570612,
-          "support": 425.0
+          "precision": 0.3707935296542891,
+          "recall": 0.4204454412178759,
+          "f1-score": 0.3459022884310241,
+          "support": 436.0
         },
         "weighted avg": {
-          "precision": 0.5114157387092768,
-          "recall": 0.38588235294117645,
-          "f1-score": 0.41449330367692105,
-          "support": 425.0
+          "precision": 0.4681240525161091,
+          "recall": 0.3577981651376147,
+          "f1-score": 0.37466513708209376,
+          "support": 436.0
         }
       }
     },
     "xgboost": {
-      "test_f1_macro": 0.4197235555378518,
+      "test_f1_macro": 0.3804822990687311,
       "classification_report": {
         "UNDERVALUED": {
-          "precision": 0.6605504587155964,
-          "recall": 0.5669291338582677,
-          "f1-score": 0.6101694915254238,
-          "support": 254.0
+          "precision": 0.6077586206896551,
+          "recall": 0.5708502024291497,
+          "f1-score": 0.5887265135699373,
+          "support": 247.0
         },
         "FAIRLY VALUED": {
-          "precision": 0.21,
-          "recall": 0.4375,
-          "f1-score": 0.28378378378378377,
-          "support": 48.0
+          "precision": 0.2077922077922078,
+          "recall": 0.32,
+          "f1-score": 0.25196850393700787,
+          "support": 50.0
         },
         "OVERVALUED": {
-          "precision": 0.3925233644859813,
-          "recall": 0.34146341463414637,
-          "f1-score": 0.3652173913043478,
-          "support": 123.0
+          "precision": 0.31496062992125984,
+          "recall": 0.28776978417266186,
+          "f1-score": 0.3007518796992481,
+          "support": 139.0
         },
-        "accuracy": 0.48705882352941177,
+        "accuracy": 0.4518348623853211,
         "macro avg": {
-          "precision": 0.42102460773385925,
-          "recall": 0.44863084949747134,
-          "f1-score": 0.4197235555378518,
-          "support": 425.0
+          "precision": 0.37683715280104096,
+          "recall": 0.39287332886727055,
+          "f1-score": 0.3804822990687311,
+          "support": 436.0
         },
         "weighted avg": {
-          "precision": 0.5320945655189111,
-          "recall": 0.48705882352941177,
-          "f1-score": 0.5024150861165037,
-          "support": 425.0
+          "precision": 0.4685447643555283,
+          "recall": 0.4518348623853211,
+          "f1-score": 0.4582990489147257,
+          "support": 436.0
         }
       }
     }
@@ -99,60 +99,60 @@
   "best_model": "xgboost",
   "feature_importances": [
     {
-      "feature": "annualized_volatility",
-      "importance": 0.08213141560554504
-    },
-    {
-      "feature": "mc_prob_undervalued",
-      "importance": 0.08067178726196289
-    },
-    {
-      "feature": "growth_rate",
-      "importance": 0.07824733853340149
-    },
-    {
-      "feature": "wacc",
-      "importance": 0.07668785750865936
-    },
-    {
-      "feature": "mc_std_over_price",
-      "importance": 0.07591283321380615
-    },
-    {
-      "feature": "fcf_yield",
-      "importance": 0.0728737860918045
-    },
-    {
-      "feature": "dcf_over_price",
-      "importance": 0.06951307505369186
-    },
-    {
-      "feature": "mc_mean_over_price",
-      "importance": 0.0693456381559372
-    },
-    {
-      "feature": "momentum_6m",
-      "importance": 0.06926720589399338
+      "feature": "beta",
+      "importance": 0.08066519349813461
     },
     {
       "feature": "net_cash_per_share_over_price",
-      "importance": 0.06789412349462509
+      "importance": 0.07844626158475876
+    },
+    {
+      "feature": "mc_std_over_price",
+      "importance": 0.07633289694786072
+    },
+    {
+      "feature": "mc_prob_undervalued",
+      "importance": 0.07620242238044739
+    },
+    {
+      "feature": "growth_rate",
+      "importance": 0.075985386967659
     },
     {
       "feature": "revenue_growth",
-      "importance": 0.06722215563058853
+      "importance": 0.07331864535808563
+    },
+    {
+      "feature": "wacc",
+      "importance": 0.07261595129966736
+    },
+    {
+      "feature": "annualized_volatility",
+      "importance": 0.0707797035574913
+    },
+    {
+      "feature": "mc_mean_over_price",
+      "importance": 0.07016356289386749
+    },
+    {
+      "feature": "fcf_yield",
+      "importance": 0.06941277533769608
+    },
+    {
+      "feature": "dcf_over_price",
+      "importance": 0.06737126410007477
     },
     {
       "feature": "momentum_12m",
-      "importance": 0.06718801707029343
+      "importance": 0.06717567890882492
     },
     {
       "feature": "relative_vs_history_pct",
-      "importance": 0.062179867178201675
+      "importance": 0.06351621448993683
     },
     {
-      "feature": "beta",
-      "importance": 0.06086494401097298
+      "feature": "momentum_6m",
+      "importance": 0.05801396816968918
     }
   ]
 }

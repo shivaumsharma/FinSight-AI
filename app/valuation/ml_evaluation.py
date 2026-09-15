@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import f1_score
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupShuffleSplit
 
 from app.valuation.ml_features import FEATURE_COLUMNS
 from app.valuation.ml_valuation_classifier import LABELS, build_logreg, build_secondary_model
@@ -123,14 +123,19 @@ def run_feature_ablations(df: pd.DataFrame, best_model_name: str, test_size: flo
     place" instead of assuming it does because it's in FEATURE_COLUMNS.
     """
     y = df["realized_label"].astype(str).to_numpy()
-    class_counts = np.unique(y, return_counts=True)[1]
-    stratify = y if class_counts.min() >= 2 else None
+    groups = df["ticker"].to_numpy()
 
     def _macro_f1(columns: List[str]) -> float:
         X = df[columns].astype("float64").to_numpy()
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=42, stratify=stratify
-        )
+        # GroupShuffleSplit, not train_test_split -- same leakage fix
+        # as ml_valuation_classifier.train_and_evaluate (see its own
+        # comment): a ticker appearing in both train and test here
+        # would make an ablation's macro-F1 delta partly reflect
+        # per-company memorization rather than the feature group's
+        # real contribution.
+        splitter = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=42)
+        train_idx, test_idx = next(splitter.split(X, y, groups=groups))
+        X_train, X_test, y_train, y_test = X[train_idx], X[test_idx], y[train_idx], y[test_idx]
         model = build_logreg() if best_model_name == "logistic_regression" else build_secondary_model()
         model.fit(X_train, y_train)
         preds = model.predict(X_test)
