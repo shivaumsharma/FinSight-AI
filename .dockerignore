@@ -27,6 +27,4 @@ scripts/finetuned_bge_embeddings/
 .streamlit/
 .idea/
 .vscode/
-.claude/
-
 .env

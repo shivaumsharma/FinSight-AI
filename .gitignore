@@ -66,8 +66,6 @@ scripts/backtest_results_*.json
 
 .idea/
 .vscode/
-.claude/
-
 # scripts/train_grpo.py's saved LoRA adapters -- one directory per
 # training run (smoke test, a run on since-discovered-corrupted data,
 # the real clean run, ...). Regenerable from scripts/rlvr_dataset_*

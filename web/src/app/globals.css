@@ -2,8 +2,7 @@
 
 /*
   Dark terminal / finance-desk theme, taken directly from the
-  Canvas.dc.html mobile design (claude.ai/design project
-  d967ca79-2cde-4259-b57b-71a6e4746758). This is still the app's
+  Canvas.dc.html mobile design reference. This is still the app's
   default -- light mode below is opt-in only (see useTheme.ts), never
   assumed from OS preference.
 */
@@ -21,8 +20,8 @@
 }
 
 /*
-  Light mode's "Classical" look, taken from the same Claude-Design
-  project's light-mode Canvas (d967ca79-2cde-4259-b57b-71a6e4746758) --
+  Light mode's "Classical" look, taken from the same design
+  reference's light-mode Canvas --
   a deliberately different visual identity (serif type, cream/gold
   palette) from dark mode's terminal aesthetic, not a simple color
   invert. Overriding --font-mono-loaded here (rather than touching
