@@ -54,6 +54,4 @@ scripts/grpo_output*/
 .streamlit/
 .idea/
 .vscode/
-.claude/
-
 .env
