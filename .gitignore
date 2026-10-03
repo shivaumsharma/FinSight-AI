@@ -115,3 +115,6 @@ mlruns/
 # Next.js frontend (web/) -- has its own .gitignore for build artifacts;
 # this repo-root .gitignore only needs to keep node_modules/ out.
 web/node_modules/
+
+# Research sprint sandbox data (large, regenerable)
+research/data/
