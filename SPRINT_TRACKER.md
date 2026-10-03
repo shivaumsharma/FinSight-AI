@@ -58,6 +58,18 @@ Per-period composite IC swings from -0.56 to +0.55. **It does NOT clear the pre-
 - **Verdict: the +0.093 / t = 2.29 hint did NOT replicate out of sample.** Raw IC is slightly positive but statistically indistinguishable from zero; sector-neutral does not help (paired t = -1.36). Reading: the nine-quarter hint was noise/regime. The honest claim is that the composite has no demonstrated stock-selection edge in this data (survivorship-biased, so if anything this flatters the model).
 - **TRIALS: still 10** (H1 and H2 were already counted).
 
+### WHY THE COMPOSITE FAILS — diagnosis (2026-10-04; `research/why_composite_fails.py`; diagnostic only, no trials added)
+
+1. **Not an aggregation problem:** DCF-only IC +0.012 (t 0.72), relative-only +0.009 (t 0.56), composite +0.011. Both halves are individually ~zero.
+2. **Not a noisy score:** the same stock's rank is highly stable quarter to quarter (rank autocorrelation 0.85). It is a consistent ranking that simply does not predict.
+3. **It is a disguised value + anti-momentum bet:** per-date correlation with earnings yield +0.44, FCF yield +0.44, 12-1 momentum -0.29, low-vol/ROA/size ~0. P3 showed those factors themselves had ~zero IC in this universe, so the composite inherits that.
+4. **Regime-driven, not stock-selection:** per-date IC std is 0.125 vs 0.045 from sampling noise alone. Yearly mean IC: 2020 +0.19 (value rebound), 2018 -0.04, 2019 -0.05, 2025 -0.08. The IC tracks whether value is working that year.
+5. **Flat deciles:** next-quarter return by composite decile 0..9 = 4.8, 4.4, 3.8, 3.9, 4.3, 4.5, 4.5, 4.5, 4.8, 5.6 %/qtr. Only the top decile stands out (+1.1 pts over the middle); the bottom is not worse.
+6. **Horizon:** against the next 4 quarters IC rises to +0.024 (t 1.35; overlapping, descriptive). Direction right for a valuation signal, still insignificant.
+7. **DCF output is extreme:** median upside +45%, 75th pct +149%, 95th pct +570%; 8% of names saturate the DCF score at >= +90. The model calls most stocks cheap, and the ranking is driven by extrapolating 3-4 years of history (hypothesis, not yet tested). The EDGAR/yfinance fidelity check also showed modest input changes flipping the verdict.
+8. **Sectors:** nothing consistent (Industrials +0.032 t 1.7, Energy -0.066, rest ~0).
+9. **Survivorship flatters all of this;** the true number is not better.
+
 ### P2b PRE-REGISTRATION — production model on EDGAR history (written 2026-10-04, BEFORE any score was computed)
 
 - **What is tested:** the unchanged production scorer (`scripts/phase2_backtest._score_ticker_at_date`: DCF + relative valuation, frozen weights/thresholds) fed with EDGAR as-filed statements (shaped like yfinance's) instead of yfinance's restated 4-5 years. Nothing in `app/` or `scripts/` is modified; the adapter lives in `research/`.
