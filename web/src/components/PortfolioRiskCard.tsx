@@ -4,10 +4,8 @@ import { useEffect, useState } from "react";
 import { PORTFOLIO_UPDATED_EVENT } from "@/lib/portfolioEvents";
 import type { PortfolioRiskOverlay } from "@/lib/types";
 
-// Volatility-targeting risk view of the user's holdings (app/analysis/vol_overlay.py). It describes how much RISK the
-// portfolio is carrying right now, not what the market will do: on the S&P 500 (2007-2025) the same rule cut the worst
-// drawdown by 23-39% but added no meaningful return in the 2016-2025 bull market -- the card always says so.
-// Renders nothing when the fetch fails or there is no portfolio to describe, same convention as PortfolioFitCard.tsx.
+// Risk view of the user's holdings (app/analysis/vol_overlay.py): how much risk the portfolio carries now, not a market
+// forecast, and the card always says so. Renders nothing on fetch failure (same convention as PortfolioFitCard.tsx).
 export default function PortfolioRiskCard() {
   const [overlay, setOverlay] = useState<PortfolioRiskOverlay | null>(null);
   const [error, setError] = useState(false);

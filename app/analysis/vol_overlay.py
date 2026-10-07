@@ -1,20 +1,14 @@
 """
 vol_overlay.py
 
-A volatility-targeting risk-control view (Moreira & Muir, "Volatility-Managed
-Portfolios"): hold less when recent realised volatility is high, never more
-than fully invested.
+Volatility-targeting risk view (Moreira & Muir): hold less when recent volatility
+is high, never more than 100%.
 
     suggested_exposure = min(1, target_vol / realised_vol)
 
-What the evidence in this repo does and does not say (SPRINT_TRACKER.md, A2;
-S&P 500, 2007-2025, price returns, 5 bps trading cost, monthly rebalance):
-this policy cut the maximum drawdown by 39% in 2007-2015 (-57% -> -35%) and
-23% in 2016-2025 (-34% -> -26%), but it did NOT add risk-adjusted return in
-the 2016-2025 bull decade (Sharpe 0.68 vs 0.66). It is drawdown protection,
-not a return forecast, and this module never presents it as one.
-
-Pure functions only (no network): the caller supplies the price history.
+Evidence (SPRINT_TRACKER.md, A2; S&P 500 2007-2025): max drawdown cut 39%
+(2007-15) and 23% (2016-25), but no Sharpe gain in 2016-25. It is drawdown
+protection, not a return forecast. Pure functions: the caller supplies prices.
 """
 
 from typing import Dict, Optional

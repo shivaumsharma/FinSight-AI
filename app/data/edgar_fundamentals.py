@@ -1,26 +1,17 @@
 """
 edgar_fundamentals.py
 
-Annual income statement / balance sheet / cash flow built from SEC EDGAR's
-XBRL "company facts" API, shaped exactly like yfinance's `.financials` /
-`.balance_sheet` / `.cashflow` DataFrames (rows = line-item labels, columns =
-fiscal-year-end dates) so the existing FinancialStatementNormaliser consumes
-them unchanged.
+SEC EDGAR as-filed annual statements in yfinance's shape (rows = line items,
+columns = fiscal-year ends), so FinancialStatementNormaliser consumes them
+unchanged.
 
-Why this exists: yfinance is this project's single point of failure for
-fundamentals (it serves only ~4-5 restated years and throttles datacenter
-IPs). EDGAR is free, unthrottled at the volumes this app needs, goes back 15+
-years, and reports the numbers as originally filed. It is used as a FALLBACK
-(FUNDAMENTALS_SOURCE=auto, the default: yfinance first, EDGAR only when
-yfinance's statements fail or come back empty) or can be forced with
-FUNDAMENTALS_SOURCE=edgar; FUNDAMENTALS_SOURCE=yfinance disables it.
+Used as a FALLBACK: FUNDAMENTALS_SOURCE=auto (default) tries yfinance first and
+EDGAR only when yfinance's statements fail or are empty; "edgar" forces it,
+"yfinance" disables it. US filers only (needs a CIK); anything else returns None.
 
-Known, measured limits (see EVALUATION.md, "Longer-history re-test"): the
-EDGAR-fed pipeline reproduces yfinance-fed composite scores with a 0.83 rank
-correlation, not 1.0 -- yfinance's "Total Debt" includes lease obligations,
-EDGAR's now includes lease liabilities (OperatingLeaseLiability, taken as the first tag that exists, so a company reporting both operating and finance leases is slightly under-counted), and share counts come from the 10-K cover page. Only
-US filers with a CIK are covered; everything else returns None and the caller
-keeps its existing behaviour.
+Known limit: the EDGAR-fed pipeline agrees with the yfinance-fed one at 0.83 rank
+correlation, not 1.0 (debt/lease definitions, cover-page share counts). See
+EVALUATION.md, "Longer-history re-test".
 """
 
 import json

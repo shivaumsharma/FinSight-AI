@@ -1,12 +1,9 @@
 """
 portfolio_risk_overlay.py
 
-build_risk_overlay(user_id) is GET /v1/portfolio/risk-overlay's body: the user's own self-reported holdings run through
-app/analysis/vol_overlay.py. Same extraction pattern as portfolio_summary.py's build_portfolio_view().
-
-Degrades instead of failing: no holdings, no usable prices, or a throttled price fetch all return
-{"available": False, "reason": ...} so the endpoint never 500s a portfolio page. Non-USD holdings (NSE ".NS") are left
-out and listed, since mixing currencies in one value series would be meaningless.
+GET /v1/portfolio/risk-overlay's body: the user's holdings run through
+app/analysis/vol_overlay.py. Degrades to {"available": False, "reason": ...}
+instead of failing; non-USD (.NS) holdings are left out and listed.
 """
 
 from app.analysis import vol_overlay

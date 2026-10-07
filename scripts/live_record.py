@@ -1,25 +1,15 @@
 """
 live_record.py
 
-A forward-looking, append-only track record for FinSight's composite score
-(committing the file to git is what makes any later edit visible).
+Append-only weekly record of FinSight's composite scores: a forward test that
+survivorship and look-ahead cannot contaminate.
 
-Why: every historical test of this score (see EVALUATION.md) is contaminated by
-survivorship bias (today's index members only) and by whatever look-ahead a
-backtest harness leaves in. A live record has neither problem: each week this
-script stores the score FinSight produces TODAY, from data available TODAY, for
-every ticker in the universe; `evaluate` later joins those stored scores to
-what actually happened. After ~2 years it is the only evidence in this project
-that nobody -- including its author -- can have overfit.
-
-Usage:
     python scripts/live_record.py snapshot [--limit N] [--workers 4]
     python scripts/live_record.py evaluate [--horizon-days 63]
 
-`snapshot` appends to live_record/snapshots.csv (one row per snapshot date and
-ticker; re-running the same day is a no-op). Commit that file to keep the
-record. `evaluate` is read-only and reports nothing statistical until enough
-snapshot dates have matured -- it says so rather than printing a misleading t-stat.
+Rows go to live_record/snapshots.csv (a same-day re-run never overwrites).
+`evaluate` joins matured snapshots to realised returns and prints no t-statistic
+until 8 snapshot dates have matured. Commit the CSV to keep the record.
 """
 
 import argparse
