@@ -169,8 +169,7 @@ function CalibratedConfidenceBlock({ calibrated }: { calibrated: CalibratedConfi
 type NewsArticleItem = NonNullable<NewsSources["all_articles"]>[number];
 
 // Retrieved-but-unused articles are capped -- same reason as
-// pdf_report_builder.py's MAX_UNUSED_ARTICLES_SHOWN and
-// streamlit_app.py's equivalent: an active mega-cap can retrieve
+// pdf_report_builder.py's MAX_UNUSED_ARTICLES_SHOWN: an active mega-cap can retrieve
 // 200+ articles in a single pull, and this list shouldn't render every
 // one just because a reader opened this tab. Used articles (the ones
 // that actually informed the report) are never capped.
@@ -224,9 +223,8 @@ function ToneTile({ label, tone }: { label: string; tone: string }) {
 // report_data_builder.py hands back raw numbers for every field here --
 // nothing is pre-formatted server-side (confirmed against a real job
 // response: WACC=0.1100821..., "Intrinsic Value (per share)"=96.6947...).
-// The old Streamlit UI never rendered these fields directly (only the
-// PDF builder formatted them), so this formatting never existed until
-// now. Dispatches on the field's *name*, not a value heuristic, since
+// Only the PDF builder formatted these fields before, so this formatting
+// is new here. Dispatches on the field's *name*, not a value heuristic, since
 // the key vocabulary is fixed and small (report_data_builder.py's
 // build_report_data()) -- a fraction like WACC and a percentage-point
 // value like "Revenue Growth (%)" are both plain floats and

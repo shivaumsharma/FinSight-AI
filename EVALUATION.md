@@ -8,7 +8,7 @@ Numbers below are computed directly from artifacts already checked into `scripts
 
 ## 0. The canonical accuracy metric
 
-FinSight reports exactly **one** headline accuracy number — not a table of window-by-window sub-metrics, and not the "Institutional Consensus Score" (analyst-agreement, market-context only, never a predictive-accuracy claim — see `app/reporting/consensus_score.py`). It's computed by `scripts/canonical_accuracy.py` and surfaced on every generated report (`report_data["track_record"]`, rendered in both the Streamlit and web UIs).
+FinSight reports exactly **one** headline accuracy number — not a table of window-by-window sub-metrics, and not the "Institutional Consensus Score" (analyst-agreement, market-context only, never a predictive-accuracy claim — see `app/reporting/consensus_score.py`). It's computed by `scripts/canonical_accuracy.py` and surfaced on every generated report (`report_data["track_record"]`, rendered in the web UI).
 
 **Definition:** of every Buy/Hold/Sell call FinSight's real production decision path (`report_data_builder.derive_recommendation` — the exact function the deployed app calls) makes on the broad, non-cherry-picked 1,002-ticker S&P 500+400+600(partial) universe, what fraction are correct **12 months later** — Buy needs realized return `> +5%`, Sell needs `< -5%`, Hold needs to land between (the same rule Section 1 below validates, unchanged).
 
@@ -87,7 +87,7 @@ A second, genuinely independent valuation lens: `app/valuation/ddm_engine.py`, a
 
 **Re-tested once the broad-universe re-run made a 10x larger sample available (n=753, up from 71) — the interior peak was noise.** With real statistical power: best weight is now 0.05 (barely above zero) for a trivial +0.3-point gain (42.6%→42.9%), and accuracy *declines monotonically* beyond that, down to 36.5% at weight=0.5. The small-sample "peak" that looked like a real effect vanished entirely once there was enough data to actually test it. This is the same lesson as the momentum result, arrived at differently: this time by getting more data rather than a matched-baseline check, and it's worth remembering going forward that a promising *shape* (interior peak vs. monotonic edge) is necessary but not sufficient evidence at small N — it can still be noise that happens to look structured.
 
-**Shipped display-only** (`report_data["valuation_analysis"]["dividend_discount_model"]`, both Streamlit and web UI, clearly labeled "not part of the recommendation"), and this is now the settled, evidence-backed answer — not a "come back later with more data" placeholder. Genuinely useful as an independent second read for the user, correctly excluded from the actual rating.
+**Shipped display-only** (`report_data["valuation_analysis"]["dividend_discount_model"]`, web UI, clearly labeled "not part of the recommendation"), and this is now the settled, evidence-backed answer — not a "come back later with more data" placeholder. Genuinely useful as an independent second read for the user, correctly excluded from the actual rating.
 
 ### Catalyst-awareness (lower confidence near earnings) — tested, evidence points the other way
 

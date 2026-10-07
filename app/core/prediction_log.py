@@ -10,11 +10,11 @@ scan across hundreds of runs. This is the opposite: one line per
 report, only the handful of fields an accuracy check (Phase 2-style,
 but on live, non-backtested predictions) actually needs.
 
-Wired into ReportTool.run() (see app/tools/report_tool.py), not
-Streamlit -- ReportTool is the terminal tool of "almost every plan"
-(its own docstring), so every real report gets logged here regardless
-of which entry point produced it (Streamlit UI, a script, a future
-API), not just whichever caller remembers to call ResearchLogger.save().
+Wired into ReportTool.run() (see app/tools/report_tool.py), not a client --
+ReportTool is the terminal tool of "almost every plan" (its own docstring),
+so every real report gets logged here regardless of which entry point
+produced it (API, a script), not just whichever caller remembers to call
+ResearchLogger.save().
 """
 
 import json

@@ -286,13 +286,9 @@ def _run_job(job_id: str, question: str, orchestrator_name: str,
 
             context = agent.run(question, **run_kwargs)
 
-            # Moved here from streamlit_app.py: this needs to happen for
-            # every job regardless of which client submitted it (Streamlit,
-            # a future mobile client, curl), not just Streamlit-originated
-            # ones -- was previously called client-side, which only worked
-            # because Streamlit ran the pipeline in-process and had the raw
-            # ResearchContext to hand. See app/core/logger.py's own
-            # docstring for why this logging exists at all.
+            # Logged server-side so every job is recorded whichever client
+            # submitted it (web, curl, ...): only the server has the raw
+            # ResearchContext. See app/core/logger.py for why this exists.
             try:
                 ResearchLogger(log_directory=str(RESEARCH_LOG_DIR)).save(context)
             except Exception as e:

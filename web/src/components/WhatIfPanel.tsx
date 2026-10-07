@@ -4,8 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import RatingBadge from "./RatingBadge";
 import type { WhatIfResponse, WhatIfResult } from "@/lib/types";
 
-// Ports streamlit_app.py's "What-If: Adjust DCF Assumptions" sliders
-// panel (app/valuation/what_if_dcf.py) to the API-backed frontend.
+// "What-If: Adjust DCF Assumptions" sliders panel (app/valuation/what_if_dcf.py).
 // Unlike ModelCompare.tsx (a single button click), this is
 // slider-driven: every drag debounces a re-POST to `endpoint` (see
 // web/src/app/api/research/[jobId]/what-if/route.ts) so dragging

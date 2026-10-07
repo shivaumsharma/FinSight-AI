@@ -1,7 +1,7 @@
 """
 what_if_dcf.py
 
-Cheap, single-shot DCF recompute for the Streamlit "what-if" sliders
+Cheap, single-shot DCF recompute for the web UI's "what-if" sliders
 panel. Not a new calculation path: reuses the exact same
 FCFFEngine.forecast_fcff() override-params mechanism already built for
 Monte Carlo sampling (app/valuation/monte_carlo_dcf.py) and the same

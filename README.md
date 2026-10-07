@@ -1,21 +1,10 @@
----
-title: FinSight AI
-colorFrom: blue
-colorTo: green
-sdk: streamlit
-sdk_version: "1.56.0"
-app_file: streamlit_app.py
-pinned: false
-python_version: "3.11"
----
-
 # FinSight AI — Agentic Financial Research & Trading Platform
 
 An agentic equity-research and paper-trading platform built using Python, FastAPI, Next.js, and a self-hosted or hosted LLM backend to plan, retrieve, value, and write institutional-style research on any publicly listed company — grounded in live market data and real SEC/NSE filings, not the model's training data.
 
 The platform combines an LLM tool-planning agent, a real DCF valuation engine, retrieval-augmented generation over live regulatory filings, a self-evaluation scoring pass, a 31-signal quantitative factor scorecard, a simulated paper-trading layer, voice input, and a rigorously benchmarked evaluation framework into one deployable, tested system.
 
-**[Try the research demo →](https://huggingface.co/spaces/shivaumsharma/finsight-ai)** · **[Try the full platform →](https://web-ten-blond-39.vercel.app)**
+**[Try the full platform →](https://web-ten-blond-39.vercel.app)**
 
 ---
 
@@ -73,7 +62,7 @@ Session-based auth, HMAC-signed shareable PDF links, a service worker with offli
 
 ```mermaid
 flowchart TD
-    UI["Streamlit UI / Next.js Frontend"] --> Agent["ResearchAgent"]
+    UI["Next.js Frontend"] --> Agent["ResearchAgent"]
     Agent --> Resolver["Ticker Resolver\n(deterministic company/ticker lookup)"]
     Agent --> Planner["Planner\n(LLM proposal ∪ rule-based fallback)"]
     Planner --> Plan["Ordered tool plan"]
@@ -121,7 +110,7 @@ Every tool reads from and writes to one shared `ResearchContext` object. The pla
 | Orchestration | Hand-rolled controller, plus a LangGraph port kept alongside it as a documented, benchmarked alternative — see [EVALUATION.md](EVALUATION.md) |
 | Caching | Redis — content-addressed for valuation/narrative output, TTL-only for statement fetches; degrades to a no-op if unreachable |
 | Report output | reportlab (downloadable PDF) |
-| Deployment | AWS Elastic Beanstalk (API, Terraform-defined) + CloudFront (HTTPS termination in front of it) + Vercel (frontend); Google Cloud Run supported but currently down (GCP project billing disabled); Hugging Face Spaces (research demo, free-tier CPU quota shared across all Spaces on the account); Railway and a plain DigitalOcean droplet (`infra/digitalocean_droplet_setup.sh`) both supported as alternatives |
+| Deployment | AWS Elastic Beanstalk (API, Terraform-defined) + CloudFront (HTTPS termination in front of it) + Vercel (frontend); Google Cloud Run supported but currently down (GCP project billing disabled); Railway and a plain DigitalOcean droplet (`infra/digitalocean_droplet_setup.sh`) both supported as alternatives |
 | Testing / CI | pytest (1,171 test functions, 69 files), GitHub Actions with failure-annotation diagnostics |
 
 ---
@@ -158,7 +147,6 @@ Autonomous_Financial_Research_Agent/
 │   └── public/                  # Service worker, PWA icons
 │
 ├── scripts/                    # Backtests, benchmarks, training-set builders
-├── streamlit_app.py              # Original Streamlit research demo
 ├── EVALUATION.md                 # Full evaluation results & methodology
 ├── requirements.txt
 ├── Dockerfile
@@ -199,17 +187,16 @@ Autonomous_Financial_Research_Agent/
 
 ## Installation
 
-**Research demo (Streamlit):**
+**Setup:**
 ```bash
 git clone https://github.com/shivaumsharma/FinSight-AI.git
 cd FinSight-AI
 pip install -r requirements.txt
 cp .env.example .env  # fill in FINNHUB_API_KEY and, for the default hosted LLM, LLM_BASE_URL/LLM_API_KEY/LLM_MODEL
-streamlit run streamlit_app.py
 ```
 The LLM defaults to a hosted, OpenAI-compatible chat API (`LLM_PROVIDER=hosted`). Set `LLM_PROVIDER=local` to run entirely on-box with no external LLM API key, via Qwen2.5-1.5B served locally through `llama.cpp`. First run downloads FinBERT and the embedding model (and Qwen2.5-1.5B, if running local) from Hugging Face; subsequent runs reuse the cached weights.
 
-**Full platform (FastAPI + Next.js):**
+**Run (FastAPI + Next.js):**
 ```bash
 # Backend
 python -m uvicorn app.api.main:app --port 8010 --env-file .env
@@ -240,12 +227,7 @@ See `.env.example` and `web/.env.example` for the full list of required/optional
 
 ## Deployment
 
-The FastAPI backend previously ran on **Google Cloud Run**, but that GCP project currently has billing disabled (no payment method attached), so the Cloud Run service is down. `infra/` defines an equivalent **AWS Elastic Beanstalk** stack via Terraform as the replacement — see `infra/README.md` for current status. The EC2/EB environment is applied and healthy, fronted by a **CloudFront** distribution for HTTPS termination (Single-Instance EB has no load balancer to terminate TLS itself) — live at `https://d3iltp1nnt4rbu.cloudfront.net`. The Next.js frontend deploys to **Vercel**; the research demo runs separately on **Hugging Face Spaces** (the local model set exceeds Streamlit Community Cloud's free-tier memory limit). Railway remains fully supported as an alternative single-service deploy for the API. The Cloud Run setup steps below are kept for reference since the same Dockerfile-based flow applies to any of these targets.
-
-**Research demo (Hugging Face Spaces):**
-1. Create a Space at [huggingface.co/new-space](https://huggingface.co/new-space) — SDK: **Streamlit**, Hardware: **CPU basic (free)**.
-2. Link it to this GitHub repo (Space Settings → "Link to a GitHub repository"), or push directly: `git remote add space https://huggingface.co/spaces/<you>/<space-name>` then `git push space main`.
-3. The `sdk`/`app_file` front matter at the top of this README configures the Space automatically.
+The FastAPI backend previously ran on **Google Cloud Run**, but that GCP project currently has billing disabled (no payment method attached), so the Cloud Run service is down. `infra/` defines an equivalent **AWS Elastic Beanstalk** stack via Terraform as the replacement — see `infra/README.md` for current status. The EC2/EB environment is applied and healthy, fronted by a **CloudFront** distribution for HTTPS termination (Single-Instance EB has no load balancer to terminate TLS itself) — live at `https://d3iltp1nnt4rbu.cloudfront.net`. The Next.js frontend deploys to **Vercel**. Railway remains fully supported as an alternative single-service deploy for the API. The Cloud Run setup steps below are kept for reference since the same Dockerfile-based flow applies to any of these targets.
 
 **Backend (Cloud Run), one-time setup:**
 1. Create a GCP project, enable Cloud Run, Cloud Build, and Artifact Registry.
@@ -280,7 +262,7 @@ cd web && npx vercel@latest --prod
 
 **Alternative: Railway** — the committed `Dockerfile`/`railway.json` support a one-service Railway deploy for the API (`railway login`, `railway init`, attach a persistent volume for `jobs.db`/`reports/`, `railway variables set ...` for each `.env.example` key, `railway up`). Potentially simpler for a from-scratch setup, since Railway auto-provisions its own build trigger instead of the manual Cloud Console wizard above.
 
-**Alternative: DigitalOcean droplet** — a plain VM instead of a managed container platform, useful specifically to get off a shared free-tier CPU/GPU quota (e.g. Hugging Face Spaces' free tier, which is shared across every Space on the account and pauses whichever one trips it) onto dedicated, always-on compute. Uses the same platform-agnostic `Dockerfile` as Cloud Run/Railway above, nothing droplet-specific baked into the image itself.
+**Alternative: DigitalOcean droplet** — a plain VM instead of a managed container platform, useful for dedicated, always-on compute. Uses the same platform-agnostic `Dockerfile` as Cloud Run/Railway above, nothing droplet-specific baked into the image itself.
 
 Account-level setup (only the account owner can do this part):
 1. Redeem the DigitalOcean credit from the GitHub Student Developer Pack (`education.github.com` → Student Pack → DigitalOcean offer), which requires a DigitalOcean account with a payment method on file even though the credit covers the cost.

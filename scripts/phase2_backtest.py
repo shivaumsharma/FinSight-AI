@@ -2,7 +2,7 @@
 phase2_backtest.py
 
 Historical backtest of the recommendation pipeline. Standalone --
-does not touch the Streamlit UI.
+does not touch the web UI.
 
 No-look-ahead design
 ---------------------

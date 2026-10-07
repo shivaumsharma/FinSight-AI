@@ -106,9 +106,8 @@ export function useResearch() {
     const { job_id: jobId } = await submitResp.json();
     setState((s) => ({ ...s, status: "running", jobId }));
 
-    // Polling loop -- mirrors streamlit_app.py's _poll_job(), just as a
-    // client-side loop instead of a server-side blocking one, since a
-    // browser tab can't hold a Python-style synchronous wait.
+    // Client-side polling loop: a browser tab can't hold a synchronous wait
+    // for the job to finish.
     while (!cancelledRef.current) {
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
       if (cancelledRef.current) return;

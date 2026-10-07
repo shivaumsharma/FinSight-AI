@@ -4,7 +4,6 @@
 pandas==3.0.5
 numpy==1.26.4
 yfinance==1.7.0
-streamlit==1.60.0
 matplotlib==3.11.1
 requests==2.34.2
 beautifulsoup4==4.15.0
@@ -36,7 +35,7 @@ llama-cpp-python==0.3.35
 # LangGraph port of the agent orchestrator (app/agents/langgraph_agent.py)
 # -- kept alongside the hand-rolled controller (research_agent.py) as a
 # documented, benchmarked alternative, not a replacement. Pinned to the
-# version verified compatible with this project's chromadb/streamlit
+# version verified compatible with this project's chromadb
 # pydantic requirements (see app/tests/test_langgraph_agent.py).
 langgraph==1.2.9
 

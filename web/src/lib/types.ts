@@ -204,9 +204,8 @@ export interface ResearchResult {
   llm_usage?: Record<string, number> | null;
 }
 
-// POST /v1/research/{job_id}/what-if's response shape -- ports
-// streamlit_app.py's "What-If: Adjust DCF Assumptions" sliders panel
-// (app/valuation/what_if_dcf.py) to the API. `available` is the
+// POST /v1/research/{job_id}/what-if's response shape (the "What-If: Adjust
+// DCF Assumptions" sliders panel, app/valuation/what_if_dcf.py). `available` is the
 // discriminant: when false, DCF simply isn't computable for this
 // company (an expected, common case, not a failure) and no other
 // field is guaranteed present. All *_pct fields are percentage-POINT

@@ -1,17 +1,10 @@
 """
 main.py
 
-FastAPI service boundary in front of the research pipeline -- step 1 of
-a staged, mobile-aware rollout (see the approved plan for the full
-context and the later step deliberately NOT in this pass: push
-notifications -- hosted inference, the shared-secret API key check,
-real per-user auth/rate-limiting, signed PDF share links, and
-disclaimer language, see below, are now all in place). streamlit_app.py
-is unchanged by this file and still calls ResearchAgent/
-LangGraphResearchAgent in-process directly -- rewiring it to call this
-API instead is a later step, done deliberately minimally when it
-happens, since Streamlit is staying a debug tool, not becoming the
-product.
+FastAPI service in front of the research pipeline: hosted inference, the
+shared-secret API key check, per-user auth and rate limiting, signed PDF
+share links and disclaimer language are all in place. The Next.js
+frontend (web/) is the only client of this API.
 
 Two auth layers, not one, stacked deliberately (see _API_KEY's own
 comment below for the full reasoning): X-API-Key gates the deployment
@@ -1116,8 +1109,7 @@ def model_compare(job_id: str, current_user: str = Depends(auth.get_current_user
 class WhatIfRequest(BaseModel):
     # Percentage-POINT units (e.g. 6.4 meaning 6.4%) -- matches this
     # codebase's existing slider-unit convention, see what_if_dcf.py's
-    # own comments and streamlit_app.py's whatif_growth_pct/etc.
-    # sliders. Omitted fields are defaulted server-side (see below),
+    # own comments. Omitted fields are defaulted server-side (see below),
     # not left unset -- the response always needs to report the actual
     # bounds/defaults for the frontend to seed its sliders on first load.
     growth_rate_pct: Optional[float] = None
@@ -1127,17 +1119,15 @@ class WhatIfRequest(BaseModel):
 
 @app.post("/v1/research/{job_id}/what-if")
 def what_if(job_id: str, body: WhatIfRequest, current_user: str = Depends(auth.get_current_user)):
-    """On-demand DCF assumption explorer -- ports streamlit_app.py's
-    "What-If: Adjust DCF Assumptions" sliders panel to the API (the
-    Next.js frontend is a separate process, so it can't call
-    app/valuation/what_if_dcf.py's compute_what_if() in-process the way
-    streamlit_app.py does). Cheap, single-shot DCF recompute (no LLM
-    call, no Monte Carlo loop), so safe to call on every slider move.
+    """On-demand DCF assumption explorer behind the web UI's "What-If"
+    sliders (the frontend is a separate process, so it calls this instead of
+    app/valuation/what_if_dcf.py's compute_what_if() directly). Cheap,
+    single-shot DCF recompute (no LLM call, no Monte Carlo loop), so safe to
+    call on every slider move.
 
     `available: False` is NOT an error -- it's the expected, common
     response whenever DCF wasn't computable for this company at all
-    (mirrors compute_what_if's own "base FCFF can't be computed" case
-    and streamlit_app.py's own try/except around building `whatif`)."""
+    (mirrors compute_what_if's own "base FCFF can't be computed" case)."""
     job = db.get_job(job_id)
     if job is None:
         raise errors.job_not_found(job_id)

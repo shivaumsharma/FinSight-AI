@@ -24,10 +24,9 @@ STATEMENT_CACHE_TTL_SECONDS = 12 * 3600
 
 class TickerNotFoundError(Exception):
     """Raised when yfinance has no usable data for a ticker -- it
-    doesn't exist, is delisted, or was mistyped. Caught centrally in
-    streamlit_app.py to show a friendly message instead of a raw
-    traceback from whichever statement fetch happens to hit an empty
-    DataFrame first."""
+    doesn't exist, is delisted, or was mistyped. Caught centrally by the
+    API layer to show a friendly message instead of a raw traceback from
+    whichever statement fetch happens to hit an empty DataFrame first."""
 
 
 class MarketDataUnavailableError(Exception):
