@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import AddToWatchlistButton from "./AddToWatchlistButton";
+import LoadError from "./LoadError";
 import { currencySymbol } from "@/lib/currency";
 import { fmtCompactNumber } from "@/lib/stockFormat";
 import type { ScreenerData, ScreenerFilters, ScreenerRow } from "@/lib/types";
@@ -91,19 +92,22 @@ export default function Screener() {
   const [sortDesc, setSortDesc] = useState(true);
   const [data, setData] = useState<ScreenerData | null>(null);
   const [showFilters, setShowFilters] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     setData(null);
+    setFailed(false);
     const query = buildQuery(filters, sortBy, sortDesc);
     fetch(`/api/market/screener?${query}`)
-      .then((r) => (r.ok ? r.json() : { results: [], total_matched: 0, universe_size: 0 }))
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then(setData)
-      .catch(() => setData({ results: [], total_matched: 0, universe_size: 0 }));
+      .catch(() => setFailed(true));
     // Re-runs whenever a filter, sort field, or sort direction changes --
     // no debounce needed since these are number inputs committed on
     // blur/change, not a per-keystroke search box.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, sortBy, sortDesc]);
+  }, [filters, sortBy, sortDesc, attempt]);
 
   function updateFilter(field: FilterField, raw: string) {
     setFilters((prev) => {
@@ -122,7 +126,7 @@ export default function Screener() {
     <div>
       <div className="flex items-center justify-between">
         <p className="font-mono text-[10px] tracking-wide text-dim">
-          {data ? `${data.total_matched} OF ${data.universe_size} TRACKED` : "LOADING..."}
+          {data ? `${data.total_matched} OF ${data.universe_size} TRACKED` : failed ? "UNAVAILABLE" : "LOADING..."}
         </p>
         <button
           type="button"
@@ -173,7 +177,9 @@ export default function Screener() {
         </button>
       </div>
 
-      {data === null ? (
+      {failed ? (
+        <LoadError what="the screener" onRetry={() => setAttempt((a) => a + 1)} />
+      ) : data === null ? (
         <p className="mt-3 font-mono text-[11px] text-dim">Loading...</p>
       ) : data.results.length > 0 ? (
         <div className="mt-3 flex flex-col gap-2">
