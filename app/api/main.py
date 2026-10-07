@@ -84,6 +84,7 @@ from app.reasoning.real_estate_guidance import get_real_estate_guidance
 from app.reporting.news_client import fetch_company_news, fetch_market_news
 from app.reporting.corporate_actions_feed import build_corporate_actions_feed
 from app.reporting.portfolio_summary import build_portfolio_view
+from app.reporting.portfolio_risk_overlay import build_risk_overlay
 from app.reporting.accuracy_tearsheet import build_accuracy_tearsheet
 from app.reporting.report_data_builder import (
     BUY_THRESHOLD, SELL_THRESHOLD, DCF_WEIGHT, RELATIVE_WEIGHT, SCORE_CAP,
@@ -1735,6 +1736,13 @@ def get_portfolio(current_user: str = Depends(auth.get_current_user)):
     # chat "what's my portfolio look like" intent (chat_router.py) can
     # share this exact aggregation instead of a second, drifting copy.
     return build_portfolio_view(current_user)
+
+
+@app.get("/v1/portfolio/risk-overlay")
+def get_portfolio_risk_overlay(current_user: str = Depends(auth.get_current_user)):
+    # Volatility-targeting risk view over the user's holdings -- drawdown protection, not a return forecast
+    # (see app/analysis/vol_overlay.py's docstring for the measured evidence and its limits).
+    return build_risk_overlay(current_user)
 
 
 @app.post("/v1/portfolio")
