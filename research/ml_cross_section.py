@@ -17,6 +17,7 @@ from research.pit_panel import annual_rows, load_facts  # noqa: E402
 
 DATA = Path(__file__).resolve().parent / "data"
 FIRST_TEST, RETRAIN_EVERY, MIN_NAMES = pd.Timestamp("2016-06-30"), 4, 100
+SCORES_FILE = "p2b_scores.csv"   # the holdout run points this at a file that also holds the holdout-date scores
 ITEMS = ["net_income", "cfo", "capex", "total_assets", "revenue", "gross_profit", "equity", "long_term_debt",
          "debt_current", "shares_outstanding", "diluted_shares"]
 FEATS = ["mom_12_1", "ret_1m", "vol", "log_mcap", "earnings_yield", "fcf_yield", "book_market", "roa", "gross_prof",
@@ -47,7 +48,7 @@ def build_panel():
     close = pd.read_parquet(DATA / "prices_close_splitadj.parquet")
     splits = pd.read_parquet(DATA / "splits.parquet")
     splits = {t: g.set_index("date")["ratio"].sort_index() for t, g in splits.groupby("ticker")}
-    sc = pd.read_csv(DATA / "p2b_scores.csv", parse_dates=["date"])
+    sc = pd.read_csv(DATA / SCORES_FILE, parse_dates=["date"])
     sc = sc[sc["error"].isna()]
     idx = adj.index.to_series()
     qe = [d for d in sorted(idx.groupby(idx.index.to_period("Q")).max()) if d >= fi.FIRST_DATE]

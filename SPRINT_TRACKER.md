@@ -127,6 +127,25 @@ Net share issuance adds essentially nothing on top of the existing features (the
 - **Control (one direct call to the same model):** produced distinct per-audience praise, criticism, adopt/not and what-would-make-them-pay, plus a single most damaging objection (the 27% Sell accuracy and 38.6% directional accuracy), in about a minute. **The swarm added nothing over one prompt.**
 - **Verdict:** not usable as an indicator of what real people feel (the opinions are model-generated and unvalidated) and not worth its cost over a single prompt; keep a single-prompt "synthetic audience" only as a brainstorming aid, and get 5-10 real users for actual evidence. Not tested as a stock-sentiment indicator (it cannot be backtested: P7 look-ahead; the only fair test is the forward live record). Services stopped; restart with the paths in the sandbox if wanted.
 
+### SEALED HOLDOUT — RESULT (2026-10-07; `research/holdout_run.py eval`; ONE-SHOT, NOW CONSUMED; frozen-model SHA-256 verified before use)
+
+Four quarters: 2025-09-30, 2025-12-31, 2026-03-31, 2026-06-30 (about 995 stocks scored per date; top decile = 99 names; 25 bps one-way cost).
+
+| HistGradientBoosting (primary) | Gross top-decile | Benchmark (equal weight) | Net excess | Rank IC (1q) |
+|---|---|---|---|---|
+| 2025-09-30 -> 12-31 | +5.0% | +2.2% | **+2.32 pts** | -0.054 |
+| 2025-12-31 -> 03-31 | -1.1% | +1.3% | **-2.53 pts** | -0.183 |
+| 2026-03-31 -> 06-30 | +23.7% | +13.5% | **+10.06 pts** | +0.161 |
+| 2026-06-30 -> 09-30 | -3.0% | -3.5% | **+0.30 pts** | +0.083 |
+
+- **Pre-registered verdict (primary, HGB): CONFIRMED (directionally, not proven):** mean net excess **+2.54 pts per quarter** (about +10% a year), beats the benchmark in **3 of 4** quarters, total +23.5% net vs +13.4% for the benchmark. **Ridge (secondary): INCONCLUSIVE** (beats in 2 of 4; mean +4.19 pts/qtr, driven by two quarters).
+- **Why this is NOT strong evidence (stated plainly, and decisive for how it may be cited):**
+  1. **One quarter carries it.** 2026-03-31 -> 06-30 alone contributes +10.06 pts in a quarter when the benchmark itself rose +13.5%. **Without that quarter the mean excess is +0.03 pts per quarter, i.e. zero.**
+  2. **The model did not rank stocks better on average:** mean 1-quarter rank IC **+0.0018** (negative in 2 of 4 quarters, -0.18 in one), and the 4-quarter IC on the one date with a complete 4-quarter return is **-0.082** (the top decile still beat the benchmark by +4.0 pts that year). A top-decile portfolio can outperform in a rally through a size/volatility tilt without any ranking skill; that is the most plausible reading given the development-period small-cap tilt.
+  3. With four quarters no statistical significance is possible, and the full P9 bar (development t >= 2, deflated Sharpe >= 0.95) was already unmet.
+- **What may be claimed:** the development result was not contradicted by fresh data; the model is **not proven** and has **no demonstrated stock-selection skill**. **What may not be claimed:** that the model "works", that +5-7% a year is real, or the +10% annualised holdout figure as a track record.
+- **The holdout cannot be reused** (any new model would need its own untouched data). The only remaining clean evidence is the weekly live record; a frozen-model entry in it has not been built.
+
 ### SEALED HOLDOUT — PRE-REGISTRATION (user authorised opening it on 2026-10-07; written BEFORE any holdout number was computed; this is a ONE-SHOT test)
 
 - **What is tested:** the frozen learned 4-quarter model (`frozen_model_2025-06-30.joblib`, SHA-256 `ec8b1e25e19ca3d803b2fe157419ff9600a09b1b29ea9c60a1cdb1261507791d`; integrity re-verified before use). No retraining, no tuning, no feature or definition changes. The primary model is the HistGradientBoosting one; Ridge is reported as secondary.
