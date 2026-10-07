@@ -157,9 +157,37 @@ export interface TrackRecord {
 export interface CalibratedConfidence {
   accuracy_pct: number;
   n: number;
+  // How often the same call given to every stock in this scope would have been right.
+  base_rate_pct: number;
+  edge_pts: number;
   scope: "sector" | "overall";
   sector: string | null;
   rating: "Buy" | "Hold" | "Sell";
+}
+
+// From app/analysis/data_quality.py -- display-only; never changes the rating.
+export interface DataQuality {
+  score: number;
+  level: "HIGH" | "MEDIUM" | "LOW";
+  no_view: boolean;
+  issues: string[];
+  fields_present: number;
+  fields_total: number;
+}
+
+// From app/analysis/risk_range.py -- size of a plausible move, not direction.
+export interface RiskRangeBand {
+  low: number;
+  high: number;
+  low_pct: number;
+  high_pct: number;
+}
+export interface RiskRange {
+  annualised_volatility_pct: number;
+  current_price: number;
+  coverage: string;
+  ranges: Record<string, RiskRangeBand>;
+  note: string;
 }
 
 export interface ReportData {
@@ -177,6 +205,8 @@ export interface ReportData {
   signal_quality?: SignalQuality;
   track_record?: TrackRecord | null;
   calibrated_confidence?: CalibratedConfidence | null;
+  data_quality?: DataQuality | null;
+  risk_range?: RiskRange | null;
   narrative?: Partial<Record<NarrativeSection, string>>;
   market_earnings_snapshot?: MarketEarningsSnapshot;
   valuation_analysis?: ValuationAnalysis;

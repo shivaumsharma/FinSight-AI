@@ -23,6 +23,8 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from app.analysis.data_quality import build_data_quality
+from app.analysis.risk_range import build_risk_range
 from app.core.currency import currency_symbol
 from app.core.research_context import ResearchContext
 from app.reporting.calibrated_confidence import build_calibrated_confidence
@@ -1006,6 +1008,10 @@ def build_report_data(context: ResearchContext) -> Dict[str, Any]:
         # see derive_signal_quality's own docstring for the display-only
         # boundary and exactly which already-computed values feed it.
         "signal_quality": signal_quality,
+
+        # Display-only; neither changes the rating. See the two modules' docstrings.
+        "data_quality": build_data_quality(financial, valuation_results, info),
+        "risk_range": build_risk_range(context.historical_prices),
 
         # FinSight's one canonical backtested accuracy number, the same
         # on every report -- not this ticker's outcome, the whole

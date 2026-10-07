@@ -6,7 +6,7 @@ import ModelCompare from "./ModelCompare";
 import RatingBadge, { ratingColorClass } from "./RatingBadge";
 import Tabs from "./Tabs";
 import WhatIfPanel from "./WhatIfPanel";
-import type { CalibratedConfidence, NewsSources, ResearchResult, SignalQuality, TrackRecord } from "@/lib/types";
+import type { CalibratedConfidence, DataQuality, NewsSources, ResearchResult, RiskRange, SignalQuality, TrackRecord } from "@/lib/types";
 
 function ShareButton({ jobId }: { jobId: string }) {
   const [state, setState] = useState<"idle" | "sharing" | "copied" | "error">("idle");
@@ -161,7 +161,46 @@ function CalibratedConfidenceBlock({ calibrated }: { calibrated: CalibratedConfi
     <div className="mt-2 rounded-lg border border-border bg-card px-3 py-2 text-[11px] text-muted">
       <strong className="text-text">Calibrated confidence:</strong> {calibrated.rating} calls {scopeNote} have
       historically been right <strong className="text-text">{calibrated.accuracy_pct}%</strong> of the time (n=
-      {calibrated.n}, 12-month backtest).
+      {calibrated.n}, 12-month backtest). Giving every stock the same call would have been right{" "}
+      <strong className="text-text">{calibrated.base_rate_pct}%</strong> of the time, so the call's edge is{" "}
+      <strong className="text-text">
+        {calibrated.edge_pts > 0 ? "+" : ""}
+        {calibrated.edge_pts} pts
+      </strong>
+      .
+    </div>
+  );
+}
+
+function DataQualityBlock({ quality }: { quality: DataQuality | null | undefined }) {
+  if (!quality) return null;
+  return (
+    <div className="mt-2 rounded-lg border border-border bg-card px-3 py-2 text-[11px] text-muted">
+      <strong className="text-text">Data quality:</strong> {quality.level} ({quality.score}/100,{" "}
+      {quality.fields_present}/{quality.fields_total} key financial fields present).{" "}
+      {quality.no_view
+        ? "Key inputs are missing, so this rating rests on partial data. In testing, missing inputs did not make the model less accurate, so this is a disclosure, not a correction."
+        : "The rating is based on reasonably complete inputs."}
+      {quality.issues.length > 0 && <span className="text-dim"> {quality.issues.join("; ")}.</span>}
+    </div>
+  );
+}
+
+function RiskRangeBlock({ risk, symbol }: { risk: RiskRange | null | undefined; symbol: string }) {
+  if (!risk) return null;
+  return (
+    <div className="mt-2 rounded-lg border border-border bg-card px-3 py-2 text-[11px] text-muted">
+      <strong className="text-text">Plausible price range</strong> ({risk.coverage}, from {risk.annualised_volatility_pct}%
+      annual volatility):{" "}
+      {Object.entries(risk.ranges).map(([horizon, band], i) => (
+        <span key={horizon}>
+          {i > 0 && " · "}
+          {horizon} {symbol}
+          {band.low}–{symbol}
+          {band.high}
+        </span>
+      ))}
+      . <span className="text-dim">{risk.note}</span>
     </div>
   );
 }
@@ -380,6 +419,8 @@ export default function ReportView({
       </div>
       <TrackRecordBlock trackRecord={rd.track_record} />
       <CalibratedConfidenceBlock calibrated={rd.calibrated_confidence} />
+      <DataQualityBlock quality={rd.data_quality} />
+      <RiskRangeBlock risk={rd.risk_range} symbol={symbol} />
 
       {/* Verdict card -- border color set inline since it's chosen from
           a runtime value (rating); a Tailwind class built via template

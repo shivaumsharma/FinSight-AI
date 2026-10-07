@@ -90,16 +90,19 @@ def _load_pooled_rows() -> list:
 
 
 def _accuracy_for(rows: list, rating: str, gics_sector: Optional[str]) -> Optional[dict]:
-    matching = [
-        r for r in rows
-        if r["recommendation"] == rating
-        and (gics_sector is None or _sector_from_category(r.get("category")) == gics_sector)
-    ]
+    """Accuracy of `rating` calls, plus the base rate: how often giving EVERY stock in the same scope
+    this call would have been right. Accuracy is only evidence of skill to the extent it beats that."""
+    in_scope = [r for r in rows if gics_sector is None or _sector_from_category(r.get("category")) == gics_sector]
+    matching = [r for r in in_scope if r["recommendation"] == rating]
     n = len(matching)
     if n < MIN_SAMPLE_SIZE:
         return None
-    correct = sum(1 for r in matching if score_rating(r["recommendation"], r["realized_return_pct"]))
-    return {"accuracy_pct": round(100 * correct / n, 1), "n": n}
+    correct = sum(1 for r in matching if score_rating(rating, r["realized_return_pct"]))
+    base_correct = sum(1 for r in in_scope if score_rating(rating, r["realized_return_pct"]))
+    accuracy = 100 * correct / n
+    base_rate = 100 * base_correct / len(in_scope)
+    return {"accuracy_pct": round(accuracy, 1), "n": n,
+            "base_rate_pct": round(base_rate, 1), "edge_pts": round(accuracy - base_rate, 1)}
 
 
 def build_calibrated_confidence(sector: Optional[str], rating: str) -> Optional[dict]:

@@ -53,7 +53,23 @@ def test_sector_level_bucket_used_when_it_has_enough_samples(tmp_path, monkeypat
 
     result = cc.build_calibrated_confidence("Technology", "Buy")
 
-    assert result == {"accuracy_pct": 80.0, "n": 5, "scope": "sector", "sector": "Information Technology", "rating": "Buy"}
+    # Every row in scope is a Buy here, so the base rate equals the accuracy and the edge is zero.
+    assert result == {"accuracy_pct": 80.0, "n": 5, "base_rate_pct": 80.0, "edge_pts": 0.0,
+                      "scope": "sector", "sector": "Information Technology", "rating": "Buy"}
+
+
+def test_base_rate_counts_every_stock_in_scope_not_only_those_given_the_rating(tmp_path, monkeypatch):
+    monkeypatch.setattr(cc, "_SCRIPT_DIR", tmp_path)
+    monkeypatch.setattr(cc, "MIN_SAMPLE_SIZE", 5)
+    rows = [_row(f"B{i}", "Energy (S&P 500)", "Buy", 10.0 if i < 3 else 1.0) for i in range(5)]  # 3/5 right
+    rows += [_row(f"H{i}", "Energy (S&P 500)", "Hold", 10.0) for i in range(5)]  # up 10%: a Buy would be right
+    _write_sources(tmp_path, rows)
+
+    result = cc.build_calibrated_confidence("Energy", "Buy")
+
+    assert result["accuracy_pct"] == 60.0
+    assert result["base_rate_pct"] == 80.0  # 8 of 10 stocks in scope beat the Buy threshold
+    assert result["edge_pts"] == -20.0
 
 
 def test_falls_back_to_overall_when_sector_bucket_is_too_small(tmp_path, monkeypatch):
