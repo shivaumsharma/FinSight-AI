@@ -519,7 +519,7 @@ def test_valuation_tool_wires_alpha_factors_onto_the_context(monkeypatch):
     # for a non-.NS ticker -- a real yfinance network call this test
     # must NOT make (this exact class of bug -- a "unit" test silently
     # depending on live network -- is what broke CI for
-    # test_company_resolver.py; see .github/workflows/tests.yml's own
+    # test_company_resolver.py; see .github/workflows/ci.yml's own
     # comment on that). Stub it out entirely.
     monkeypatch.setattr(vt_module, "get_benchmark_history", lambda ticker, period="5y": None)
 

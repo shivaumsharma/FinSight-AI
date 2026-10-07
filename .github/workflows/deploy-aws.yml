@@ -1,23 +1,14 @@
 name: deploy-aws
 
-# Builds the backend image and deploys it to Elastic Beanstalk -- only runs
-# once infra/ has been applied AND the AWS_DEPLOY_ROLE_ARN repo variable is
-# set (from `terraform output github_actions_role_arn`, see infra/README.md).
-# Missing/empty is expected and this whole workflow just no-ops until then --
-# same gating pattern DigiNyaya's ci.yml already uses.
-#
-# Triggered by tests.yml COMPLETING on main, not by push directly -- the two
-# used to fire independently on the same push event, which meant a commit
-# that failed pytest would still deploy to production in parallel (confirmed:
-# no `needs`/gating existed between them at all). workflow_run only fires
-# after tests.yml finishes, and the `if:` below additionally requires it to
-# have actually passed. workflow_dispatch is kept as a manual override (e.g.
-# to redeploy an already-tested commit without re-running the suite) and
-# skips the conclusion check since there's no workflow_run event to check.
+# Builds the backend image and deploys it to Elastic Beanstalk. Runs only after the
+# "ci" workflow completes successfully on main (so a commit that fails any check never
+# deploys), and only once infra/ is applied and the AWS_DEPLOY_ROLE_ARN repo variable is
+# set (`terraform output github_actions_role_arn`, see infra/README.md); until then it
+# no-ops. workflow_dispatch redeploys an already-tested commit without re-running CI.
 
 on:
   workflow_run:
-    workflows: ["tests"]
+    workflows: ["ci"]
     types: [completed]
     branches: [main]
   workflow_dispatch: {}
@@ -37,12 +28,12 @@ jobs:
     # first). Configuring the actual gate is a one-time manual step this
     # workflow can't do for itself: GitHub repo Settings -> Environments ->
     # production -> add required reviewers. Until that's done, this line
-    # is a no-op and every push that passes tests.yml still deploys
+    # is a no-op and every push that passes ci.yml still deploys
     # automatically, exactly as today.
     environment: production
     steps:
       # workflow_run's default checkout would use the deploy workflow FILE's
-      # own ref (main's latest), not necessarily the exact commit tests.yml
+      # own ref (main's latest), not necessarily the exact commit ci.yml
       # just validated -- pin to that commit's SHA explicitly so what's
       # deployed is what was actually tested, not whatever main has moved to
       # by the time this job starts.

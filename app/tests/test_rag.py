@@ -12,7 +12,7 @@ mock at the same three seams RAGPipeline.__init__ constructs
 (ChromaVectorStore, SECEdgarClient, NSEFilingsClient) plus
 FinancialTranscriptChunker, so this now runs in milliseconds with no
 network access and belongs in CI -- no longer --ignore'd in
-.github/workflows/tests.yml.
+.github/workflows/ci.yml.
 """
 
 import importlib.util
@@ -26,7 +26,7 @@ import types
 # import RAGPipeline` below), even though this file never constructs a
 # real ChromaVectorStore -- every test here replaces it with a fake via
 # _build_pipeline. Those two packages are deliberately NOT in this
-# project's lightweight CI dependency list (see tests.yml's own
+# project's lightweight CI dependency list (see ci.yml's own
 # extensive comment on why: keeping torch/chromadb out keeps CI fast
 # and network-independent), so importing them for real here would
 # either break CI collection or force CI to grow multi-GB heavier for
