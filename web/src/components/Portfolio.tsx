@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import RatingBadge from "./RatingBadge";
 import SectionSkeleton from "./SectionSkeleton";
+import LoadError from "./LoadError";
 import PortfolioRiskCard from "./PortfolioRiskCard";
 import { currencySymbol } from "@/lib/currency";
 import { PORTFOLIO_UPDATED_EVENT, notifyPortfolioUpdated } from "@/lib/portfolioEvents";
@@ -25,6 +26,7 @@ function todayIso(): string {
 // manual P&L calculator against live quotes.
 export default function Portfolio() {
   const [holdings, setHoldings] = useState<PortfolioHolding[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [summary, setSummary] = useState<PortfolioSummary | null>(null);
   const [analysis, setAnalysis] = useState<PortfolioAnalysis | null>(null);
   const [ticker, setTicker] = useState("");
@@ -40,15 +42,16 @@ export default function Portfolio() {
 
   function refresh() {
     fetch("/api/portfolio")
-      .then((r) => (r.ok ? r.json() : { holdings: [], summary: null }))
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((data) => {
         setHoldings(data.holdings);
         setSummary(data.summary);
+        setLoadFailed(false);
       })
-      .catch(() => {
-        setHoldings([]);
-        setSummary(null);
-      });
+      // A failed load must not masquerade as "No holdings yet" -- keep any
+      // holdings already on screen and only show the error block when
+      // there is nothing to show.
+      .catch(() => setLoadFailed(true));
     // Combined portfolio analysis (rating rollup across already-
     // researched holdings) -- a separate, independent fetch from the
     // holdings list above, never blocking it if this one fails.
@@ -178,6 +181,14 @@ export default function Portfolio() {
     }
   }
 
+  if (holdings === null && loadFailed) {
+    return (
+      <div className="mt-6">
+        <p className="font-mono text-[10px] tracking-wide text-dim">PORTFOLIO</p>
+        <LoadError what="your portfolio" onRetry={refresh} className="mt-2" />
+      </div>
+    );
+  }
   if (holdings === null) return <SectionSkeleton label="PORTFOLIO" rows={2} />;
 
   return (

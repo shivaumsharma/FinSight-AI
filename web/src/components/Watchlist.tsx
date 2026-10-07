@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import RatingBadge from "./RatingBadge";
+import LoadError from "./LoadError";
 import { formatShortDate } from "@/lib/format";
 import { currencySymbol } from "@/lib/currency";
 import type { CompanySuggestion, WatchlistItem } from "@/lib/types";
@@ -60,14 +61,20 @@ export default function Watchlist() {
   const [ticker, setTicker] = useState("");
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [suggestions, setSuggestions] = useState<CompanySuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
   function refresh() {
     fetch("/api/watchlist")
-      .then((r) => (r.ok ? r.json() : { items: [] }))
-      .then((data) => setItems(data.items))
-      .catch(() => setItems([]));
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((data) => {
+        setItems(data.items);
+        setLoadFailed(false);
+      })
+      // Keep whatever was already on screen on a failed re-fetch; only a
+      // failed FIRST load shows the error block (never the empty state).
+      .catch(() => setLoadFailed(true));
   }
 
   useEffect(refresh, []);
@@ -196,6 +203,8 @@ export default function Watchlist() {
   return (
     <div className="mt-6">
       <p className="font-mono text-[10px] tracking-wide text-dim">WATCHLIST</p>
+
+      {loadFailed && items === null && <LoadError what="your watchlist" onRetry={refresh} className="mt-2" />}
 
       {items && items.length > 0 && (
         <div className="mt-2 flex flex-col gap-2">{items.map((item) => renderItem(item, false))}</div>
