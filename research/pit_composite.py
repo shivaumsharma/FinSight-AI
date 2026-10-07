@@ -179,6 +179,8 @@ def score_ticker(job_and_dates):
     for as_of in dates:
         if prices.index.min() > as_of - pd.Timedelta(days=300):
             continue                                        # need ~1y of trailing prices for beta
+        if prices.index.max() < as_of - pd.Timedelta(days=7):
+            continue                                        # delisted before this date: never score a stock from its stale last price
         try:
             raw = build_raw(ann, splits, prices, as_of)
             if raw is None:
@@ -202,7 +204,7 @@ def quarter_ends():
 
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
-    if mode not in ("smoke", "run"):
+    if mode not in ("smoke", "run", "run_new"):
         print(__doc__)
         return
     qe = quarter_ends()
@@ -210,6 +212,10 @@ def main():
     assert all(d <= DEV_END for d in dates)
     jobs = prepare()
     market = market_series()
+    if mode == "run_new":                                   # only the former members added by delisted_build.py
+        from research import delisting
+        new = set(delisting.load())
+        jobs = [j for j in jobs if j[0] in new]
     if mode == "smoke":
         sel = [j for j in jobs if j[0] in ("AAPL", "HD", "CAT", "WMS", "KNX")]
         dates = [d for d in dates if d in (pd.Timestamp("2014-06-30"), pd.Timestamp("2019-12-31"))]
@@ -223,7 +229,7 @@ def main():
                 print(f"  {i}/{len(jobs)} tickers done ({time.time() - t0:.0f}s)", file=sys.stderr, flush=True)
     rows = [r for chunk in results for r in chunk]
     out = pd.DataFrame(rows)
-    path = DATA / ("p2b_smoke.csv" if mode == "smoke" else "p2b_scores.csv")
+    path = DATA / {"smoke": "p2b_smoke.csv", "run": "p2b_scores.csv", "run_new": "p2b_scores_delisted.csv"}[mode]
     out.to_csv(path, index=False)
     ok = out[out["error"].isna()] if "error" in out else out
     print(f"{len(jobs)} tickers x {len(dates)} dates in {time.time() - t0:.0f}s -> {len(ok)} scored, {len(out) - len(ok)} errors")

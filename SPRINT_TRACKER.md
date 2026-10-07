@@ -19,7 +19,7 @@ A signal-and-portfolio system that earns **positive, believable, out-of-sample**
 3. **Kill gates:** each new signal has a written pass/fail line. If it fails on the development period, it is dropped, not tuned.
 4. **Controls first:** every new signal must beat, or add to, the boring proven factors (P3), not merely look good alone.
 
-**TRIALS so far (this sprint):** 10 (7 from P3; 1 from P4 primary; 2 sector-neutral variants of the composite IC)
+**TRIALS so far (this sprint):** 34 (7 from P3; 1 from P4; 2 sector-neutral; 5 fix candidates; 4 alternatives; 3 DCF-stability measures; 2 round-2 stability tests; 2 horizon-matched ML tests; 2 filing-tone tests; 2 share-issuance tests; 3 earnings-surprise tests; 1 portfolio view of the learned model)
 
 ## SCOPE UPDATE (user, 2026-10-04) — supersedes the decisions below where they conflict
 
@@ -57,6 +57,290 @@ Per-period composite IC swings from -0.56 to +0.55. **It does NOT clear the pre-
 - Descriptive: out-of-sample raw top-minus-bottom quintile spread +1.1%/quarter, t = +1.16. Yearly mean IC swings from -0.085 (2025) to +0.194 (2020).
 - **Verdict: the +0.093 / t = 2.29 hint did NOT replicate out of sample.** Raw IC is slightly positive but statistically indistinguishable from zero; sector-neutral does not help (paired t = -1.36). Reading: the nine-quarter hint was noise/regime. The honest claim is that the composite has no demonstrated stock-selection edge in this data (survivorship-biased, so if anything this flatters the model).
 - **TRIALS: still 10** (H1 and H2 were already counted).
+
+### ALTERNATIVES RESULT (2026-10-04; `research/vol_managed.py`, `research/ml_cross_section.py`; development only)
+
+**A1 — learned cross-sectional model (37 out-of-sample test dates, 2016-06 to 2025-06; 47,337 rows; 27 features incl. sector dummies):**
+
+| Model | Mean IC | t | Positive dates | Pass (IC >= 0.03 and t >= 2.5)? |
+|---|---|---|---|---|
+| HistGradientBoosting | +0.023 | +1.03 | 59% | **No** |
+| Ridge | +0.026 | +1.02 | 57% | **No** |
+| Production composite, same dates | +0.017 | +0.73 | n/a | n/a |
+
+Best number in the whole sprint, but still within noise. Descriptive: top decile of the GBM's predictions returned 10.4%/qtr vs ~4.3% for the other nine (D9-D0 t = +1.44) — a right-tail, concentrated effect, not a smooth ranking. Ridge leans on small size (log market cap coefficient -0.039) and cheap book-to-market: a small-cap/value tilt, exactly the exposure survivorship bias flatters (small survivors that stayed in today's indices). Yearly GBM IC swings from -0.08 (2021) to +0.12 (2025).
+
+**A2 — volatility-managed / trend-filtered S&P 500 (2007-2025, price basis, 5 bps cost):**
+
+| Strategy | Period | Sharpe (strategy / buy-hold) | Max drawdown (strategy / buy-hold) |
+|---|---|---|---|
+| Vol-managed (15% target) | 2007-15 | 0.43 / 0.28 | -35% / -57% |
+| | 2016-25 | 0.68 / 0.66 | -26% / -34% |
+| Trend (200-day) | 2007-15 | 0.62 / 0.27 | -18% / -57% |
+| | 2016-25 | 0.58 / 0.66 | -25% / -34% |
+
+**Neither passes the pre-registered rule** (Sharpe +0.10 and drawdown 20% shallower in BOTH halves). Vol-managing cut drawdown 23-39% in both halves but its Sharpe edge vanished in the 2016-25 bull decade (+0.02). The trend filter was excellent in 2007-15 (the 2008 crash) and lagged in 2016-25. Reading: real drawdown protection, no free Sharpe in a bull market — a risk-control feature, not an alpha source.
+
+**Trials: 19.** Nothing built.
+
+### SUE RESULT — earnings-surprise drift (2026-10-04; `research/eps_pull.py`, `sue_ic.py`, `ml_cross_section_4q_sue.py`; 61,842 EPS rows, 1,014 companies)
+
+| Test | Result | Pass? |
+|---|---|---|
+| S1 standalone, SUE vs next-quarter return (53 dates, median 818 names) | mean IC **-0.0017**, t -0.17, positive 49%, halves -0.007 / +0.004; top-minus-bottom quintile -0.08%/qtr | **No** |
+| S2 added to the 4-quarter learned model: HistGradientBoosting | +0.0585 vs +0.0543 without (change +0.004), Newey-West t 1.73 | **No** |
+| S2 Ridge | +0.0459 vs +0.0457 (change +0.000), Newey-West t 1.19 | **No** |
+
+Reading: post-earnings drift is absent in this mid/large-cap universe, consistent with the literature that it has largely decayed there (it survives mainly in micro-caps, which this universe excludes). **Rejected.** Share issuance and earnings surprise are now both tested and rejected; the learned model's baseline edge (about +0.054 IC at 4 quarters) is unchanged by either. Untested new-scope signals: insider purchases (Form 4) and 13F holdings changes. Trials: 33.
+
+### SUE PRE-REGISTRATION — earnings-surprise drift (written 2026-10-04, BEFORE any EPS was pulled or scored)
+
+- **Idea:** stocks whose quarterly earnings beat their own seasonal pattern keep drifting up for a few months (post-earnings-announcement drift; Ball & Brown 1968, Bernard & Thomas 1989). Needs no analyst forecasts: surprise = this quarter's EPS minus the same quarter a year ago.
+- **Data:** diluted EPS (fallback: basic) for 3-month periods from 10-Qs; Q4 = annual EPS (10-K) minus Q1+Q2+Q3. Each value is stamped with its filing date, so only filings dated before the test date are used.
+- **Signal (fixed):** SUE = (EPS_q - EPS_{q-4}) / standard deviation of the last 8 year-over-year changes (need >= 6). At each quarter-end T use the latest SUE whose filing date is before T and within the previous 100 days; otherwise missing.
+- **Tests (fixed):**
+  - **S1 standalone:** per-quarter Spearman IC of SUE vs next-quarter total return over the 53 development dates (>= 100 names). Pass: mean IC >= 0.02 and t >= 2.5, positive in both halves.
+  - **S2 as a feature:** add SUE to the A1b protocol (4-quarter target, HistGradientBoosting and Ridge, fixed settings). Descriptive: change in IC versus A1b on the same data; pass bar = the A1b bar (IC >= 0.03 and Newey-West t >= 2.5).
+- **Trials: 3 (S1, S2-hgb, S2-ridge; counter -> 33).** Sealed holdout untouched.
+
+### A1c RESULT — net share issuance as a feature (2026-10-04; `research/ml_cross_section_4q_issuance.py`; 37 test dates, 28 features)
+
+| Model | 4q IC with `share_growth` | Without (A1b, same data) | Change | Newey-West t | Pass? |
+|---|---|---|---|---|---|
+| HistGradientBoosting | +0.0555 | +0.0543 | +0.0012 | +1.67 | **No** |
+| Ridge | +0.0489 | +0.0457 | +0.0032 | +1.31 | **No** |
+
+Net share issuance adds essentially nothing on top of the existing features (the model already captures size/value/quality; and the cover-page share counts are a noisy proxy for true buyback activity). Rejected as a standalone addition. Remaining new-scope signals (insider purchases from Form 4, earnings-surprise drift, 13F holdings changes) are untested; they need new data pulls. Trials: 30.
+
+### A1c PRE-REGISTRATION — net share issuance as a new feature (written 2026-10-04, BEFORE it was run)
+
+- **Idea (first of the "new scope" signals):** companies that shrink their share count (buybacks) tend to outperform ones that issue shares. Data already in hand: cover-page share counts from consecutive annual reports.
+- **Feature (fixed):** `share_growth` = latest known annual share count / prior annual share count - 1 (diluted weighted shares if the cover count is missing). Values outside [-40%, +60%] are set missing: they are almost certainly stock splits that the two counts straddle, not real issuance.
+- **Test:** the A1b protocol exactly (walk-forward, 4-quarter target, HistGradientBoosting + Ridge, fixed settings, first test 2016-06-30, Newey-West t) with `share_growth` added to the 16 base features. Data: survivors + the 38 former members merged so far (final rerun when the full set arrives).
+- **Pass:** the A1b bar (mean IC >= 0.03 and Newey-West t >= 2.5), and, descriptively, the change in IC versus A1b on the same data. Trials: 2 (counter -> 30).
+
+### MIROFISH PILOT — simulated-crowd feedback on FinSight (2026-10-05; sandbox `D:\Coding\Projects\_sandbox`, AGPL, never committed or shipped)
+
+- **Setup:** local fork (Neo4j 5.26 on Java 17 + Ollama qwen2.5:7b + OASIS), all offline; Docker Desktop turned out to be uninstalled on this machine (not by me), so it was run natively. Seed = an honest description of FinSight including its failures. Source scanned first: no external URLs, no telemetry. Setup fixes needed: pip needs UTF-8 mode; `mcp` must be pinned to the lockfile's 1.24.0; the simulation silently downloads a ~440 MB BERT recommender from HuggingFace on first run (this looked like a hang).
+- **Result:** 16 agents, 12 simulated hours, 70 posts, 2 likes, 0 comments, ~4 minutes. **Only 4 of the 16 "people" were human personas;** the other 12 were corporate accounts extracted from names in the text (FinSight, SEC Filings, Home Depot, Apple, Microsoft). After the 4 seeded opening posts, agents mostly echoed each other ("Transparency is key..."), with role confusion (a "FinanceStudent" posting in Microsoft's voice, a "HobbyistQuantTrader" speaking as FinSight).
+- **What the four seed statements said (the only independent content):** retail investors like the honesty; skeptics and quants say 38.6% directional accuracy undermines usefulness; journalists will focus on credibility.
+- **Control (one direct call to the same model):** produced distinct per-audience praise, criticism, adopt/not and what-would-make-them-pay, plus a single most damaging objection (the 27% Sell accuracy and 38.6% directional accuracy), in about a minute. **The swarm added nothing over one prompt.**
+- **Verdict:** not usable as an indicator of what real people feel (the opinions are model-generated and unvalidated) and not worth its cost over a single prompt; keep a single-prompt "synthetic audience" only as a brainstorming aid, and get 5-10 real users for actual evidence. Not tested as a stock-sentiment indicator (it cannot be backtested: P7 look-ahead; the only fair test is the forward live record). Services stopped; restart with the paths in the sandbox if wanted.
+
+### P8/P9/P11 — PORTFOLIO CHECK of the learned 4-quarter model (2026-10-05; `research/learned_portfolio.py`; DESCRIPTIVE, development data only; trials counted: 34)
+
+Walk-forward predictions (made only with data known at each date) -> hold the top decile of predicted stocks, equal-weight, for one quarter, re-rank every quarter; benchmark = equal-weight of every stock scored that date. 37 quarters, 2016-06 to 2025-06. Cost = one-way bps on the replaced fraction of the book (average turnover 38%).
+
+| Model / cost | Annual return | Benchmark | Excess/yr (t) | Sharpe | Bench Sharpe | Max drawdown | Bench DD | Deflated Sharpe (33 trials) |
+|---|---|---|---|---|---|---|---|---|
+| HistGradientBoosting, 0 bps | 25.9% | 18.4% | +6.8% (t 2.34) | 1.12 | 0.89 | -24.3% | -28.1% | 0.82 |
+| HGB, 10 bps | 25.5% | 18.4% | +6.5% (t 2.24) | 1.11 | 0.89 | -24.5% | -28.1% | 0.81 |
+| HGB, 25 bps | 25.0% | 18.4% | +6.0% (t 2.08) | 1.09 | 0.89 | -24.7% | -28.1% | 0.80 |
+| HGB, 50 bps | 24.1% | 18.4% | +5.2% (t 1.82) | 1.06 | 0.89 | -25.0% | -28.1% | 0.78 |
+| Ridge, 10 bps | 23.5% | 18.4% | +4.6% (t 1.50) | 1.06 | 0.89 | -31.7% | -28.1% | 0.79 |
+
+- HGB beat the equal-weight benchmark in **68% of quarters** and in 8 of 10 calendar years (negative only in 2020 and 2021).
+- **This is the strongest evidence in the project, and it is NOT proven.** Deflated Sharpe is 0.78-0.82 against the pre-registered 0.95 bar once the 33 variants tried are accounted for; the development IC t-statistic (Newey-West 1.57) is below 2; and the portfolio result is a descriptive view of the same model, not an independent test.
+- **Why to be careful:** (1) the ridge coefficients show a small-company tilt (log market cap -0.036, book-to-market -0.029), the exposure most flattered by remaining survivorship (still ~19-24% of 2012-2016 index members missing) and the most expensive to trade; (2) the top-decile result is a concentrated tail effect; (3) results by year swing (-2.7% to +12.9% excess); (4) the 10-50 bps cost assumptions are not calibrated for small stocks.
+- **The sealed holdout (dates after 2025-06-30, now about four quarter-ends of real out-of-sample data) has NOT been opened.** It can be used once. The right next step is to freeze the model exactly as it is and open the holdout for this single test, plus keep the weekly live record running; that decision is the user's.
+
+### G1 FINAL-FINAL (2026-10-05) — with verified manual additions: 108 former members
+
+- 16 hand-supplied SEC IDs were run through the same automatic checks; **10 passed** (Monsanto, Time Warner, Time Warner Cable, GGP, Harman, AGL Resources, Green Mountain/Keurig, Heinz, Level 3, Nielsen), 2 became duplicates of companies already held (Chesapeake/Expand, HCP/Healthpeak), and **4 were rejected by the checks** (FLIR, Frontier, Pall, Walgreens) and stay excluded. Still REVIEW: AGN, ALTR, ARNC, CA, DISCK, DTV, MYL, PGN (reused symbols / successor entities, deliberately skipped). NOMATCH: BMS, DISCA, PX, SIAL, VIAC, WRK.
+- **Index coverage (Jan-1 members with prices):** 2012 **76%**, 2016 **81%**, 2020 **88%**, 2024 **93%** (originally 63/69/81/91).
+- **Results unchanged within noise:** composite IC +0.0086 (t 0.49) all dates, +0.0148 (t 0.74) out of sample 2012-2022; factors none alive, P3 FAIL; learned 4-quarter model hgb **+0.0519** (Newey-West t 1.57), ridge +0.0453 (t 1.15) versus composite +0.0086 on the same dates; learned 1-quarter hgb +0.0187 / ridge +0.0246.
+- **Final reading:** the survivorship correction trimmed the learned model's 4-quarter edge from +0.060 to +0.052 (about 13%) and left every verdict unchanged. This is the version to cite.
+
+### G1 FINAL RESULT — survivorship-corrected rerun with 98 former members (2026-10-05; logs `research/data/final_rerun.log`)
+
+- **Coverage of the index:** matched 98 of 130 downloaded former S&P 500 members (23 REVIEW, 6 NOMATCH, 3 DUP). Share of January-1 index members with price history: **2012 63% -> 76%, 2016 69% -> 79%, 2020 81% -> 87%, 2024 91% -> 93%**. The rest cannot be recovered with free data: names Tiingo does not list (52 of 183), the 75 reused-symbol names, and REVIEW/NOMATCH cases.
+- **REVIEW (need a human, never auto-used):** AGN, ALTR, ARNC, CA, DISCK, DTV, FLIR, FTR, GAS, GGP, GMCR, HAR, HCP, HNZ, LVLT, MON, MYL, NLSN, PGN, PLL, TWC, TWX, WBA. **NOMATCH:** BMS, DISCA, PX, SIAL, VIAC, WRK. Many are well-known companies (Monsanto, Time Warner, Walgreens) that can be added with a verified manual CIK in `delisted_overrides.csv`.
+
+| Test | Survivors only | Final (98 former members added) |
+|---|---|---|
+| Composite IC, all 53 quarters | +0.0106 (t 0.62) | **+0.0086 (t 0.49)** |
+| Composite IC, 2012-2022 out of sample | +0.0164 (t 0.84) | +0.0148 (t 0.74) |
+| Sector-neutral composite, all dates | +0.0083 (t 0.55) | +0.0079 (t 0.51) |
+| P3 factors | none alive | none alive (valuation_only +0.001, multi_factor -0.021, FAIL) |
+| Learned model, 4-quarter IC (HistGradientBoosting) | +0.0600 (NW t 1.72) | **+0.0513 (NW t 1.53)** |
+| Learned model, ridge, 4q | +0.0478 (NW t 1.20) | +0.0453 (NW t 1.15) |
+| Composite, 4q, same dates | +0.0153 | +0.0095 |
+| Learned model 1-quarter (hgb / ridge) | +0.0233 / +0.0260 | +0.0156 / +0.0242 |
+
+**Reading:** survivorship bias had been flattering every result a little, as expected: the learned model's 4-quarter edge shrank by about 15% (0.060 -> 0.051) and the composite's IC fell slightly. No verdict changes: the composite and the classic factors still have no demonstrable edge, and the learned 4-quarter model remains the best but unproven candidate (below the t >= 2.5 bar). The earlier conclusions were robust to the correction.
+
+### G1 SURVIVORSHIP FIX — PREVIEW with 38 of ~131 former members added (2026-10-04)
+
+**Pipeline built and verified** (`research/tiingo_prices.py` -> `delisted_match.py` -> `delisted_build.py` -> `pit_composite.py run_new`; shared guard `research/delisting.py`):
+- Matching is by company NAME with five automatic checks (name similarity, a 10-K near the end of index membership, plausible market cap at membership-era filings, 10-Ks across >= 70% of member years, first 10-K no later than a year after the first member year); anything else goes to REVIEW, never guessed. Of the 49 names available: 38 AUTO, 3 DUP (share classes already held), 6 REVIEW (AGN, ALTR, ARNC, CA, DISCK, DTV: reused symbols or successor entities, correctly refused), 2 NOMATCH. An earlier version wrongly matched Avon to "TX Rail Products"; fixed by requiring name similarity >= 0.75 and judging the 10-K timing against the end of membership.
+- Delisted stocks keep their terminal return (last real price carried forward in the adjusted-close matrix) and are masked from every price-based feature and score after their last real trading day, so the fix cannot leak stale prices.
+- Data checks: Aetna's last price $212.70 vs the $207 deal price; Citrix's $18.57 and Altaba's $51.50 special distributions handled continuously; Jan-1 index coverage 63% -> 67% (2012), 69% -> 73% (2016), 81% -> 83% (2020) with only 38 tickers in.
+
+| Test | Survivors only | + 38 former members |
+|---|---|---|
+| Composite IC, all 53 quarters | +0.0106 (t 0.62) | +0.0101 (t 0.59) |
+| Composite IC, 2012-2022 out of sample | +0.0164 (t 0.84) | +0.0161 (t 0.83) |
+| P3 factors (momentum, low vol, EY, FCF yield, ROA, combinations) | all ~0 | all ~0 (valuation_only -0.000, multi_factor -0.023) |
+| Learned model, 4-quarter IC (hist-gradient-boosting) | +0.0600 (NW t 1.72) | **+0.0543** (NW t 1.59) |
+| Learned model, ridge | +0.0478 (NW t 1.20) | +0.0457 (NW t 1.17) |
+
+Reading: the conclusions are robust to the first 38 additions; the learned model loses about a tenth of its edge, the direction survivorship bias predicts. Not final: ~93 more tickers are still downloading (Tiingo free tier ~50 requests/hour).
+**To finish when the download completes:** `python research/delisted_match.py && python research/delisted_build.py && python research/pit_composite.py run_new`, merge `p2b_scores_delisted.csv` into `p2b_scores.csv` (original saved as `p2b_scores_survivors.csv`), then rerun `pit_composite_ic.py`, `factor_ic.py`, `ml_cross_section.py`, `ml_cross_section_4q.py`. Originals of every changed data file are kept as `*_pre_delisted.*`.
+
+### G1 DEEP SCAN RESULT (2026-10-04; `research/g1_probe.py`, public Tiingo ticker list)
+
+- 817 tickers were ever in the S&P 500 since 2012; 549 are in our price matrix, 268 are not. yfinance returns >1 year of history for 75 of the 268 (all still trading: renamed/outside our universe) and **nothing for 183 truly delisted names** (TWTR, ATVI, CELG, SIVB, AET, AGN...).
+- **Size of the bias:** a survivor-only equal-weight portfolio of Jan-1 members beat the equal-weight S&P 500 ETF (RSP) by **+1.9 pts/year on average** (2012-2024; +1.9 in 2012-16, +1.3 in 2020-24). Missing share by year: 36% (2012) -> 9% (2024); adding the 75 recoverable names would cut it to 28% -> 4%.
+- **Sources checked:** Stooq (blocked, returns an HTML gate); yfinance (nothing for delisted); EDGAR (no prices; ticker->CIK lookup is unsafe, e.g. ALTR resolves to a different company); Financial Modeling Prep and EODHD (free-tier limits unverifiable, pages blocked); Nasdaq Data Link WIKI (stale after 2018, needs an account); **Tiingo: its public supported-tickers list covers 131 of the 183 (105 with history before mid-2012); the unlisted ones are mostly renames we hold under a new symbol.**
+- **Verdict: NOT exhaustive.** One real route remains: a free Tiingo API key (user must create it) for prices, plus name-based matching of delisted companies to SEC filer IDs with manual verification (symbol reuse makes ticker-based lookup unsafe). Estimated effort: half a day plus about an hour of rescoring. Everything else is exhausted.
+
+### G8 — BUILT: `app/analysis/vol_overlay.py`, `app/reporting/portfolio_risk_overlay.py`, `GET /v1/portfolio/risk-overlay`; 14 offline tests; live check on AAPL/MSFT/JPM/NVDA gave 15.9% realised vol -> 94% suggested exposure; exposure formula matches the research backtest exactly. Drawdown protection only, stated in the response. UI not wired yet.
+
+### G7 RESULT — filing tone change (2026-10-04; `research/tone_change_ic.py`; 1,531 filings, 13 filing-year groups)
+
+| Signal | Mean IC | t | Years positive | Halves | Pass? |
+|---|---|---|---|---|---|
+| T1 change in LM-negative word share | +0.022 | +1.00 | 69% | +0.048 / +0.001 | **No** |
+| T2 change in LM-uncertainty word share | +0.001 | +0.05 | 46% | -0.028 / +0.026 | **No** |
+
+T1 has a faint, right-signed effect that is statistically indistinguishable from noise and is gone in the second half of the sample (the usual post-publication decay pattern). **Rejected; no variants run.** Combined with P4 (sentence-level change) the filing-text idea is exhausted on this data. Trials: 28.
+
+### G7 PRE-REGISTRATION — filing tone change (written 2026-10-04, BEFORE any tone was computed)
+
+- **Source of the word list:** Loughran-McDonald master dictionary (`LM.csv`, 6.7 MB, extracted from the `pysentiment2` 0.1.1 PyPI wheel; 2,355 negative and 297 uncertainty words). Not installed as a dependency; only the data file is used.
+- **Data / design:** identical to P4 (same 150-company sample, the same 1,548 year-over-year 10-K Item 1A pairs, same filings <= 2025-06-30, same outcome: abnormal return from 2 trading days after filing to +63 trading days, same grouping by filing quarter, >= 30 filings per group).
+- **Signals (fixed):** T1 = change in the share of Item 1A words that are LM-negative versus the company's prior-year filing; score = -T1 (more negative tone predicts lower return). T2 = same with LM-uncertainty words; score = -T2.
+- **Pass line (trial-adjusted):** mean IC >= 0.02 and t >= 2.5 across >= 12 filing-year groups, positive in both halves of the sample period. Otherwise the tone idea is rejected; no variants (no level-of-tone, no other categories).
+- **Trials: 2 (counter -> 28).**
+
+### G5 RESULT — horizon-matched retest A1b (2026-10-04; `research/ml_cross_section_4q.py`; 37 test dates 2016-06..2025-06, 43k training rows by the end)
+
+| Model | 4-quarter mean IC | naive t | Newey-West t (lag 3) | Pass (IC >= 0.03 and NW t >= 2.5)? |
+|---|---|---|---|---|
+| HistGradientBoosting | **+0.060** | +2.62 | +1.72 | **No** |
+| Ridge | +0.048 | +1.81 | +1.20 | **No** |
+| Production composite, same dates | +0.015 | n/a | +0.45 | n/a |
+
+Best result of the sprint: the mean IC is 4x the composite's and clears 0.03, and the learned model beats the hand-built score at the horizon the classifier was labelled on. But the overlapping-window-corrected t-statistic does not reach 2.5, and yearly IC is unstable (2019 +0.21, 2021 -0.17, 2022 +0.22). Survivorship (size/value tilt) still flatters it. **Verdict: not promoted; "display-only" status stands.** It is the right challenger to follow live: freeze this model and feature set, and log its scores alongside the composite in the G6 live record so a clean out-of-sample record accrues. Trials: 26.
+
+### G5 — why the ML classifier is display-only, and the one fair retest (pre-registered 2026-10-04, BEFORE running)
+
+**Why display-only (already measured, EVALUATION.md section 4):** wiring it into the composite as a blended `ML_WEIGHT` moved leave-one-window-out accuracy 44.1% -> 44.8% (flat across weights 0-0.5); gating Sell/Buy calls on it moved accuracy -3.8, -15.8 and -1.4 points; held-out accuracy 45.2% and F1-macro 0.380 on 1,700 rows; its one real edge is OVERVALUED precision 31.0% vs 27.1%. Rule: a signal graduates from display-only only if it clears a pre-registered out-of-sample pass line. It has not. A1 (47k point-in-time rows, 1-quarter horizon) also missed it (IC +0.023, t 1.0).
+
+**Fair retest — horizon-matched (A1b):** the classifier's labels are 12-month outcomes, but A1 predicted 1 quarter. Same A1 features, models and walk-forward protocol (HistGradientBoosting and Ridge, fixed settings), but target and evaluation = next **4 quarters'** total return (cross-sectional rank), first test date 2016-06-30, training only on rows whose 4-quarter label was fully realised before each retrain date. Test dates overlap, so the t-statistic uses a Newey-West correction (lag 3). Pass: mean IC >= 0.03 AND Newey-West t >= 2.5. Trials: 2 (counter -> 26). If it passes, the classifier is re-trained on the EDGAR panel and re-tested in the composite under the same leave-one-window-out protocol before any wiring; if not, the "display-only" status is final.
+
+### G3 ROUND-2 RESULT (2026-10-04; `research/g3_round2.py`) — G3 DECLARED EXHAUSTED
+
+| Test | Result | Pass? |
+|---|---|---|
+| G3b: Buy&stable minus Buy&unstable | +0.78 pts/quarter, t = +1.60 (53 dates); halves -0.06 / +1.65; mean excess: stable +0.34, unstable -0.43, all Buy +0.10 %/qtr | **No** (t < 2.5, first half negative) |
+| G3c: composite IC without the top-|upside| quintile | +0.0113 (t +0.72); halves +0.0070 / +0.0157 | **No** |
+
+Reading: the stable-vs-unstable Buy gap is directionally sensible but not statistically distinguishable from noise and absent in 2012-18; removing the extreme-upside fifth does not rescue the ranking. The DCF's own uncertainty measures carry no reliable information about returns, in either shape of test. Both pre-registered rounds used; no further variants. Existing Monte Carlo / sensitivity flags remain informational (and the MC width adds nothing about realised risk beyond trailing volatility, partial corr +0.007). Trials: 24.
+
+### G3 DIAGNOSIS and ROUND-2 PRE-REGISTRATION (written 2026-10-04, BEFORE round 2 was run; `research/g3_diagnose.py`)
+
+**What went wrong in round 1 (measured):**
+1. **Stability is a proxy for extreme upside** (per-date Spearman with |upside|: S1 +0.58, S2 +0.72), and the most extreme-|upside| fifth of calls has IC **-0.019** (t -1.0), the other four fifths +0.007 to +0.020. High "conviction" = extrapolation artefacts, so confidence was measuring the wrong thing.
+2. **Wrong test shape:** round 1 measured rank IC *inside* each group. The between-group table shows something it could not see: among names the DCF calls cheap, stable ones returned +0.36% excess per quarter vs -0.55% for unstable (n = 11,574 vs 6,384); among names called rich, no difference (-0.09% vs +0.03%).
+3. **The Monte Carlo width is not a risk indicator beyond trailing volatility:** partial correlation with realised |move| after removing 252-day volatility = +0.007 (t 0.9); raw +0.027 against +0.249 for trailing volatility itself. The MC spread is model-internal parameter uncertainty, not information about the future price.
+
+**Round 2 (exactly two tests; if both fail, G3 is declared exhausted):**
+- **G3b — stability veto on Buy calls:** Buy = production rule (composite >= BUY_THRESHOLD). Per date, mean next-quarter excess return (vs the date mean) of Buy&stable (S1 >= 0.8) minus Buy&unstable. Pass: mean >= +0.5 pts/quarter, t >= 2.5 over >= 30 dates with >= 20 names in each group, AND positive in both 2012-18 and 2019-25.
+- **G3c — drop the extreme-conviction fifth:** composite IC on names outside the top-|upside| quintile of each date. Pass: IC >= 0.03, t >= 2.5, positive in both halves.
+- **Trials: 2 (counter -> 24).** Sealed holdout untouched.
+
+### G3 RESULT — DCF stability (2026-10-04; `research/pit_stability.py`, `research/g3_stability_ic.py`; 26,549 scored ticker-dates, 53 dates)
+
+| Measure | Stable group IC (t) | Unstable group IC (t) | Paired stable - unstable (t) | Pass? |
+|---|---|---|---|---|
+| S1 (Monte Carlo agrees with base verdict) | +0.006 (0.33) | +0.010 (0.56) | -0.004 (-0.19) | **No** |
+| S2 (sensitivity-grid agreement) | +0.007 (0.40) | +0.022 (1.08) | -0.018 (-0.84) | **No** |
+| S3 (MC prob_undervalued as a score) | +0.015 (0.95) | n/a | n/a | **No** |
+
+73% (S1) / 81% (S2) of calls are "stable". **The DCF's own confidence does not predict returns:** if anything the unstable calls do slightly better. Consequence: the existing confidence flags (Monte Carlo CI, sensitivity grid) stay what they already are — informational model-fragility indicators with no predictive claim; no new flag or abstention rule is justified. Trials: 22.
+
+### GAP-FILLING PROGRESS (2026-10-04)
+
+- **G1 survivorship:** confirmed unfixable with free data (Stooq blocked; yfinance returns 0 rows for TWTR, ATVI, CELG, SIVB). Handled by labelling every single-stock historical result an upper bound (EVALUATION.md) and by G6.
+- **G2 EDGAR fundamentals — BUILT:** `app/data/edgar_fundamentals.py` + fallback wiring in `MarketDataLoader` (`FUNDAMENTALS_SOURCE=auto|yfinance|edgar`, default auto = EDGAR only when yfinance's statements fail). 16 offline tests; 57 tests pass across the touched areas. Live check vs yfinance (AAPL, IBM, HD, 4 fiscal years): revenue, net income, operating cash flow and capex identical; shares within 0.2%; total debt gap 8-10% after adding lease liabilities (was 17-24%). Limit: if yfinance is down for company info too, `market_data_tool` still raises before statements are requested, so this covers statement-level failures and the forced-EDGAR mode, not a full yfinance outage.
+- **G3 DCF stability — TESTED TWICE, EXHAUSTED:** see G3 RESULT and G3 ROUND-2 RESULT.
+- **G4 Sell side — already covered:** reports already carry per-sector, per-rating calibrated accuracy (`calibrated_confidence.py`) and confidence flags (Monte Carlo CI, sensitivity grid, DCF/relative disagreement). No rating-logic change is justified by the evidence.
+- **G5 ML classifier — keep display-only:** A1 shows no significant edge even with 47k rows.
+- **G6 live record — BUILT:** `scripts/live_record.py` (`snapshot` appends a weekly, append-only score record; `evaluate` joins matured snapshots to realised returns and refuses to print a t-stat before 8 matured dates). 7 offline tests. Not yet scheduled: a GitHub-runner schedule would hit the yfinance datacenter throttle, so run `snapshot` from a machine you control (laptop or the droplet) and commit `live_record/snapshots.csv`.
+- **G7, G8 deferred.**
+
+### GAP-FILLING PLAN (user request 2026-10-04: go through every architecture entry, find the gap, fix it)
+
+| # | Component | Gap (measured) | Fix | Status |
+|---|---|---|---|---|
+| G1 | Data layer | Survivorship: 37% of 2012 S&P 500 members missing; Stooq blocked, yfinance has none of the acquired names (TWTR/ATVI/CELG/SIVB = 0 rows) so no free fix exists | Cannot be removed; bound it. Label every single-stock historical number an upper bound; prefer index-level tests; start the forward record (G6) | doc + G6 |
+| G2 | market_data_tool | yfinance: ~5 restated years, throttled, single point of failure | EDGAR as-filed fundamentals provider behind a flag (default off), yfinance fallback, tests | build |
+| G3 | valuation_tool | DCF verdict flips on small input changes | Stability measures from the existing Monte Carlo + sensitivity grid; test if stable calls predict better; surface a flag only if they do | test running |
+| G4 | Composite / Sell side | Bottom deciles no worse than the middle: Sell carries no information | Confidence labelling; no rating-logic change without evidence | check |
+| G5 | ML classifier | 1.5k rows; EDGAR panel gives 47k but A1 shows no significant edge | Keep display-only; document | doc |
+| G6 | news / consensus / everything untestable historically | No free historical data to validate; no survivorship-free evidence | Daily point-in-time score snapshots (forward record), immune to look-ahead and survivorship | build |
+| G7 | rag / sentiment | Never tested against returns | Tone-change test on the 1,548 downloaded filings; needs a word list download -> ask first | deferred |
+| G8 | Portfolio / paper trading | Vol-managed overlay cut drawdown 23-39% but no Sharpe gain | Optional risk-control view | deferred |
+
+### G3 PRE-REGISTRATION — DCF stability (written 2026-10-04, BEFORE the rerun)
+
+- **Run:** the same 984 tickers x 53 dates through the unchanged production scorer, now also capturing `valuation_results` (Monte Carlo statistics and the 5x5 WACC x terminal-growth sensitivity grid).
+- **Measures (fixed):** S1 = share of Monte Carlo draws on the same side of the market price as the base DCF verdict. S2 = share of the 25 sensitivity cells on the same side of the price as the base verdict. S3 = Monte Carlo `prob_undervalued` used directly as a score.
+- **Hypothesis:** calls the DCF itself is confident about carry more information. Test: split each date's names into stable (S >= 0.8) and unstable (S < 0.8); compare composite IC.
+- **Pass line:** stable-group IC >= 0.03, t >= 2.5 (>= 100 names/date and >= 30 dates with a stable group of >= 40 names) AND the paired stable minus unstable IC difference has t >= 2. S3 passes on the standard IC >= 0.03, t >= 2.5. Sealed holdout untouched.
+- **Trials:** S1, S2, S3 = 3 (counter -> 22).
+- **If it passes:** surface the flag (and abstain/lower confidence on unstable calls) in the product. **If not:** the flag may still ship as a clearly-labelled *uncertainty indicator* (it describes model fragility, not return prediction) but no claim of predictive value is made.
+
+### ALTERNATIVES PRE-REGISTRATION (written 2026-10-04, BEFORE either was run) — from the architecture review
+
+Why these two: the sprint showed the single hand-built score has no edge and that survivorship bias contaminates every single-stock test. A1 attacks the first with 17x more labelled, point-in-time data and a learned (not hand-weighted) combination; A2 sidesteps the second entirely by testing on an index (no delisted constituents), and targets what a "best returns" competition usually scores (risk-adjusted return, drawdown).
+
+**A1 — learned cross-sectional model on the EDGAR panel (Gu-Kelly-Xiu style, small).**
+- Rows: ticker x quarter-end 2012-06..2025-06 (sealed holdout untouched). Features (all point-in-time, rank-normalised per date, missing -> median): mom_12_1, 1-month return, 252-day volatility, log market cap, earnings yield, FCF yield, book/market, ROA, gross profitability, accruals ((net income - CFO)/assets), asset growth, revenue growth, leverage, plus the production dcf_score, relative_score and upside_pct, plus sector code.
+- Target: per-date percentile rank of next-quarter total return.
+- Models (fixed now, no tuning): (i) HistGradientBoostingRegressor(max_depth=3, learning_rate=0.05, max_iter=200, min_samples_leaf=200, l2_regularization=1.0); (ii) Ridge(alpha=10) as the linear baseline.
+- Walk-forward: first test date 2016-06-30 (>= 16 prior quarters); retrain every 4 quarters on all dates whose label was fully realised before the retrain date; no peeking, no hyperparameter search.
+- Pass line: mean out-of-sample rank IC >= 0.03 and t >= 2.5 (trial-adjusted), >= 100 names per date. Descriptive only: feature importance, comparison with the production composite's IC on the same dates, top-minus-bottom decile spread.
+- Trials: 2 (counter -> 17).
+
+**A2 — volatility-managed and trend-filtered S&P 500 exposure (Moreira-Muir; classic trend rule).**
+- Data: ^GSPC daily 2007-01 onward, ^IRX for cash return. Price-return basis for both strategy and benchmark (no dividends, so the comparison is like-for-like).
+- A2a vol-managed: at each month-end, exposure = min(1.0, 15% / realised annualised vol of the last 21 trading days); remainder in cash; no leverage. A2b trend: exposure 1.0 if close > 200-day average at month-end, else 0 (cash). Cost 5 bps per unit of exposure change. Benchmark: buy-and-hold ^GSPC.
+- Pass line (must hold in BOTH 2007-2015 and 2016-2025 and after costs): Sharpe >= benchmark + 0.10 AND max drawdown at least 20% shallower (relative).
+- Trials: 2 (counter -> 19).
+
+### FIX-CANDIDATE RESULT (2026-10-04; `research/fix_candidates.py`; development only, sealed holdout untouched)
+
+| Candidate | Pooled IC | t | Segment A (2012-18) | Segment B (2019-25) | 4q IC (desc.) | Pass? |
+|---|---|---|---|---|---|---|
+| Baseline composite | +0.011 | 0.62 | -0.004 | +0.026 | +0.024 | n/a |
+| 1. DCF rank (no saturation) | +0.012 | 0.71 | -0.004 | +0.027 | +0.024 | **No** |
+| 2a. composite + momentum | +0.006 | 0.47 | +0.002 | +0.011 | +0.014 | **No** |
+| 2b. composite + ROA | +0.001 | 0.09 | -0.014 | +0.017 | +0.003 | **No** |
+| 2c. composite + momentum + ROA | +0.002 | 0.12 | -0.005 | +0.008 | +0.001 | **No** |
+| 3. regime gate (ON dates) | +0.012 | 0.52 | -0.020 | +0.026 | +0.023 | **No** |
+
+- **Candidate 1:** removing saturation changes nothing (IC +0.0115 vs +0.0106). The DCF's full ordering carries no more information than its clipped score, so the "saturated extremes" explanation is rejected. A full DCF re-run with capped growth is not justified: the proxy says the ordering itself is uninformative.
+- **Candidate 2:** adding momentum/quality makes it WORSE (consistent with P3, where multi_factor was -0.025). Fixing "value traps" with the factors we have does not work on this universe.
+- **Candidate 3:** the gate is uninformative: the value spread trended up (0.05 in 2014 -> 0.095 in 2022-23), so the signal is ON for 37 of 41 testable dates; spread-vs-IC correlation +0.07; OFF-date IC -0.025 on only 4 dates. Not a falsification of regime timing in principle (a detrended spread would be a new trial), but this definition does not work.
+- **Candidate 4:** needs no pass line; it is the only fix that does not depend on the data. Implemented separately (README / EVALUATION.md / report disclosure).
+- **Verdict:** none of the three testable fixes works. Trials: 15.
+
+### FIX-CANDIDATE PRE-REGISTRATION (written 2026-10-04, BEFORE any candidate was scored)
+
+Goal: find out which of the four fixes would actually work before building anything. Data: `p2b_scores.csv` (EDGAR-fed production scores, 53 quarterly dates) + P3 factors. Outcome: next-quarter total return. Nothing is re-tuned: every definition below is fixed now; there are no parameters to fit.
+
+- **Candidate 1 (robust DCF, cheap proxy):** `dcf_rank` = per-date percentile rank of raw `upside_pct` (removes the +/-100 saturation and tie block at the top, keeps full ordering). A true re-run of the DCF with capped growth / averaged margins is only worth the ~45-minute run if this proxy shows the DCF ordering carries information.
+- **Candidate 2 (quality/trend filter):** 2a = mean of per-date percentile ranks of `composite_score` and `mom_12_1`; 2b = same with `roa`; 2c = mean of all three. Equal weights.
+- **Candidate 3 (regime gate):** value spread on date T = mean (earnings_yield + fcf_yield) of the top quintile of `composite_score` minus that of the bottom quintile... see below. ON if the spread is above its expanding median of all PRIOR dates (needs >= 12 prior dates); score the unchanged composite on ON dates only.
+  - Spread definition: median `earnings_yield` of the cheapest 20% of stocks (by `valuation_only`) minus median `earnings_yield` of the most expensive 20%.
+- **Candidate 4 (change the claim):** not testable with data; it is a product-honesty decision.
+- **Trials:** 1 + 3 + 1 = **5 new, counter -> 15.**
+- **Evaluation:** Spearman IC vs next-quarter return per date, >= 100 names. Segment A = 2012-06..2018-12, Segment B = 2019-03..2025-06 (sealed holdout untouched).
+- **Pass line (raised because 5 candidates are tested at once):** pooled mean IC >= 0.03 AND t >= 2.5 AND positive mean IC in BOTH segments. For Candidate 3: ON-date mean IC >= 0.03, t >= 2.5, positive in both segments, and at least 15 ON dates.
+- **Baseline to beat:** composite IC +0.011 (t 0.62). Descriptive only (not eligible to pass): 4-quarter-horizon IC.
+- **Rule:** if nothing passes, nothing is built into the scoring; the product change is Candidate 4 (disclosure), which needs no pass line.
 
 ### WHY THE COMPOSITE FAILS — diagnosis (2026-10-04; `research/why_composite_fails.py`; diagnostic only, no trials added)
 

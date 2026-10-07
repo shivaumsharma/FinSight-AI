@@ -16,6 +16,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from research import delisting  # noqa: E402
 from research.pit_panel import annual_rows, load_facts  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent
@@ -74,8 +75,10 @@ def factors_at(data, date):
     adj, close = data["adj"], data["close"]
     pos = adj.index.get_loc(date)
     tickers = adj.columns
-    p_now, p_m1, p_m12 = adj.iloc[pos], adj.iloc[pos - 21], adj.iloc[pos - 252]
+    stale = delisting.stale_tickers(date, tickers)  # delisted names carry their last price forward: never score from it
+    p_now, p_m1, p_m12 = adj.iloc[pos].where(~stale), adj.iloc[pos - 21], adj.iloc[pos - 252]
     window = adj.iloc[pos - 252: pos + 1].pct_change(fill_method=None)
+    window.loc[:, stale.reindex(window.columns).fillna(False).values.astype(bool)] = np.nan  # delisted: no volatility from carried prices
 
     out = pd.DataFrame(index=tickers)
     out["mom_12_1"] = (p_m1 / p_m12 - 1).where(p_now.notna())
