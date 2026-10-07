@@ -678,6 +678,24 @@ export interface PortfolioAnalysis {
   unresearched_tickers: string[];
 }
 
+// GET /v1/portfolio/risk-overlay's response (app/analysis/vol_overlay.py): a volatility-targeting risk view of the user's
+// self-reported holdings. Drawdown protection, not a return forecast -- `evidence.takeaway` and `disclaimer` say so and the
+// card must always show them. `available: false` carries a plain-language `reason` instead of numbers.
+export interface PortfolioRiskOverlay {
+  available: boolean;
+  reason?: string;
+  realised_volatility_pct?: number;
+  target_volatility_pct?: number;
+  suggested_exposure_pct?: number;
+  suggested_cash_pct?: number;
+  max_drawdown_in_window_pct?: number;
+  window_days?: number;
+  evidence?: { market: string; takeaway: string; max_drawdown_cut: Record<string, string>; sharpe: Record<string, string> };
+  disclaimer?: string;
+  excluded_tickers?: string[];
+  holdings_used?: string[];
+}
+
 // POST /v1/orders' response shape -- a simulated market order's
 // instant fill. NO real broker, NO real money -- see
 // db.execute_order's own docstring for the full boundary explanation.

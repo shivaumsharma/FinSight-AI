@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import RatingBadge from "./RatingBadge";
 import SectionSkeleton from "./SectionSkeleton";
+import PortfolioRiskCard from "./PortfolioRiskCard";
 import { currencySymbol } from "@/lib/currency";
 import { PORTFOLIO_UPDATED_EVENT, notifyPortfolioUpdated } from "@/lib/portfolioEvents";
 import type { CompanySuggestion, PortfolioAnalysis, PortfolioHolding, PortfolioSummary } from "@/lib/types";
@@ -263,6 +264,8 @@ export default function Portfolio() {
           </div>
         </div>
       )}
+
+      {holdings.length > 0 && <PortfolioRiskCard />}
 
       {holdings.length > 0 && (
         <div className="mt-2 flex flex-col gap-2">
