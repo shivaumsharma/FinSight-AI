@@ -19,7 +19,7 @@ A signal-and-portfolio system that earns **positive, believable, out-of-sample**
 3. **Kill gates:** each new signal has a written pass/fail line. If it fails on the development period, it is dropped, not tuned.
 4. **Controls first:** every new signal must beat, or add to, the boring proven factors (P3), not merely look good alone.
 
-**TRIALS so far (this sprint):** 34 (7 from P3; 1 from P4; 2 sector-neutral; 5 fix candidates; 4 alternatives; 3 DCF-stability measures; 2 round-2 stability tests; 2 horizon-matched ML tests; 2 filing-tone tests; 2 share-issuance tests; 3 earnings-surprise tests; 1 portfolio view of the learned model)
+**TRIALS so far (this sprint):** 38 (7 from P3; 1 from P4; 2 sector-neutral; 5 fix candidates; 4 alternatives; 3 DCF-stability measures; 2 round-2 stability tests; 2 horizon-matched ML tests; 2 filing-tone tests; 2 share-issuance tests; 3 earnings-surprise tests; 1 portfolio view of the learned model; 4 insider-purchase tests)
 
 ## SCOPE UPDATE (user, 2026-10-04) — supersedes the decisions below where they conflict
 
@@ -126,6 +126,32 @@ Net share issuance adds essentially nothing on top of the existing features (the
 - **What the four seed statements said (the only independent content):** retail investors like the honesty; skeptics and quants say 38.6% directional accuracy undermines usefulness; journalists will focus on credibility.
 - **Control (one direct call to the same model):** produced distinct per-audience praise, criticism, adopt/not and what-would-make-them-pay, plus a single most damaging objection (the 27% Sell accuracy and 38.6% directional accuracy), in about a minute. **The swarm added nothing over one prompt.**
 - **Verdict:** not usable as an indicator of what real people feel (the opinions are model-generated and unvalidated) and not worth its cost over a single prompt; keep a single-prompt "synthetic audience" only as a brainstorming aid, and get 5-10 real users for actual evidence. Not tested as a stock-sentiment indicator (it cannot be backtested: P7 look-ahead; the only fair test is the forward live record). Services stopped; restart with the paths in the sandbox if wanted.
+
+### INSIDER RESULT — open-market purchases by officers/directors (2026-10-07; `research/insider_pull.py`, `insider_ic.py`, `ml_cross_section_4q_insider.py`; 342,823 purchases, 8,617 issuers, 2012-01 to 2025-06)
+
+| Test | Result | Pass? |
+|---|---|---|
+| I1 purchase value / market cap, vs next-quarter return (53 dates; 25% of stock-dates have a purchase in the prior 180 days) | mean IC **+0.0105**, t +1.32, positive 51%, halves +0.011 / +0.010 | **No** |
+| I2 number of distinct insider buyers | mean IC **+0.0078**, t +1.04, halves +0.006 / +0.010 | **No** |
+| (descriptive) stocks WITH a purchase minus WITHOUT, next quarter | **+0.04%/qtr**, t +0.10 | n/a |
+| I1+I2 as features in the learned 4-quarter model, HistGradientBoosting | +0.0472 vs +0.0519 without (worse), Newey-West t 1.36 | **No** |
+| Same, Ridge | +0.0461 vs +0.0453 (+0.0008), Newey-West t 1.18 | **No** |
+
+Reading: right-signed but statistically empty in this mid/large-cap universe; the insider effect documented in the literature is concentrated in small/illiquid stocks and in larger "cluster" purchases than a simple 180-day aggregate captures. **Rejected as specified.** 13F holdings changes: dropped (needs a CUSIP-to-ticker map not available free), recorded as not attempted, not as tested. Trials: 38. **All four candidate "new-scope" signals (share issuance, earnings surprise, insider purchases; 13F untested) are now closed: none improves on the learned model's baseline.**
+
+### INSIDER PRE-REGISTRATION — open-market insider purchases (written 2026-10-07, BEFORE any insider data was downloaded)
+
+- **Idea:** executives and directors buying their own company's stock with their own money has been associated with higher later returns for decades (e.g. Lakonishok & Lee 2001; Jeng, Metrick & Zeckhauser 2003). Free, date-stamped data: SEC's bulk "Insider Transactions Data Sets" (Forms 3/4/5, 2012Q1-2025Q2 only, about 540 MB; nothing from the sealed holdout period is downloaded).
+- **Definition (fixed):** an open-market purchase = transaction code `P`, acquired, on Form 4 (or 4/A), by a reporting owner flagged Officer or Director, price > 0, value = shares x price. At each test date T use filings dated within the 180 days BEFORE T.
+- **Signals (fixed):** I1 = total purchase value / market cap at T. I2 = number of distinct insiders who bought (cluster buying). Stocks with no purchase get 0.
+- **Tests (fixed):** I1-q and I2-q: per-quarter Spearman IC vs next-quarter return, 53 dates, >= 100 names; pass = mean IC >= 0.02, t >= 2.5, positive in both halves (2012-18, 2019-25). I1-f and I2-f: both added as features to the A1b protocol (HistGradientBoosting and Ridge; 4-quarter target); pass = the A1b bar (IC >= 0.03 and Newey-West t >= 2.5); descriptive: change in IC versus A1b on the same data. Also descriptive: average next-quarter return of stocks with any purchase vs none.
+- **Trials: 4 (counter -> 38).** Holdout untouched. 13F holdings changes are NOT attempted: they need a CUSIP-to-ticker map that is not available free, and the signal is weak in this universe; recorded as dropped, not as tested.
+
+### FROZEN MODEL (2026-10-07; `research/freeze_model.py`) — the learned 4-quarter model, locked
+
+- Trained exactly as the last walk-forward retrain: every row whose 4-quarter label was fully realised by 2025-06-30 (**46,323 rows, dates 2012-06-29 to 2024-06-28**), HistGradientBoosting (max_depth 3, learning_rate 0.05, 200 iterations, min_samples_leaf 200, l2 1.0, seed 0) and Ridge (alpha 10); 28 columns (16 rank-normalised base features + sector dummies); target = per-date percentile rank of the next-4-quarter return.
+- **File `research/data/frozen_model_2025-06-30.joblib`, SHA-256 `ec8b1e25e19ca3d803b2fe157419ff9600a09b1b29ea9c60a1cdb1261507791d`.** It reproduces the walk-forward predictions for 2025-06-30 with correlation 1.000000 across 1,000 stocks.
+- Rule: no retuning, refitting or feature changes before the holdout / live evaluation; any change creates a NEW model with a new hash and a new trial. The sealed holdout (dates after 2025-06-30) is still unopened.
 
 ### P8/P9/P11 — PORTFOLIO CHECK of the learned 4-quarter model (2026-10-05; `research/learned_portfolio.py`; DESCRIPTIVE, development data only; trials counted: 34)
 
