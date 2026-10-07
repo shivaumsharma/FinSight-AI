@@ -19,7 +19,7 @@ A signal-and-portfolio system that earns **positive, believable, out-of-sample**
 3. **Kill gates:** each new signal has a written pass/fail line. If it fails on the development period, it is dropped, not tuned.
 4. **Controls first:** every new signal must beat, or add to, the boring proven factors (P3), not merely look good alone.
 
-**TRIALS so far (this sprint):** 38 (7 from P3; 1 from P4; 2 sector-neutral; 5 fix candidates; 4 alternatives; 3 DCF-stability measures; 2 round-2 stability tests; 2 horizon-matched ML tests; 2 filing-tone tests; 2 share-issuance tests; 3 earnings-surprise tests; 1 portfolio view of the learned model; 4 insider-purchase tests)
+**TRIALS so far (this sprint):** 39 (7 from P3; 1 from P4; 2 sector-neutral; 5 fix candidates; 4 alternatives; 3 DCF-stability measures; 2 round-2 stability tests; 2 horizon-matched ML tests; 2 filing-tone tests; 2 share-issuance tests; 3 earnings-surprise tests; 1 portfolio view of the learned model; 4 insider-purchase tests; 1 data-completeness test)
 
 ## SCOPE UPDATE (user, 2026-10-04) — supersedes the decisions below where they conflict
 
@@ -126,6 +126,44 @@ Net share issuance adds essentially nothing on top of the existing features (the
 - **What the four seed statements said (the only independent content):** retail investors like the honesty; skeptics and quants say 38.6% directional accuracy undermines usefulness; journalists will focus on credibility.
 - **Control (one direct call to the same model):** produced distinct per-audience praise, criticism, adopt/not and what-would-make-them-pay, plus a single most damaging objection (the 27% Sell accuracy and 38.6% directional accuracy), in about a minute. **The swarm added nothing over one prompt.**
 - **Verdict:** not usable as an indicator of what real people feel (the opinions are model-generated and unvalidated) and not worth its cost over a single prompt; keep a single-prompt "synthetic audience" only as a brainstorming aid, and get 5-10 real users for actual evidence. Not tested as a stock-sentiment indicator (it cannot be backtested: P7 look-ahead; the only fair test is the forward live record). Services stopped; restart with the paths in the sandbox if wanted.
+
+### FIX 1 RESULT — data completeness vs. ranking skill (2026-10-08; `research/data_quality_ic.py`; 37 test dates; trial 39)
+
+| Model | Complete inputs IC (NW t) | Incomplete inputs IC (NW t) | Complete − incomplete (NW t) |
+|---|---|---|---|
+| HistGradientBoosting | +0.0383 (1.45) | +0.0571 (1.55) | −0.0189 (−0.54) |
+| Ridge | +0.0403 (1.33) | +0.0471 (1.09) | −0.0068 (−0.20) |
+
+Only 29.9% of stock-dates have all 16 features. **FAIL against the pre-registered line** (complete bucket +0.02 higher, t >= 2.0): the sign is the wrong way and neither difference is distinguishable from zero. Missing inputs do not make the learned model rank worse, so the data-quality flag ships as a disclosure only and its UI text says so. The learned model handles missing values by filling with the cross-sectional median, which is probably why completeness does not matter to it; this says nothing about the DCF-based rating, which has no equivalent test.
+
+### FIX 2 CALIBRATION — risk range (2026-10-08; `research/risk_range_calibration.py`; all quarter-end dates, 2007-2025, survivors + 98 former members)
+
+The 10th-90th percentile range from trailing one-year volatility should contain the realised price 80% of the time. Measured: **81.7% at one quarter** (10.3% of outcomes above, 7.9% below; 68,630 stock-dates, 73 dates) and **81.5% at one year** (13.4% above, 5.2% below). Calibrated on average, but it fails in crises: the worst single date had **17.5%** coverage at one quarter (52.7% at one year), so a market-wide shock sends most stocks outside the band together. The UI note says a large shock can fall outside it. Survivorship leaves a small upward bias in the realised side.
+
+### TOOL ABLATION — one common baseline (2026-10-08; `research/tool_ablation.py`; 37 test dates 2016-06..2025-06; survivorship-corrected; no new trials)
+
+Baseline = the learned 4-quarter model with its 16 base features. Each row adds one candidate input and re-runs the identical walk-forward.
+
+| Added input | HGB IC | Change vs base (NW t) | HGB top-decile net excess, pts/qtr | Ridge IC | Change vs base (NW t) |
+|---|---|---|---|---|---|
+| (baseline) | +0.0519 (NW t 1.57) | — | +1.50 | +0.0453 (1.15) | — |
+| Share issuance | +0.0562 | +0.0043 (1.38) | +1.42 | +0.0474 | +0.0020 (0.77) |
+| Earnings surprise (SUE) | +0.0519 | −0.0000 (−0.00) | +1.21 | +0.0453 | −0.0000 (−0.01) |
+| Insider purchases | +0.0472 | −0.0047 (−0.62) | +1.41 | +0.0461 | +0.0008 (0.94) |
+| All three | +0.0494 | −0.0025 (−0.33) | +1.33 | +0.0485 | +0.0032 (0.78) |
+
+No addition changes the model by more than 0.005 IC and none has a t above 1.4, so each is indistinguishable from nothing. Coverage of the new inputs: issuance 92% of rows, SUE 85%, insider purchases 24%. The baseline reproduces the frozen model's earlier numbers exactly.
+
+### FIX 4 RESULT — base rate beside accuracy (2026-10-08; `app/reporting/calibrated_confidence.py`)
+
+Pooled 12-month backtest, all sectors: Buy right 57.3% vs 58.4% if every stock were called Buy (−1.1 pts); Sell 27.1% vs 28.0% (−0.9); Hold 15.9% vs 13.6% (+2.4). Reports now show both numbers and the edge.
+
+### FIX 1 PRE-REGISTRATION — does input-data completeness predict how well the learned model ranks? (written 2026-10-08, BEFORE it was run; `research/data_quality_ic.py`; development data only, holdout untouched)
+
+- **Question:** the report now shows a data-quality score and a "no view" flag (`app/analysis/data_quality.py`). Is that flag justified by outcomes, i.e. is the learned 4-quarter model's rank IC lower where inputs are less complete?
+- **Definition (fixed now):** per stock-date, completeness = share of the 16 base model features that are present before filling. Buckets: complete (all 16) vs incomplete (any missing). Walk-forward predictions are the unchanged A1b model. Mean rank IC of each bucket per date (4-quarter horizon), Newey-West t on the paired difference (complete minus incomplete).
+- **Pass line:** complete bucket IC at least 0.02 higher with paired NW t >= 2.0. Anything less means the flag is a disclosure about missing inputs, not a proven accuracy filter, and the UI wording must say so.
+- **Trial counter: 39** (one new definition). The ablation (`research/tool_ablation.py`) and risk-range calibration (`research/risk_range_calibration.py`) re-use already-counted definitions or measure a quantity with a stated 80% target; neither is a new trial.
 
 ### SEALED HOLDOUT — RESULT (2026-10-07; `research/holdout_run.py eval`; ONE-SHOT, NOW CONSUMED; frozen-model SHA-256 verified before use)
 
