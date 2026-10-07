@@ -421,7 +421,7 @@ export default function ReportView({
       <p className="mt-2 text-xs text-muted">{rec.basis}</p>
       {rec.confidence_flag && (
         <div className="mt-2 rounded-lg border border-amber-900/60 bg-amber-950/40 px-3 py-2 text-xs text-warn">
-          <strong>Low-confidence signal:</strong> {rec.confidence_flag}
+          <strong>Sensitivity to assumptions:</strong> {rec.confidence_flag}
         </div>
       )}
       <SignalQualityBlock signalQuality={rd.signal_quality} />

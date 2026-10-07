@@ -210,7 +210,7 @@ def build_pdf_report(report_data: dict) -> bytes:
         }))
     if recommendation.get("confidence_flag"):
         story.append(Paragraph(
-            f'<font color="#9a6700"><b>Low-confidence signal:</b></font> {recommendation["confidence_flag"]}',
+            f'<font color="#9a6700"><b>Sensitivity to assumptions:</b></font> {recommendation["confidence_flag"]}',
             _BODY_STYLE,
         ))
 
@@ -472,7 +472,7 @@ def build_pdf_report(report_data: dict) -> bytes:
     ))
     if recommendation.get("confidence_flag"):
         story.append(Paragraph(
-            f'<font color="#9a6700"><b>Low-confidence signal:</b></font> {recommendation["confidence_flag"]}',
+            f'<font color="#9a6700"><b>Sensitivity to assumptions:</b></font> {recommendation["confidence_flag"]}',
             _BODY_STYLE,
         ))
 

@@ -285,7 +285,7 @@ MARKET: Current price {market['current_price']}
 MANAGEMENT SENTIMENT (from SEC filing tone): {market['sentiment_label']} ({market['sentiment_confidence']})
 MARKET/MEDIA SENTIMENT (from recent news tone): {market['news_sentiment_label']} ({market['news_sentiment_confidence']})
 DETERMINED RECOMMENDATION: {recommendation['rating']} -- {recommendation['basis']}
-{"CONFIDENCE CAVEAT: " + recommendation["confidence_flag"] if recommendation.get("confidence_flag") else ""}
+{"ASSUMPTION-SENSITIVITY CAVEAT (describes how fragile the valuation is to its inputs, not how likely it is to be right): " + recommendation["confidence_flag"] if recommendation.get("confidence_flag") else ""}
 {_growth_divergence_block(growth)}
 {_earnings_proximity_block(market.get('next_earnings_date'))}
 
