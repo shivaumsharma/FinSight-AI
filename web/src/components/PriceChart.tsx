@@ -67,6 +67,11 @@ export default function PriceChart({ ticker, currency }: { ticker: string; curre
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const overlaySeriesRef = useRef<Partial<Record<OverlayKey, ISeriesApi<"Line">[]>>>({});
+  // True from "new data applied" until the user pans/zooms: while set, every
+  // size change re-fits. autoSize settles asynchronously (and the chart is
+  // recreated when theme colors resolve), so the first fit can happen at a
+  // not-yet-final width and leave the bars squeezed against one edge.
+  const autoFitRef = useRef(true);
 
   const [range, setRange] = useState<Range>("1y");
   const [data, setData] = useState<TechnicalsResponse | null>(null);
@@ -80,12 +85,22 @@ export default function PriceChart({ ticker, currency }: { ticker: string; curre
   const borderColor = useThemeColor("--border-subtle", "#131a22");
 
   useEffect(() => {
+    // Guards against a slow earlier response (e.g. 5Y) landing after a
+    // later one (e.g. 1M) and overwriting it when ranges are clicked fast.
+    let stale = false;
     setData(null);
     setError(false);
     fetch(`/api/stock/${encodeURIComponent(ticker)}/technicals?range=${range}`)
       .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then(setData)
-      .catch(() => setError(true));
+      .then((d) => {
+        if (!stale) setData(d);
+      })
+      .catch(() => {
+        if (!stale) setError(true);
+      });
+    return () => {
+      stale = true;
+    };
   }, [ticker, range]);
 
   // Chart creation -- once per mount, torn down on unmount. Colors are
@@ -110,11 +125,23 @@ export default function PriceChart({ ticker, currency }: { ticker: string; curre
     });
     volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
+    chart.timeScale().subscribeSizeChange(() => {
+      if (autoFitRef.current) chart.timeScale().fitContent();
+    });
+    const stopAutoFit = () => {
+      autoFitRef.current = false;
+    };
+    const el = containerRef.current;
+    el.addEventListener("pointerdown", stopAutoFit);
+    el.addEventListener("wheel", stopAutoFit, { passive: true });
+
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
 
     return () => {
+      el.removeEventListener("pointerdown", stopAutoFit);
+      el.removeEventListener("wheel", stopAutoFit);
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
@@ -170,6 +197,7 @@ export default function PriceChart({ ticker, currency }: { ticker: string; curre
       ];
     }
 
+    autoFitRef.current = true;
     chart.timeScale().fitContent();
   }, [data, visibleOverlays, accent, danger, dim]);
 
@@ -217,13 +245,24 @@ export default function PriceChart({ ticker, currency }: { ticker: string; curre
         ))}
       </div>
 
-      <div className="mt-2 rounded-lg border border-border bg-card px-2 py-2">
+      {/* The chart container is ALWAYS rendered at full size. It used to be
+          display:none until data arrived, so lightweight-charts was created
+          at width 0 and fitContent() ran before it had measured itself,
+          leaving the candles squeezed into the right edge on first load.
+          Loading/error/empty states are overlays instead. */}
+      <div className="relative mt-2 rounded-lg border border-border bg-card px-2 py-2">
+        <div ref={containerRef} className="h-[320px] w-full" />
         {error ? (
-          <p className="py-10 text-center font-mono text-[11px] text-dim">Couldn&apos;t load price history for this ticker.</p>
+          <p className="absolute inset-0 grid place-items-center bg-card px-4 text-center font-mono text-[11px] text-dim">
+            Couldn&apos;t load price history for this ticker.
+          </p>
         ) : !data ? (
-          <div className="h-[320px] animate-pulse rounded bg-card/60" />
+          <div className="absolute inset-2 animate-pulse rounded bg-card/60" />
+        ) : data.price_history.length === 0 ? (
+          <p className="absolute inset-0 grid place-items-center bg-card px-4 text-center font-mono text-[11px] text-dim">
+            No price history available for this range.
+          </p>
         ) : null}
-        <div ref={containerRef} className={data && !error ? "h-[320px] w-full" : "hidden"} />
       </div>
       <p className="mt-1 font-mono text-[9px] text-dim">Currency: {currency}. Daily bars -- intraday (1D/1W) ranges aren&apos;t available.</p>
     </div>

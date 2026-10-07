@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import AuthGate from "@/components/AuthGate";
 import BottomNav from "@/components/BottomNav";
+import LoadError from "@/components/LoadError";
 import type { IndexQuote } from "@/lib/types";
 
 // Full-size version of the home page's IndicesCarousel strip, split
@@ -13,13 +14,21 @@ import type { IndexQuote } from "@/lib/types";
 export default function IndicesPage() {
   const [indices, setIndices] = useState<IndexQuote[] | null>(null);
   const [tab, setTab] = useState<"global" | "india">("global");
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+
+  function retry() {
+    setFailed(false);
+    setIndices(null);
+    setAttempt((a) => a + 1);
+  }
 
   useEffect(() => {
     fetch("/api/market/indices")
-      .then((r) => (r.ok ? r.json() : { indices: [] }))
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((data) => setIndices(data.indices))
-      .catch(() => setIndices([]));
-  }, []);
+      .catch(() => setFailed(true));
+  }, [attempt]);
 
   const shown = (indices || []).filter((idx) => idx.region === tab);
 
@@ -47,6 +56,8 @@ export default function IndicesPage() {
                 </button>
               ))}
             </div>
+
+            {failed && <LoadError what="indices" onRetry={retry} />}
 
             {indices !== null && (
               <div className="mt-3 flex flex-col gap-2">
