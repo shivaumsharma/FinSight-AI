@@ -922,9 +922,7 @@ async def price_stream(websocket: WebSocket):
 
     async def sender():
         while True:
-            try:
-                await asyncio.wait_for(client.ready.wait(), timeout=PRICE_STREAM_HEARTBEAT_SECONDS)
-            except asyncio.TimeoutError:
+            if not await price_hub.wait_for_event(client.ready, PRICE_STREAM_HEARTBEAT_SECONDS):
                 await websocket.send_json({"type": "hb"})
                 continue
             ticks = client.take()
