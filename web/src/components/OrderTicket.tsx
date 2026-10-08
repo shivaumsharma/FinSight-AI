@@ -126,7 +126,7 @@ export default function OrderTicket() {
         <button
           type="button"
           onClick={() => setShowForm((s) => !s)}
-          className="font-mono text-[10px] font-bold text-muted hover:text-accent"
+          className="-my-2 inline-block py-2 font-mono text-[10px] font-bold text-muted hover:text-accent"
         >
           {showForm ? "CANCEL" : "+ NEW ORDER"}
         </button>

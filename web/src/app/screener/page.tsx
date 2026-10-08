@@ -15,7 +15,7 @@ export default function ScreenerPage() {
       {() => (
         <div className="min-h-screen bg-bg pb-safe-20">
           <div className="mx-auto max-w-2xl px-5 py-8">
-            <Link href="/" className="font-mono text-xs font-bold text-muted hover:text-accent">
+            <Link href="/" className="-my-2 inline-block py-2 font-mono text-xs font-bold text-muted hover:text-accent">
               &larr; HOME
             </Link>
             <h1 className="mt-3 font-mono text-lg font-bold text-text">Screener</h1>

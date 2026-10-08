@@ -60,9 +60,9 @@ describe("WatchlistRow", () => {
   it("removes by ticker, and a demo row has no remove button", () => {
     const onRemove = vi.fn();
     const { rerender } = render(<WatchlistRow item={item()} onRemove={onRemove} />);
-    fireEvent.click(screen.getByTitle("Remove from watchlist"));
+    fireEvent.click(screen.getByRole("button", { name: "Remove AAPL from watchlist" }));
     expect(onRemove).toHaveBeenCalledWith("AAPL");
     rerender(<WatchlistRow item={item()} isDemo onRemove={onRemove} />);
-    expect(screen.queryByTitle("Remove from watchlist")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove AAPL from watchlist" })).not.toBeInTheDocument();
   });
 });

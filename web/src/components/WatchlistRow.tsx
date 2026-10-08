@@ -54,7 +54,8 @@ function WatchlistRow({ item, isDemo = false, onRemove }: Props) {
             type="button"
             onClick={() => onRemove?.(item.ticker)}
             title="Remove from watchlist"
-            className="ml-3 font-mono text-xs text-dim hover:text-danger"
+            aria-label={`Remove ${item.ticker} from watchlist`}
+            className="-my-2 -mr-2 ml-1 flex h-9 w-9 items-center justify-center font-mono text-xs text-dim hover:text-danger"
           >
             &times;
           </button>

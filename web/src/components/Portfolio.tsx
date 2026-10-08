@@ -199,7 +199,7 @@ export default function Portfolio() {
         <button
           type="button"
           onClick={() => setShowForm((s) => !s)}
-          className="font-mono text-[10px] font-bold text-muted hover:text-accent"
+          className="-my-2 inline-block py-2 font-mono text-[10px] font-bold text-muted hover:text-accent"
         >
           {showForm ? "CANCEL" : "+ ADD HOLDING"}
         </button>
@@ -350,7 +350,7 @@ export default function Portfolio() {
             type="button"
             onClick={seedSampleData}
             disabled={seeding}
-            className="shrink-0 font-mono text-[10px] font-bold text-muted hover:text-accent disabled:opacity-50"
+            className="-my-2 shrink-0 py-2 font-mono text-[10px] font-bold text-muted hover:text-accent disabled:opacity-50"
           >
             {seeding ? "LOADING..." : "TRY SAMPLE DATA"}
           </button>
