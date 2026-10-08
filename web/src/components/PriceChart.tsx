@@ -12,6 +12,7 @@ import {
   createChart,
 } from "lightweight-charts";
 import ConnectionBanner from "./ConnectionBanner";
+import { ChartFrame } from "./ui";
 import { applyTickToBar, type Bar } from "@/lib/liveCandle";
 import { useLivePrices } from "@/lib/livePrices";
 
@@ -232,17 +233,24 @@ export default function PriceChart({ ticker, currency }: { ticker: string; curre
     });
   }
 
+  const chartState = error ? "error" : !data ? "loading" : data.price_history.length === 0 ? "empty" : "ready";
+
+  // The chart container is always rendered at full size (ChartFrame draws loading/error/empty on top of it): with
+  // display:none until data arrived, lightweight-charts was created at width 0 and the candles ended up squeezed
+  // against the right edge on first load.
   return (
-    <div className="mt-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-mono text-[10px] tracking-wide text-dim">
+    <ChartFrame
+      title={
+        <>
           PRICE CHART
           {live.status === "live" && (
             <span className="ml-2 text-accent" data-testid="chart-live">
               ● LIVE
             </span>
           )}
-        </p>
+        </>
+      }
+      controls={
         <div className="flex gap-1 rounded-lg border border-border bg-card p-0.5">
           {RANGES.map((r) => (
             <button
@@ -257,45 +265,30 @@ export default function PriceChart({ ticker, currency }: { ticker: string; curre
             </button>
           ))}
         </div>
-      </div>
-
-      <ConnectionBanner status={live.status} />
-
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {OVERLAY_TOGGLES.map((o) => (
-          <button
-            key={o.key}
-            type="button"
-            onClick={() => toggleOverlay(o.key)}
-            className={`rounded border px-2 py-0.5 font-mono text-[10px] font-bold ${
-              visibleOverlays.has(o.key) ? "border-accent text-accent" : "border-border text-dim hover:text-muted"
-            }`}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
-
-      {/* The chart container is ALWAYS rendered at full size. It used to be
-          display:none until data arrived, so lightweight-charts was created
-          at width 0 and fitContent() ran before it had measured itself,
-          leaving the candles squeezed into the right edge on first load.
-          Loading/error/empty states are overlays instead. */}
-      <div className="relative mt-2 rounded-lg border border-border bg-card px-2 py-2">
-        <div ref={containerRef} className="h-[320px] w-full" />
-        {error ? (
-          <p className="absolute inset-0 grid place-items-center bg-card px-4 text-center font-mono text-[11px] text-dim">
-            Couldn&apos;t load price history for this ticker.
-          </p>
-        ) : !data ? (
-          <div className="absolute inset-2 animate-pulse rounded bg-card/60" />
-        ) : data.price_history.length === 0 ? (
-          <p className="absolute inset-0 grid place-items-center bg-card px-4 text-center font-mono text-[11px] text-dim">
-            No price history available for this range.
-          </p>
-        ) : null}
-      </div>
-      <p className="mt-1 font-mono text-[9px] text-dim">Currency: {currency}. Daily bars -- intraday (1D/1W) ranges aren&apos;t available.</p>
-    </div>
+      }
+      banner={<ConnectionBanner status={live.status} />}
+      toolbar={
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {OVERLAY_TOGGLES.map((o) => (
+            <button
+              key={o.key}
+              type="button"
+              onClick={() => toggleOverlay(o.key)}
+              className={`rounded border px-2 py-0.5 font-mono text-[10px] font-bold ${
+                visibleOverlays.has(o.key) ? "border-accent text-accent" : "border-border text-dim hover:text-muted"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      }
+      state={chartState}
+      errorMessage="Couldn't load price history for this ticker."
+      emptyMessage="No price history available for this range."
+      caption={`Currency: ${currency}. Daily bars -- intraday (1D/1W) ranges aren't available.`}
+    >
+      <div ref={containerRef} className="h-[320px] w-full" />
+    </ChartFrame>
   );
 }

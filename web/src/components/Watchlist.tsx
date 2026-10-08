@@ -5,6 +5,7 @@ import ConnectionBanner from "./ConnectionBanner";
 import WatchlistRow from "./WatchlistRow";
 import LoadError from "./LoadError";
 import ListSkeleton from "./ListSkeleton";
+import { Button } from "./ui";
 import { useLivePrices } from "@/lib/livePrices";
 import type { CompanySuggestion, WatchlistItem } from "@/lib/types";
 
@@ -195,13 +196,9 @@ export default function Watchlist() {
           autoComplete="off"
           className="min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-2 font-mono text-xs text-text placeholder:text-muted focus:outline-none focus:border-accent disabled:opacity-60"
         />
-        <button
-          type="submit"
-          disabled={adding || !ticker.trim()}
-          className="rounded-lg border border-border bg-card px-3.5 py-2 font-mono text-xs font-bold text-muted hover:border-accent hover:text-accent disabled:opacity-50"
-        >
+        <Button type="submit" disabled={!ticker.trim()} loading={adding}>
           {adding ? "..." : "ADD"}
-        </button>
+        </Button>
 
         {showSuggestions && suggestions.length > 0 && (
           <div className="absolute left-0 right-[68px] top-full z-10 mt-1 overflow-hidden rounded-lg border border-border bg-card shadow-lg">

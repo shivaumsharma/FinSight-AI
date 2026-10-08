@@ -67,6 +67,22 @@
   --color-warn: var(--warn);
   --font-mono: var(--font-mono-loaded), ui-monospace, Menlo, "SF Mono", monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+
+  /* Type scale (font-size). Used as text-micro, text-caption, ... See src/components/ui/tokens.ts. */
+  --text-micro: 0.625rem;
+  --text-caption: 0.6875rem;
+  --text-small: 0.75rem;
+  --text-body: 0.875rem;
+  --text-title: 1.125rem;
+  --text-display: 1.25rem;
+
+  /* Spacing roles on top of Tailwind's 4px scale. Used as px-gutter, px-card-x, py-card-y. */
+  --spacing-gutter: 1.25rem;
+  --spacing-card-x: 0.875rem;
+  --spacing-card-y: 0.625rem;
+
+  /* Corner radius. Used as rounded-control. */
+  --radius-control: 0.5rem;
 }
 
 body {

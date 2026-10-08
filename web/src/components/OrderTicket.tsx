@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import SectionSkeleton from "./SectionSkeleton";
+import { Button } from "./ui";
 import { currencySymbol } from "@/lib/currency";
 import { PORTFOLIO_UPDATED_EVENT, notifyPortfolioUpdated } from "@/lib/portfolioEvents";
 import type { CompanySuggestion, Order } from "@/lib/types";
@@ -241,24 +242,13 @@ export default function OrderTicket() {
 
           <div className="flex gap-2">
             {step === "review" && (
-              <button
-                type="button"
-                onClick={() => setStep("edit")}
-                disabled={submitting}
-                className="rounded-lg border border-border px-3 py-2 font-mono text-xs font-bold text-muted hover:text-text disabled:opacity-40"
-              >
+              <Button onClick={() => setStep("edit")} disabled={submitting}>
                 Edit order
-              </button>
+              </Button>
             )}
-            <button
-              type="submit"
-              disabled={submitting}
-              className={`flex-1 rounded-lg py-2 font-mono text-xs font-bold text-bg disabled:cursor-not-allowed disabled:opacity-40 ${
-                side === "BUY" ? "bg-accent" : "bg-danger"
-              }`}
-            >
+            <Button type="submit" variant={side === "BUY" ? "primary" : "danger"} loading={submitting} className="flex-1">
               {submitting ? "Placing order..." : step === "review" ? `Confirm ${side.toLowerCase()} (simulated)` : "Review order"}
-            </button>
+            </Button>
           </div>
           {error && (
             <p role="alert" className="font-mono text-[10px] text-danger">
