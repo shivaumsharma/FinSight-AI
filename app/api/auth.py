@@ -218,6 +218,7 @@ WAKE_LISTEN_TOKEN_TTL_SECONDS = REALTIME_VOICE_TOKEN_TTL_SECONDS
 # signing mechanism and secret.
 PURPOSE_WAKE_WORD = "wake_word"
 PURPOSE_CONVERSATION = "conversation"
+PURPOSE_PRICE_STREAM = "price_stream"
 
 
 def sign_realtime_voice_token(user_id: str, purpose: str) -> str:

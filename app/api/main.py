@@ -35,6 +35,7 @@ plain on-demand endpoints, triggered by a free external cron (see
 alive between requests.
 """
 
+import asyncio
 import hmac
 import logging
 import os
@@ -52,7 +53,7 @@ from pydantic import BaseModel, field_validator
 from app.api import auth, db, errors, jobs
 from app.api.serialization import financial_df_from_json
 from app.core.company_resolver import resolve_companies, suggest_companies
-from app.data import sarvam_client, sarvam_realtime_client, sarvam_tts_client
+from app.data import price_hub, sarvam_client, sarvam_realtime_client, sarvam_tts_client
 from app.data.market_data import (
     TickerNotFoundError, get_corporate_actions, get_corporate_actions_history, get_quote, get_usd_conversion_rate,
 )
@@ -875,6 +876,81 @@ async def conversation_listen(websocket: WebSocket):
         await websocket.close(code=1000)
     except Exception:
         pass
+
+
+@app.get("/v1/prices/stream-token")
+def get_price_stream_token(current_user: str = Depends(auth.get_current_user)):
+    """Short-lived credential for /v1/prices/stream below, scoped so it cannot be replayed on the voice sockets.
+    Same shape and reasoning as GET /v1/voice/wake-listen-token: the real session token lives in an httpOnly cookie."""
+    return {
+        "token": auth.sign_realtime_voice_token(current_user, auth.PURPOSE_PRICE_STREAM),
+        "expires_in": auth.REALTIME_VOICE_TOKEN_TTL_SECONDS,
+    }
+
+
+PRICE_STREAM_HEARTBEAT_SECONDS = 15
+
+
+@app.websocket("/v1/prices/stream")
+async def price_stream(websocket: WebSocket):
+    """
+    Live quotes for the watchlist, positions and chart screens. The browser connects here directly: Next.js route
+    handlers cannot proxy WebSockets and the HTTP-only API Gateway cannot carry them, so this must be reached on the
+    Elastic Beanstalk backend itself (or through CloudFront).
+
+    Protocol (JSON text frames):
+      client -> server  {"token": "..."}                          first message, from GET /v1/prices/stream-token
+                        {"type": "subscribe", "tickers": [...]}   replaces the subscription set
+                        {"type": "ping"}
+      server -> client  {"type": "hello", "interval": seconds, "source": "yahoo-poll"}
+                        {"type": "subscribed", "tickers": [...]}
+                        {"type": "ticks", "ticks": [{"t", "p", "c", "cur", "ts"}, ...]}   latest price per ticker
+                        {"type": "hb"} when idle, {"type": "pong"}
+    """
+    await websocket.accept()
+    try:
+        first = await websocket.receive_json()
+    except Exception:
+        await websocket.close(code=4001, reason="Expected a JSON auth message first.")
+        return
+
+    user_id = auth.verify_realtime_voice_token(str(first.get("token", "")), auth.PURPOSE_PRICE_STREAM)
+    if user_id is None:
+        await websocket.close(code=4401, reason="Invalid or expired token.")
+        return
+
+    hub = price_hub.get_hub()
+    client = hub.register()
+
+    async def sender():
+        while True:
+            try:
+                await asyncio.wait_for(client.ready.wait(), timeout=PRICE_STREAM_HEARTBEAT_SECONDS)
+            except asyncio.TimeoutError:
+                await websocket.send_json({"type": "hb"})
+                continue
+            ticks = client.take()
+            if ticks:
+                await websocket.send_json({"type": "ticks", "ticks": ticks})
+
+    send_task = asyncio.create_task(sender())
+    try:
+        await websocket.send_json({"type": "hello", "interval": hub.interval, "source": "yahoo-poll"})
+        while True:
+            message = await websocket.receive_json()
+            kind = message.get("type") if isinstance(message, dict) else None
+            if kind == "subscribe" and isinstance(message.get("tickers"), list):
+                accepted = hub.set_subscriptions(client, message["tickers"])
+                await websocket.send_json({"type": "subscribed", "tickers": accepted})
+            elif kind == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("price stream failed for user %s", user_id)
+    finally:
+        send_task.cancel()
+        hub.unregister(client)
 
 
 @app.post("/v1/research")

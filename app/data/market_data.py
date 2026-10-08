@@ -58,7 +58,7 @@ _quote_cache: dict = {}
 _QUOTE_CACHE_TTL_SECONDS = 45
 
 
-def get_quote(ticker: str) -> dict:
+def get_quote(ticker: str, max_age_seconds: float = _QUOTE_CACHE_TTL_SECONDS) -> dict:
     """Cheap current-price lookup for the Watchlist -- {"price",
     "change_pct", "previous_close", "currency"}. previous_close is
     exposed (already fetched internally to compute change_pct) so
@@ -73,7 +73,7 @@ def get_quote(ticker: str) -> dict:
     ticker = ticker.upper()
 
     cached = _quote_cache.get(ticker)
-    if cached is not None and time.time() - cached[0] < _QUOTE_CACHE_TTL_SECONDS:
+    if cached is not None and time.time() - cached[0] < max_age_seconds:
         return cached[1]
 
     try:
