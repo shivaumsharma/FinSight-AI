@@ -1,13 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import RatingBadge from "./RatingBadge";
+import { useCallback, useEffect, useState } from "react";
+import WatchlistRow from "./WatchlistRow";
 import LoadError from "./LoadError";
-import { formatShortDate } from "@/lib/format";
-import { currencySymbol } from "@/lib/currency";
 import type { CompanySuggestion, WatchlistItem } from "@/lib/types";
-import { formatPercent, formatPrice } from "@/lib/numberFormat";
 
 // Static, clearly-labeled sample rows shown only when a user's real
 // watchlist is empty -- gives new users a sense of what the feature
@@ -66,7 +62,7 @@ export default function Watchlist() {
   const [suggestions, setSuggestions] = useState<CompanySuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  function refresh() {
+  const refresh = useCallback(() => {
     fetch("/api/watchlist")
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((data) => {
@@ -76,9 +72,9 @@ export default function Watchlist() {
       // Keep whatever was already on screen on a failed re-fetch; only a
       // failed FIRST load shows the error block (never the empty state).
       .catch(() => setLoadFailed(true));
-  }
+  }, []);
 
-  useEffect(refresh, []);
+  useEffect(refresh, [refresh]);
 
   // Debounced -- fetching on every keystroke would fire a request per
   // character typed. 2-char minimum keeps a single keypress from
@@ -135,7 +131,7 @@ export default function Watchlist() {
     submitTicker(s.ticker);
   }
 
-  async function handleRemove(t: string) {
+  const handleRemove = useCallback(async (t: string) => {
     // Optimistic removal -- the DELETE endpoint is idempotent and
     // near-instant, no need to wait for the round-trip before the
     // card disappears. refresh() afterwards re-syncs from the server
@@ -145,59 +141,7 @@ export default function Watchlist() {
     setItems((prev) => (prev ? prev.filter((i) => i.ticker !== t) : prev));
     await fetch(`/api/watchlist/${t}`, { method: "DELETE" }).catch(() => {});
     refresh();
-  }
-
-  function renderItem(item: WatchlistItem, isDemo: boolean) {
-    const corporateActions = [
-      item.next_earnings_date && `Earnings ${formatShortDate(item.next_earnings_date)}`,
-      item.next_ex_dividend_date && `Ex-div ${formatShortDate(item.next_ex_dividend_date)}`,
-    ].filter(Boolean);
-
-    return (
-      <div
-        key={item.ticker}
-        className={`rounded-lg border px-3.5 py-2.5 ${isDemo ? "border-dashed border-border-subtle bg-card/50" : "border-border bg-card"}`}
-      >
-        <div className="flex items-center justify-between">
-          <Link href={`/stock/${item.ticker}`} className="flex flex-1 items-center justify-between gap-2 min-w-0">
-            <div className="flex items-center gap-2.5">
-              <span className="font-mono text-sm font-bold text-text hover:text-accent">{item.ticker}</span>
-              {item.rating ? (
-                <RatingBadge rating={item.rating} size="sm" />
-              ) : (
-                <span className="font-mono text-[10px] text-dim">not yet researched</span>
-              )}
-            </div>
-            {item.price !== null && (
-              <div className="text-right">
-                <div className="font-mono text-sm text-text">
-                  {formatPrice(item.price, currencySymbol(item.currency))}
-                </div>
-                {item.change_pct !== null && (
-                  <div className={`font-mono text-[10px] ${item.change_pct >= 0 ? "text-accent" : "text-danger"}`}>
-                    {formatPercent(item.change_pct, { signed: true })}
-                  </div>
-                )}
-              </div>
-            )}
-          </Link>
-          {!isDemo && (
-            <button
-              type="button"
-              onClick={() => handleRemove(item.ticker)}
-              title="Remove from watchlist"
-              className="ml-3 font-mono text-xs text-dim hover:text-danger"
-            >
-              &times;
-            </button>
-          )}
-        </div>
-        {corporateActions.length > 0 && (
-          <p className="mt-1.5 font-mono text-[10px] text-dim">{corporateActions.join(" · ")}</p>
-        )}
-      </div>
-    );
-  }
+  }, [refresh]);
 
   return (
     <div className="mt-6">
@@ -206,7 +150,11 @@ export default function Watchlist() {
       {loadFailed && items === null && <LoadError what="your watchlist" onRetry={refresh} className="mt-2" />}
 
       {items && items.length > 0 && (
-        <div className="mt-2 flex flex-col gap-2">{items.map((item) => renderItem(item, false))}</div>
+        <div className="mt-2 flex flex-col gap-2">
+          {items.map((item) => (
+            <WatchlistRow key={item.ticker} item={item} onRemove={handleRemove} />
+          ))}
+        </div>
       )}
 
       {items && items.length === 0 && (
@@ -214,7 +162,11 @@ export default function Watchlist() {
           <p className="font-mono text-[10px] text-dim">
             Empty for now -- here&apos;s what it looks like once you add a stock:
           </p>
-          <div className="mt-2 flex flex-col gap-2 opacity-70">{DEMO_ITEMS.map((item) => renderItem(item, true))}</div>
+          <div className="mt-2 flex flex-col gap-2 opacity-70">
+            {DEMO_ITEMS.map((item) => (
+              <WatchlistRow key={item.ticker} item={item} isDemo />
+            ))}
+          </div>
         </div>
       )}
 
