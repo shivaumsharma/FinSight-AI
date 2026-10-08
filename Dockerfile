@@ -35,17 +35,10 @@ COPY --from=builder /install /usr/local
 WORKDIR /app
 COPY . .
 
-# Non-root: the app writes its persistent state (jobs.db, reports/,
-# llm_logs/, logs/, filings_cache/, vector_db/, and mlruns/ if a
-# training script ever runs here) directly under WORKDIR by default --
-# see app/core/paths.py's own DATA_DIR docstring: DATA_DIR only points
-# elsewhere (a mounted volume) when explicitly set, and defaults to the
-# repo root otherwise. chown the whole tree rather than enumerating
-# each write path individually, since a new one could be added later
-# without this Dockerfile being updated to match.
-RUN useradd --create-home --shell /bin/false appuser \
-    && chown -R appuser:appuser /app
-USER appuser
+# Runs as root, as the images deployed before 2026-10-08 did. A non-root user crashed production on startup
+# ("attempt to write a readonly database"): Elastic Beanstalk creates the /var/app/data host volume (mounted at
+# DATA_DIR=/data) owned by root, so appuser cannot write jobs.db there. To drop privileges again, chown the volume
+# first (entrypoint or EB platform hook) and test that on a built image with a root-owned volume before re-enabling.
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
