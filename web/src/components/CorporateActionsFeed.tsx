@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { formatShortDate } from "@/lib/format";
 import LoadError from "./LoadError";
+import ListSkeleton from "./ListSkeleton";
 import type { CorporateActionEvent, CorporateActionsFeedData } from "@/lib/types";
 
 const EVENT_LABEL: Record<CorporateActionEvent["type"], string> = {
@@ -49,7 +50,7 @@ export default function CorporateActionsFeed() {
       {failed ? (
         <LoadError what="corporate actions" onRetry={() => setAttempt((a) => a + 1)} />
       ) : data === null ? (
-        <p className="mt-3 font-mono text-[11px] text-dim">Loading...</p>
+        <ListSkeleton rows={3} />
       ) : data.events.length > 0 ? (
         <div className="mt-3 flex flex-col gap-2">
           {data.events.map((event, i) => (

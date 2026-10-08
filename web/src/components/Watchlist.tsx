@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import WatchlistRow from "./WatchlistRow";
 import LoadError from "./LoadError";
+import ListSkeleton from "./ListSkeleton";
 import type { CompanySuggestion, WatchlistItem } from "@/lib/types";
 
 // Static, clearly-labeled sample rows shown only when a user's real
@@ -148,6 +149,8 @@ export default function Watchlist() {
       <p className="font-mono text-[10px] tracking-wide text-dim">WATCHLIST</p>
 
       {loadFailed && items === null && <LoadError what="your watchlist" onRetry={refresh} className="mt-2" />}
+
+      {items === null && !loadFailed && <ListSkeleton rows={3} className="mt-2" />}
 
       {items && items.length > 0 && (
         <div className="mt-2 flex flex-col gap-2">

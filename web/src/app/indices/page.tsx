@@ -5,6 +5,7 @@ import Link from "next/link";
 import AuthGate from "@/components/AuthGate";
 import BottomNav from "@/components/BottomNav";
 import LoadError from "@/components/LoadError";
+import ListSkeleton from "@/components/ListSkeleton";
 import type { IndexQuote } from "@/lib/types";
 import { formatNumber, formatPercent } from "@/lib/numberFormat";
 
@@ -38,7 +39,7 @@ export default function IndicesPage() {
       {() => (
         <div className="min-h-screen bg-bg pb-safe-20">
           <div className="mx-auto max-w-2xl px-5 py-8">
-            <Link href="/" className="font-mono text-xs font-bold text-muted hover:text-accent">
+            <Link href="/" className="-my-2 inline-block py-2 font-mono text-xs font-bold text-muted hover:text-accent">
               &larr; HOME
             </Link>
             <h1 className="mt-3 font-mono text-lg font-bold text-text">Indices</h1>
@@ -59,6 +60,8 @@ export default function IndicesPage() {
             </div>
 
             {failed && <LoadError what="indices" onRetry={retry} />}
+
+            {indices === null && !failed && <ListSkeleton rows={6} />}
 
             {indices !== null && (
               <div className="mt-3 flex flex-col gap-2">

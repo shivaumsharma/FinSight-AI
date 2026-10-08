@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import AuthGate from "@/components/AuthGate";
 import BottomNav from "@/components/BottomNav";
 import LoadError from "@/components/LoadError";
+import ListSkeleton from "@/components/ListSkeleton";
 import RatingBadge from "@/components/RatingBadge";
 import { relativeTime } from "@/lib/format";
 import type { ReportSummary } from "@/lib/types";
@@ -57,7 +58,7 @@ function ReportsList() {
   }
 
   if (reports === null) {
-    return <p className="mt-6 font-mono text-xs text-dim">loading...</p>;
+    return <ListSkeleton rows={4} className="mt-6" />;
   }
 
   if (reports.length === 0) {

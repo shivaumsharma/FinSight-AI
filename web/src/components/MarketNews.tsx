@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import SectionSkeleton from "./SectionSkeleton";
+import LoadError from "./LoadError";
 import { formatShortDate } from "@/lib/format";
 import type { NewsArticle } from "@/lib/types";
 
@@ -14,13 +15,18 @@ export default function MarketNews() {
   const [tab, setTab] = useState<"trending" | "mine">("trending");
   const [trending, setTrending] = useState<NewsArticle[] | null>(null);
   const [mine, setMine] = useState<NewsArticle[] | null>(null);
+  const [trendingFailed, setTrendingFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     fetch("/api/news/market?limit=8")
-      .then((r) => (r.ok ? r.json() : { articles: [] }))
-      .then((data) => setTrending(data.articles))
-      .catch(() => setTrending([]));
-  }, []);
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((data) => {
+        setTrending(data.articles);
+        setTrendingFailed(false);
+      })
+      .catch(() => setTrendingFailed(true));
+  }, [attempt]);
 
   useEffect(() => {
     if (tab !== "mine" || mine !== null) return;
@@ -31,6 +37,14 @@ export default function MarketNews() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
+  if (trendingFailed) {
+    return (
+      <div className="mt-6">
+        <p className="font-mono text-[10px] tracking-wide text-dim">MARKET NEWS</p>
+        <LoadError what="market news" onRetry={() => setAttempt((a) => a + 1)} className="mt-2" />
+      </div>
+    );
+  }
   if (trending === null) return <SectionSkeleton label="MARKET NEWS" rows={3} />;
   // Nothing to show at all -- no trending feed configured and the
   // user hasn't opened "On My Stocks" yet (or it's also empty).

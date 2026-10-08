@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import AddToWatchlistButton from "./AddToWatchlistButton";
 import LoadError from "./LoadError";
+import ListSkeleton from "./ListSkeleton";
 import { currencySymbol } from "@/lib/currency";
 import { fmtCompactNumber } from "@/lib/stockFormat";
 import type { ScreenerData, ScreenerFilters, ScreenerRow } from "@/lib/types";
@@ -130,7 +131,7 @@ export default function Screener() {
         <button
           type="button"
           onClick={() => setShowFilters((v) => !v)}
-          className="font-mono text-[10px] font-bold text-muted hover:text-accent"
+          className="-my-2 py-2 font-mono text-[10px] font-bold text-muted hover:text-accent"
         >
           {showFilters ? "HIDE FILTERS" : "SHOW FILTERS"}
         </button>
@@ -179,7 +180,7 @@ export default function Screener() {
       {failed ? (
         <LoadError what="the screener" onRetry={() => setAttempt((a) => a + 1)} />
       ) : data === null ? (
-        <p className="mt-3 font-mono text-[11px] text-dim">Loading...</p>
+        <ListSkeleton rows={5} />
       ) : data.results.length > 0 ? (
         <div className="mt-3 flex flex-col gap-2">
           {data.results.map((row) => (
