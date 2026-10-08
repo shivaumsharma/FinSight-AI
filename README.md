@@ -50,6 +50,11 @@ Every report is scored, not just produced — grounding (40%), retrieval quality
 ### Trading Platform
 Self-reported portfolio tracking, a global watchlist, Top Movers and a market Sentiment Gauge over a real tracked universe, Corporate Actions and Global Indices feeds, and simulated paper order execution — a rehearsal tool for a trade decision against real prices, never a real broker connection.
 
+### Live Prices
+A WebSocket feed (`/v1/prices/stream`) pushes price ticks to the watchlist, positions, stock header and the chart's last candle. The browser connects to the backend directly (route handlers can't proxy WebSockets and the HTTP-only API Gateway can't carry them), authenticated by a 60-second token. The client reconnects on its own with jittered exponential backoff, treats a silent connection as dropped, and shows a "reconnecting" banner while it recovers. The source is the same Yahoo quote lookup used elsewhere, polled every 5 seconds and forwarded only when a price changed, so prices are near-real-time, not exchange ticks.
+
+**Render cost under a fast feed** (React Profiler, production build, 100 rows, 500 ticks/s for 4 s, ticks spread evenly across all rows, `cd web && npm run bench`): one render per tick cost about **1.03 ms of React render time per tick**; batching ticks into 100 ms updates and memoizing rows cut that to **0.035 ms per tick, about 29x less** (about 25x less total render time, 60x fewer row renders, 51x fewer commits). Per-commit time rises because each commit does more, but the worst commit stays under 9 ms. Details and raw runs in `web/bench/results.json`. Measured on one machine in headless Chromium; the ratios matter, not the milliseconds. Not measured: real-device or low-end-phone performance.
+
 ### Voice Input
 A mic button transcribes your spoken question via Sarvam AI's Speech-to-Text API and fills it into the question box for you to review before submitting — never auto-submitted, so a mistranscription costs nothing but the API call.
 
@@ -253,7 +258,7 @@ curl -X POST https://<your-cloud-run-url>/v1/research \
 cd web
 npx vercel@latest link
 ```
-Then set `FINSIGHT_API_URL` (the Cloud Run URL above) and `FINSIGHT_API_KEY` (matching `API_KEY` on the backend) as Environment Variables in the Vercel dashboard.
+Then set `FINSIGHT_API_URL` (the Cloud Run URL above) and `FINSIGHT_API_KEY` (matching `API_KEY` on the backend) as Environment Variables in the Vercel dashboard. For the live price feed, set `PRICE_STREAM_WS_URL` to the backend's WebSocket address (for example `wss://<cloudfront-domain>/v1/prices/stream`); if unset it is derived from `FINSIGHT_API_URL`. It must reach the backend itself, because the API Gateway in front of the HTTP API cannot carry WebSocket connections. This has not been verified against the deployed CloudFront distribution yet.
 
 **Redeploy the frontend:**
 ```bash
