@@ -1,7 +1,7 @@
 """tone_change_ic.py -- RESEARCH SANDBOX. Scores the G7 PRE-REGISTRATION in SPRINT_TRACKER.md exactly (P4's design, tone signals)."""
 import re, sys, warnings
 from pathlib import Path
-import numpy as np, pandas as pd
+import pandas as pd
 warnings.filterwarnings("ignore")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from research import filing_change_ic as fc

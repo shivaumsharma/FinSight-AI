@@ -12,7 +12,6 @@ import json
 import sys
 import time
 import warnings
-from math import sqrt
 from multiprocessing import Pool
 from pathlib import Path
 

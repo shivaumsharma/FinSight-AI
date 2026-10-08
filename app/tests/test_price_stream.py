@@ -4,11 +4,13 @@ import asyncio
 
 import pytest
 from fastapi import WebSocketDisconnect
+from fastapi.testclient import TestClient
 
-from app.api import auth
+from app.api import auth, db
+from app.api.main import app
 from app.data import price_hub
 from app.data.price_hub import PriceHub
-from app.tests.test_api import _signup, client  # noqa: F401  (client is a pytest fixture)
+from app.tests.test_api import _signup
 
 
 def _quotes(prices):
@@ -114,6 +116,13 @@ def test_unsubscribing_drops_pending_ticks_for_that_ticker():
 
 
 # ---------------------------------------------------------------- endpoints
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "jobs.db")
+    with TestClient(app) as test_client:
+        yield test_client
+
 
 @pytest.fixture
 def hub(monkeypatch):

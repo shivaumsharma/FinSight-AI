@@ -15,7 +15,6 @@ import pandas as pd
 warnings.filterwarnings("ignore")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from research import tool_ablation as t  # noqa: E402
-from research import ml_cross_section as m  # noqa: E402
 
 
 def main():

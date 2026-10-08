@@ -37,7 +37,6 @@ def sue_series(g):
     s = quarterly_eps(g)
     if len(s) < 9:
         return pd.DataFrame(columns=["filed", "sue"])
-    prior = {}
     d = []
     for r in s.itertuples():
         match = s[(s.end - (r.end - pd.Timedelta(days=365))).abs() <= pd.Timedelta(days=20)]

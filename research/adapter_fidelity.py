@@ -36,7 +36,7 @@ def main():
             raw = _fetch_raw_ticker_data(t)
             r = _score_ticker_at_date(t, cat, raw, AS_OF, AS_OF, market["^GSPC"], market["^TNX"])
             return t, r["composite_score"], r["dcf_score"], r["upside_pct"]
-        except Exception as e:
+        except Exception:
             return t, None, None, None
 
     with ThreadPoolExecutor(6) as ex:

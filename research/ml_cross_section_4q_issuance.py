@@ -37,7 +37,6 @@ def main():
             print(f"   retrain at {T.date()}: {int(tr.sum())} rows", flush=True)
         te = P.date == T
         for k in model: preds[k][te] = model[k].predict(X[te])
-    base_ic = {}
     for k in preds:
         ic = pd.Series({T: preds[k][P.date == T].corr(P.loc[P.date == T, "fwd4"], method="spearman") for T in tests if ((P.date == T) & P.fwd4.notna()).sum() >= m.MIN_NAMES})
         ok = ic.mean() >= 0.03 and nw_t(ic) >= 2.5

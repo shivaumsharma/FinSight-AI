@@ -3,7 +3,6 @@ import time
 from datetime import date
 
 import yfinance as yf
-import pandas as pd
 
 from app.core.cache import cache_get, cache_set, make_key
 from app.core.retry import retry_on_transient_error

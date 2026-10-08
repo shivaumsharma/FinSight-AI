@@ -16,7 +16,6 @@ import pandas as pd
 
 warnings.filterwarnings("ignore")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from research import delisting  # noqa: E402
 from research import factor_ic as fi  # noqa: E402
 
 DATA = Path(__file__).resolve().parent / "data"

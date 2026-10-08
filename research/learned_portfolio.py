@@ -13,7 +13,6 @@ survive a correction for the number of things tried?
 
 Run: python research/learned_portfolio.py       (needs research/data/a1b_predictions.parquet from ml_cross_section_4q.py)
 """
-import sys
 import warnings
 from math import sqrt
 from pathlib import Path

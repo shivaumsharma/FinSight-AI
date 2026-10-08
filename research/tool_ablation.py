@@ -13,7 +13,6 @@ top-decile long-only net excess return per quarter after 25 bps one-way cost.
 These are the SAME definitions already counted as trials; re-running them on the final data adds none.
 Run: python research/tool_ablation.py      Output: research/data/tool_ablation.json
 """
-import json
 import sys
 import warnings
 from pathlib import Path

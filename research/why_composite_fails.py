@@ -69,4 +69,4 @@ for s_, g in sc.groupby("sector"):
 print("\n8) NOISE vs SIGNAL: per-date IC std vs what sampling noise alone gives")
 ic = ic_by_date(sc, "composite_score"); nn = sc.groupby("date").size().reindex(ic.index)
 print(f"  observed std of per-date IC {ic.std():.3f}; pure sampling noise at n~{int(nn.median())} would be ~{(1/np.sqrt(nn)).mean():.3f}")
-print(f"  years: " + "  ".join(f"{y}:{v:+.2f}" for y, v in ic.groupby(ic.index.year).mean().items()))
+print("  years: " + "  ".join(f"{y}:{v:+.2f}" for y, v in ic.groupby(ic.index.year).mean().items()))
