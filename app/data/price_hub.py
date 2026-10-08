@@ -24,6 +24,20 @@ FETCH_CONCURRENCY = 8
 IDLE_SHUTDOWN_SECONDS = 30
 
 
+async def wait_for_event(event: asyncio.Event, timeout: float) -> bool:
+    """True if the event was set, False if the timeout passed first.
+
+    Not asyncio.wait_for: on Python 3.11 (CI and the Docker image) it can swallow a cancellation that lands at the
+    moment its timeout fires, so a cancelled polling loop keeps running and asyncio.run never returns.
+    """
+    waiter = asyncio.ensure_future(event.wait())
+    try:
+        await asyncio.wait({waiter}, timeout=timeout)
+        return waiter.done()
+    finally:
+        waiter.cancel()
+
+
 def _default_fetch(ticker: str) -> dict:
     from app.data.market_data import get_quote
 
@@ -145,10 +159,7 @@ class PriceHub:
                     await self.poll_once()
                 except Exception:
                     logger.exception("price poll failed")
-            try:
-                await asyncio.wait_for(self._wake.wait(), timeout=self.interval)
-            except asyncio.TimeoutError:
-                pass
+            await wait_for_event(self._wake, self.interval)
             self._wake.clear()
 
 

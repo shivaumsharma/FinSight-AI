@@ -23,12 +23,19 @@ def _quotes(prices):
     return fetch
 
 
+def _manual_hub(prices):
+    """A hub whose background loop never starts, so a test drives polling itself with poll_once()."""
+    hub = PriceHub(fetch=_quotes(prices), interval=0.01)
+    hub._ensure_running = lambda: None
+    return hub
+
+
 # ---------------------------------------------------------------- hub
 
 def test_poll_forwards_only_prices_that_changed():
     async def go():
         prices = {"AAPL": (100.0, 1.0), "MSFT": (200.0, -0.5)}
-        hub = PriceHub(fetch=_quotes(prices), interval=0.01)
+        hub = _manual_hub(prices)
         client = hub.register()
         hub.set_subscriptions(client, ["AAPL", "MSFT"])
 
@@ -48,7 +55,7 @@ def test_poll_forwards_only_prices_that_changed():
 def test_a_slow_client_gets_only_the_latest_price_per_ticker():
     async def go():
         prices = {"AAPL": (100.0, 0.0)}
-        hub = PriceHub(fetch=_quotes(prices), interval=0.01)
+        hub = _manual_hub(prices)
         client = hub.register()
         hub.set_subscriptions(client, ["AAPL"])
         for p in (100.0, 101.0, 102.0, 103.0):
@@ -62,7 +69,7 @@ def test_a_slow_client_gets_only_the_latest_price_per_ticker():
 def test_clients_only_receive_their_own_subscriptions():
     async def go():
         prices = {"AAPL": (100.0, 0.0), "MSFT": (200.0, 0.0)}
-        hub = PriceHub(fetch=_quotes(prices), interval=0.01)
+        hub = _manual_hub(prices)
         a, b = hub.register(), hub.register()
         hub.set_subscriptions(a, ["AAPL"])
         hub.set_subscriptions(b, ["MSFT"])
@@ -74,7 +81,7 @@ def test_clients_only_receive_their_own_subscriptions():
 
 def test_a_ticker_that_fails_does_not_stop_the_others():
     async def go():
-        hub = PriceHub(fetch=_quotes({"AAPL": (100.0, 0.0)}), interval=0.01)
+        hub = _manual_hub({"AAPL": (100.0, 0.0)})
         client = hub.register()
         hub.set_subscriptions(client, ["AAPL", "NOPE"])
         assert await hub.poll_once() == 1
@@ -84,7 +91,7 @@ def test_a_ticker_that_fails_does_not_stop_the_others():
 
 def test_a_late_subscriber_gets_the_known_price_immediately():
     async def go():
-        hub = PriceHub(fetch=_quotes({"AAPL": (100.0, 0.0)}), interval=0.01)
+        hub = _manual_hub({"AAPL": (100.0, 0.0)})
         first = hub.register()
         hub.set_subscriptions(first, ["AAPL"])
         await hub.poll_once()
@@ -96,7 +103,7 @@ def test_a_late_subscriber_gets_the_known_price_immediately():
 
 def test_subscriptions_are_normalised_deduplicated_and_capped():
     async def go():
-        hub = PriceHub(fetch=_quotes({}), interval=0.01)
+        hub = _manual_hub({})
         client = hub.register()
         accepted = hub.set_subscriptions(client, [" aapl", "AAPL", "", "x" * 30] + [f"T{i}" for i in range(80)])
         assert accepted[0] == "AAPL" and accepted.count("AAPL") == 1
@@ -106,12 +113,38 @@ def test_subscriptions_are_normalised_deduplicated_and_capped():
 
 def test_unsubscribing_drops_pending_ticks_for_that_ticker():
     async def go():
-        hub = PriceHub(fetch=_quotes({"AAPL": (100.0, 0.0), "MSFT": (200.0, 0.0)}), interval=0.01)
+        hub = _manual_hub({"AAPL": (100.0, 0.0), "MSFT": (200.0, 0.0)})
         client = hub.register()
         hub.set_subscriptions(client, ["AAPL", "MSFT"])
         await hub.poll_once()
         hub.set_subscriptions(client, ["MSFT"])
         assert [t["t"] for t in client.take()] == ["MSFT"]
+    asyncio.run(go())
+
+
+def test_wait_for_event_reports_set_and_timeout():
+    async def go():
+        event = asyncio.Event()
+        assert await price_hub.wait_for_event(event, 0.01) is False
+        asyncio.get_running_loop().call_later(0.01, event.set)
+        assert await price_hub.wait_for_event(event, 1) is True
+    asyncio.run(go())
+
+
+def test_a_cancelled_polling_loop_always_stops():
+    """Cancels a tight wait loop at many moments around its timeout; on Python 3.11 asyncio.wait_for can swallow one."""
+    async def go():
+        async def poll_forever():
+            event = asyncio.Event()
+            while True:
+                await price_hub.wait_for_event(event, 0.001)
+
+        for i in range(150):
+            task = asyncio.ensure_future(poll_forever())
+            await asyncio.sleep(0.0004 * (i % 9))
+            task.cancel()
+            done, _ = await asyncio.wait({task}, timeout=1)
+            assert done, f"task {i} kept running after cancel()"
     asyncio.run(go())
 
 

@@ -4,6 +4,9 @@
 # and network access; see .github/workflows/tests.yml).
 pytest>=8.0
 
+# Fails a test that runs longer than the limit in pytest.ini instead of letting a hang freeze CI.
+pytest-timeout>=2.3
+
 # In-process fake Redis server (real redis-py wire protocol) used only
 # by scripts/benchmark_redis_cache.py -- lets that benchmark exercise
 # the real app/core/cache.py code path without needing an actual Redis
