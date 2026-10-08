@@ -8,7 +8,7 @@ Numbers below are computed directly from artifacts already checked into `scripts
 
 ## 0. The canonical accuracy metric
 
-FinSight reports exactly **one** headline accuracy number — not a table of window-by-window sub-metrics, and not the "Institutional Consensus Score" (analyst-agreement, market-context only, never a predictive-accuracy claim — see `app/reporting/consensus_score.py`). It's computed by `scripts/canonical_accuracy.py` and surfaced on every generated report (`report_data["track_record"]`, rendered in both the Streamlit and web UIs).
+FinSight reports exactly **one** headline accuracy number — not a table of window-by-window sub-metrics, and not the "Institutional Consensus Score" (analyst-agreement, market-context only, never a predictive-accuracy claim — see `app/reporting/consensus_score.py`). It's computed by `scripts/canonical_accuracy.py` and surfaced on every generated report (`report_data["track_record"]`, rendered in the web UI).
 
 **Definition:** of every Buy/Hold/Sell call FinSight's real production decision path (`report_data_builder.derive_recommendation` — the exact function the deployed app calls) makes on the broad, non-cherry-picked 1,002-ticker S&P 500+400+600(partial) universe, what fraction are correct **12 months later** — Buy needs realized return `> +5%`, Sell needs `< -5%`, Hold needs to land between (the same rule Section 1 below validates, unchanged).
 
@@ -87,7 +87,7 @@ A second, genuinely independent valuation lens: `app/valuation/ddm_engine.py`, a
 
 **Re-tested once the broad-universe re-run made a 10x larger sample available (n=753, up from 71) — the interior peak was noise.** With real statistical power: best weight is now 0.05 (barely above zero) for a trivial +0.3-point gain (42.6%→42.9%), and accuracy *declines monotonically* beyond that, down to 36.5% at weight=0.5. The small-sample "peak" that looked like a real effect vanished entirely once there was enough data to actually test it. This is the same lesson as the momentum result, arrived at differently: this time by getting more data rather than a matched-baseline check, and it's worth remembering going forward that a promising *shape* (interior peak vs. monotonic edge) is necessary but not sufficient evidence at small N — it can still be noise that happens to look structured.
 
-**Shipped display-only** (`report_data["valuation_analysis"]["dividend_discount_model"]`, both Streamlit and web UI, clearly labeled "not part of the recommendation"), and this is now the settled, evidence-backed answer — not a "come back later with more data" placeholder. Genuinely useful as an independent second read for the user, correctly excluded from the actual rating.
+**Shipped display-only** (`report_data["valuation_analysis"]["dividend_discount_model"]`, web UI, clearly labeled "not part of the recommendation"), and this is now the settled, evidence-backed answer — not a "come back later with more data" placeholder. Genuinely useful as an independent second read for the user, correctly excluded from the actual rating.
 
 ### Catalyst-awareness (lower confidence near earnings) — tested, evidence points the other way
 
@@ -250,9 +250,11 @@ Both diagnosed causes were real, and fixing them closed roughly a quarter to a t
 | Original (11 valuation-only features) | 39 | XGBoost | 0.410 | — |
 | + momentum/volatility features | 49 | Logistic Regression | 0.458 | — |
 | + Phase 2 data, no class balancing | 1,700 | XGBoost | 0.346 *(looks better, isn't)* | 95.3% / 4.2% / 13.0% |
-| + Phase 2 data, class-balanced | **1,700** | **XGBoost** | **0.420** | **56.7% / 43.8% / 34.1%** |
+| + Phase 2 data, class-balanced | **1,700** | **XGBoost** | **0.380** | **57.1% / 32.0% / 28.8%** |
 
-The class-balanced result is the honest one: genuinely balanced discrimination across all three classes (not a majority-class default dressed up as accuracy), on 35x the data, with a stable CV F1-macro (0.415 ± 0.040 across 5 folds — tight relative to the ±0.15-0.18 stds at N=39-49) confirming it isn't a lucky split. `annualized_volatility` remains the single most important feature, ahead of every valuation-derived one.
+The class-balanced result is the honest one: genuinely balanced discrimination across all three classes (not a majority-class default dressed up as accuracy), on 35x the data, with a stable CV F1-macro (0.353 ± 0.028 across 5 folds — tight relative to the ±0.15-0.18 stds at N=39-49) confirming it isn't a lucky split. `annualized_volatility` remains among the most important features, alongside `beta` and `net_cash_per_share_over_price`.
+
+**A second leak, found later (2026-09-15), caught the same way the two Phase 2 leaks above were: not assumed, checked.** `train_and_evaluate`/`cross_validate_models`'s split was a plain (label-stratified but not ticker-grouped) row split -- 550 of the 618 unique tickers in the 1,700-row training set appear in more than one as-of-date window, so a random split routinely put, say, 3 of a ticker's 4 snapshots in training and the 4th in test. Re-scoring with a `GroupKFold`/`GroupShuffleSplit` split (grouped by ticker, so no company's rows can ever straddle both sides) dropped the reported numbers measurably: held-out accuracy from an apparent 48.7% to a real 45.2%, OVERVALUED precision from an apparent 39.3% to a real 31.0%. The table above already reflects the corrected, group-safe numbers. `OVERVALUED` precision (31.0%) is still a genuine, if modest, edge over the DCF composite rule's own Sell precision (27.1%, Section 0) -- real, just smaller than the leaky version suggested.
 
 **Phase 4 — does wiring it into the composite actually move accuracy? Tested, not assumed. Result: no.** `scripts/tune_ml_weight.py` grid-searches an `ML_WEIGHT` (a third term alongside `DCF_WEIGHT`/`RELATIVE_WEIGHT`, `ml_score = (P(UNDERVALUED) - P(OVERVALUED)) * 100`, naturally bounded so it needs no percentile normalization) against the Phase 2 windows.
 
@@ -262,7 +264,9 @@ The first version of this test showed a large, monotonically-increasing benefit 
 
 **Conclusion: the ML classifier is not wired into the composite.** `DCF_WEIGHT`/`RELATIVE_WEIGHT` are unchanged. This is exactly what "only wire it in if it clears a real bar" was supposed to prevent shipping — a plausible-sounding feature addition that doesn't survive honest out-of-sample measurement. The classifier stays display-only. Kept as a reproducible negative result (`tune_ml_weight.py` isn't deleted) rather than silently dropped, so this doesn't get re-litigated from scratch once more Phase 2 data exists.
 
-**Reproduce (data):** `for m in 12 18 24 30 36 48; do python scripts/build_ml_training_set.py $m --universe scripts/ticker_universe.json; done && python scripts/combine_ml_training_sets.py && python -c "from app.valuation.ml_valuation_classifier import train; train('scripts/ml_training_set.csv')"` (space the windows out, or lower `--workers`, if re-running — this sweep's later windows got progressively rate-limited running back-to-back). **Reproduce (composite test):** `python scripts/tune_ml_weight.py`.
+**Re-tested with a different combination method (2026-09-15), same conclusion.** `tune_ml_weight.py` above blends the ML classifier as a linear `ML_WEIGHT` term. A separate, cheaper check (`scripts/ml_classifier_ensemble_mock_check.py`) tried instead *gating* the composite rule's Sell/Buy calls on the classifier's prediction agreeing (out-of-fold, ticker-grouped — same leak-safety as the fix above), plus using the classifier's prediction as the rating outright with no DCF at all. All three variants moved pooled accuracy the wrong direction: -3.8pt (gate Sell only), -15.8pt (gate Sell and Buy both — confirms Buy, the model's strongest signal, should not be second-guessed by the weaker classifier), -1.4pt (classifier alone, replacing DCF). A real per-class edge on OVERVALUED precision (31.0% vs. the composite's 27.1%, both directions of this investigation agree on that part) still doesn't survive contact with the *pooled* metric once you account for what happens to the calls a gate suppresses or changes — the same lesson `scripts/sell_precision_diagnostic.py`'s Financials/Energy sector check already found for a completely different proposed fix. Run before any further "combine the ML classifier with the composite" idea gets built, not just this specific shape of it.
+
+**Reproduce (data):** `for m in 12 18 24 30 36 48; do python scripts/build_ml_training_set.py $m --universe scripts/ticker_universe.json; done && python scripts/combine_ml_training_sets.py && python -c "from app.valuation.ml_valuation_classifier import train; train('scripts/ml_training_set.csv')"` (space the windows out, or lower `--workers`, if re-running — this sweep's later windows got progressively rate-limited running back-to-back). **Reproduce (composite test):** `python scripts/tune_ml_weight.py` (blend) or `python scripts/ml_classifier_ensemble_mock_check.py` (gating).
 
 ---
 
@@ -314,7 +318,105 @@ Both numbers are from independent tickers specifically to avoid a methodology bu
 
 ---
 
-## 9. Known limitations
+## 9. Walk-forward portfolio backtest (transaction costs, Sharpe/Sortino/drawdown)
+
+Every other backtest in this document answers "was a single Buy/Hold/Sell call directionally correct 12 months later" (Section 0/1). This one asks the question a quant or PM audience actually asks: if you'd traded this pipeline's calls as an actual portfolio — rebalancing periodically, paying real transaction costs — how would the *portfolio* have performed, on the metrics that matter (CAGR, risk-adjusted return, drawdown), against realistic comparators?
+
+**Method** (`scripts/walkforward_backtest.py`): 13 rebalance dates, quarterly, spanning the last 3 years. At each date, a sector-stratified sample of 275 tickers from `scripts/ticker_universe.json` is scored point-in-time (reusing `phase2_backtest.py`'s entire no-look-ahead machinery — filing-lag filter, trailing beta, point-in-time cutoff, historical risk-free rate — via a new `_fetch_raw_ticker_data`/`_score_ticker_at_date` split that fetches each ticker's data ONCE and reuses it across all 13 dates, not once per rebalance, avoiding a 13x multiplication of exactly the rate-limit risk that has degraded every past attempt to scale this project's backtests). The top 25 Buy-rated tickers by `composite_score` are held equal-weighted, long-only, until the next rebalance; a 10bps round-trip transaction cost (commission + spread + slippage combined into one documented assumption, not calibrated against real historical bid/ask data — this project has none to calibrate against) is charged on turnover at every rebalance. Two comparators, built the same way: **S&P 500 buy-and-hold** (bought once, held, zero trading) and a **naive factor baseline** (equal-weight the entire 275-ticker sample every quarter — no valuation signal at all, this backtest's answer to "Always-Buy"). Portfolio metrics (`app/analysis/portfolio_metrics.py`, hand-rolled, no new dependency — CAGR, annualized volatility, Sharpe, Sortino, max drawdown, hit rate, profit factor) computed identically for all three.
+
+**A real bug caught and fixed before this was trustworthy:** the first working version of this script measured turnover by comparing each rebalance's target weights to the *previous rebalance's target* weights — which is wrong the moment a strategy's target doesn't change (the naive factor baseline holds the same 275 tickers every quarter by design). That comparison silently reported 0% turnover after the very first rebalance, even though individual tickers' prices had obviously drifted apart in between — caught directly in this script's own smoke test, not assumed correct. Fixed by tracking each period's *drifted* weights (what was actually held, after that period's price moves) and comparing the new target against those, not against the stale prior target.
+
+**Result — the strategy loses to both comparators, on every metric:**
+
+| | CAGR | Sharpe | Sortino | Max Drawdown | Hit Rate | Final value ($1M start) |
+|---|---:|---:|---:|---:|---:|---:|
+| **Strategy** (top-25 Buy by composite_score) | 16.3% | 0.93 | 1.88 | **-22.7%** | 66.7% | $1,560,853 |
+| Naive factor baseline (equal-weight all 275) | 19.1% | 1.61 | 8.69 | -18.8% | 83.3% | $1,675,627 |
+| S&P 500 buy-and-hold | 21.5% | 1.00 | 3.05 | -18.9% | 66.7% | $1,776,886 |
+
+The strategy has the WORST drawdown of the three (deeper than even buy-and-hold), a lower Sharpe than both comparators, and the lowest final value. Most strikingly: the naive factor baseline — which contains zero valuation signal, it's just "own everything, rebalance to equal weight" — beats the composite-score-driven stock-picking strategy on every single metric in this table. Concentrating into the 25 tickers the pipeline judges most undervalued produced a *worse* risk-adjusted outcome than simply not picking at all, over this specific 3-year window. This is consistent with, and now extends to the portfolio level, Section 0's finding that the model's per-ticker Sell calls carry essentially no signal and its Buy calls carry real but modest signal — not enough, it turns out, to overcome the extra volatility and transaction costs concentration into 25 names (vs. 275) introduces. `avg_turnover_per_rebalance` makes the cost of that concentration concrete: 38.5% for the strategy vs. 10.1% for the naive baseline — nearly 4x the trading, for a worse outcome.
+
+**Scope, stated plainly, not silently omitted:** this is one 3-year window, not multiple non-overlapping windows the way Section 0's per-ticker metric is — a single walk-forward run is one data point, not proof the strategy loses in every regime, just this one (which, per Section 0's own finding, was a broadly rising market — the same regime where the per-ticker Sell signal was already shown not to work). The composite formula's own weights/thresholds (`DCF_WEIGHT`/`RELATIVE_WEIGHT`/`BUY_THRESHOLD`/`SELL_THRESHOLD`) were NOT re-tuned per rolling window here — this tests a frozen strategy rolled forward through real time and real costs, not a "retrain each fold" walk-forward; genuine parameter re-optimization per fold is a natural next step, not done here.
+
+### Root-causing the loss: Information Coefficient, breadth sweep, and winner/loser attribution
+
+The result above says the strategy loses; it doesn't say why. Three follow-up analyses, all reusing the same fetch/score split (`scripts/composite_score_ic_analysis.py`), root-cause it rather than guessing.
+
+**1. (Superseded by the 53-quarter re-test below: this 9-quarter number did not replicate.) The signal looked real but weak, and the DCF leg carried almost all of it.** Spearman rank IC (`composite_score` vs. realized forward return) across all 1,499 (ticker, period) pairs in the sampled universe: **pooled IC = +0.093, mean per-period IC = +0.075 (std 0.260 across the 11 measurable periods)**. An IC in this range is a genuine, textbook-weak equity signal — not zero, not inverted — but the std being 3.5x the mean means its sign and strength swing hard period to period, not a stable edge. Decomposed: `dcf_score` alone carries essentially the whole thing (IC +0.095); `relative_score` is meaningfully weaker (+0.041) — the existing 80/20 DCF/relative weighting (`report_data_builder.py`) is already pointed the right direction, this isn't a blend-weight bug. The decile table (mean forward return by composite_score decile, pooled) confirms a noisy, non-monotonic-but-roughly-upward pattern (1.2%, 0.8%, 2.0%, 5.9%, 1.7%, 1.9%, 4.0%, 3.3%, 4.5%, 5.9% from lowest to highest decile) with a **15-21% stdev inside every single decile** — 3-4x the entire top-to-bottom decile spread. Individual-stock noise dwarfs the signal.
+
+**2. Widening the portfolio made it WORSE, not better — refuting the obvious "just diversify more" fix before it shipped.** Re-ran the walk-forward backtest at three breadths (`--top-n 25/75/150`, same universe/dates/costs):
+
+| Top-N | CAGR | Sharpe | Max Drawdown |
+|---|---:|---:|---:|
+| 25 | 16.3% | 0.93 | -22.7% |
+| 75 | 12.0% | 0.73 | -18.8% |
+| 150 | 11.0% | 0.65 | -19.3% |
+| 275 (naive, no filter) | **19.1%** | **1.61** | -18.8% |
+
+CAGR and Sharpe fall monotonically from 25 to 150 — the opposite of what "concentration is the problem, add breadth" predicts — and only abandoning the score filter entirely (275) wins. This ruled out breadth/diversification as the fix and pointed at the portfolio-construction RULE itself, not the position count.
+
+**3. The actual mechanism: the strategy is Buy-only, and Sell calls are specifically wrong on the biggest winners.** Pulled the 20 largest single-period gains in the sampled universe (`composite_score_ic_rows.csv`, 60-101% moves each) and checked what the model said about each at the time: **9 of 20 (45%) were rated Sell.** Their score-decile distribution is close to uniform (roughly as many in decile 1-3 as in decile 8-10) — at the extremes, where a handful of huge movers disproportionately drive a bull market's total return, the model has essentially no discriminating power, and its worst calls (Sell on a future 60-100%+ gainer) land about as often as its best ones. Every top-N portfolio tested (25/75/150) is long-only and Buy-filtered, so a Sell rating means permanent exclusion, full stop — structurally forfeiting close to half of this window's extreme-winner exposure. The naive baseline's edge isn't really about breadth; it's that it's the only one of the four that never excludes a stock for being Sell-rated. Widening N (finding 2) made things worse specifically because it kept the Buy-only exclusion rule while diluting the concentrated top picks with weaker ones, without ever recovering the excluded Sell-side winners.
+
+**4. Tested the implied fix directly — removing the hard exclusion helps, but doesn't close the gap.** Built `_rank_tilt_weights` (`walkforward_backtest.py --strategy rank_tilt`): every successfully-scored ticker in the full universe gets a positive weight proportional to its composite_score RANK that period (never zero, never hard-excluded for a Sell rating), instead of a hard Buy-only top-N cutoff. Real result:
+
+| Strategy | CAGR | Sharpe | Max Drawdown |
+|---|---:|---:|---:|
+| Top-25 (hard Buy-only cutoff) | 16.3% | 0.93 | -22.7% |
+| Top-75 (hard cutoff, wider) | 12.0% | 0.73 | -18.8% |
+| **Rank-tilt (full universe, no exclusion)** | **12.0%** | **0.93** | **-19.5%** |
+| Naive factor baseline (no signal at all) | 19.0% | 1.59 | -18.8% |
+| S&P 500 buy-and-hold | 21.3% | 0.97 | -18.9% |
+
+The tilt confirms finding 3 was real and correctly diagnosed: at the *same* 12.0% CAGR as the top-75 hard cutoff, removing the exclusion rule raises Sharpe from 0.73 to 0.93 — a genuinely better risk-adjusted outcome for the same return, exactly what "stop permanently excluding stocks a weak signal misjudges" predicts. **But it still loses decisively to simply owning everything equal-weighted** (12.0%/0.93 vs. 19.0%/1.59) — removing the exclusion rule fixed the specific self-inflicted wound (locking out ~45% of the extreme winners) without making the underlying weak signal (IC +0.093, dwarfed by 15-21% per-decile noise, finding 1) strong enough to beat a no-signal baseline in this window.
+
+**Final conclusion of this 3-year investigation (revised by the longer re-test below):** in this specific 3-year, persistently-bullish sample, no portfolio-construction fix tested — narrower, wider, or exclusion-free tilting — makes `composite_score` add value over passive equal-weight ownership. The signal looked real (IC +0.093 over 9 quarters) but too weak, relative to individual-stock idiosyncratic risk, to translate into better risk-adjusted returns through weighting or filtering alone. That points past construction-rule fixes and at the underlying signal itself: `composite_score` is built purely from DCF + relative valuation, with no momentum, quality, or sentiment component, despite `AlphaFactorsEngine` already computing several of those (display-only, see Section 4's ML classifier feature importances, where `annualized_volatility`/`momentum_6m`/`momentum_12m`/`beta` all showed real predictive weight alongside the valuation features) — a materially different signal, not a different way of using the same one, is the next real lever, and it needs the same IC-before-shipping discipline this whole subsection modeled, not assumed to help. Separately, and just as honestly: this is one 3-year bull-market window, and a valuation-based signal not adding value over 3-month holding periods doesn't contradict DCF's traditional role as a *long-horizon* fair-value estimate — using it for quarterly tactical rotation may itself be a horizon mismatch this investigation can't distinguish from "the signal doesn't work," given the yfinance ~5-year rolling-fundamentals ceiling already blocking a genuine multi-regime or longer-horizon test (see the bear-market-window limitation earlier in this document).
+
+### Longer-history re-test on SEC EDGAR data (2012–2025): the +0.093 did not replicate
+
+The IC above rests on nine usable quarters (yfinance only serves ~5 years of restated statements, and the three earliest periods had 1, 13 and 17 scored stocks — their ICs of -0.56 to +0.55 were pure noise, which is why the original t-stat was 0.92 and only 2.29 once those were excluded after the fact). To find out whether the signal was real, the **unchanged production scorer** (`_score_ticker_at_date`: DCF + relative valuation, frozen weights) was fed SEC EDGAR *as-filed* statements instead (every value stamped with the date it became public, via the XBRL company-facts API), and run on 984 tickers at 53 quarter-ends from June 2012 to June 2025 (the period from July 2025 on was kept sealed and untouched). The test was pre-registered, including the pass line (mean IC ≥ 0.02 and t ≥ 2; a trial counter was kept, now at 15, and the bar raised for the final batch of five candidates).
+
+**Adapter fidelity, checked before trusting any number:** on 33 stocks scored by both data sources on the same date, EDGAR-fed and yfinance-fed composite scores have a 0.83 rank correlation. The remaining gap (yfinance's lease-inclusive debt, restated numbers, and the DCF's sensitivity to small input changes — one stock moved from +252% to -65% upside on modest input differences) adds noise, which biases IC toward zero rather than inflating it.
+
+| Window | Variant | Mean IC | t | Quarters positive |
+|---|---|---:|---:|---:|
+| 2012-06 → 2022-12 (decisive, never seen by the original hint) | raw composite | +0.016 | +0.84 | 21/43 |
+| | sector-neutral | +0.010 | +0.58 | 20/43 |
+| 2023-03 → 2025-06 | raw composite | -0.014 | -0.40 | 3/10 |
+| All 53 quarters | raw composite | **+0.011** | **+0.62** | 24/53 |
+
+**Verdict: no demonstrated stock-selection edge.** The +0.093 was a nine-quarter artifact. Survivorship bias (the price universe is today's index members; 37% of the S&P 500's January-2012 members and 9% of January-2024's have no price history here — measured against point-in-time membership data) *flatters* every number above, so the true figure is not better.
+
+**Why it fails (measured, not guessed):** (1) both halves are individually ~zero (DCF +0.012, relative +0.009), so blending is not the problem; (2) the score is stable — a stock's rank has 0.85 quarter-to-quarter autocorrelation — so it is not noise, it is a consistent ranking that does not predict; (3) it is a disguised value-plus-falling-stocks bet (correlation +0.44 with earnings yield, +0.44 with FCF yield, -0.29 with 12-month momentum), and those factors had ~zero IC themselves in this universe; (4) its IC tracks whether value is working that year (+0.19 in 2020, negative in 2018, 2019 and 2025; quarter-to-quarter IC std 0.125 vs 0.045 from sampling noise alone), i.e. style exposure, not stock selection; (5) next-quarter return by composite decile is nearly flat (4.8, 4.4, 3.8, 3.9, 4.3, 4.5, 4.5, 4.5, 4.8, 5.6 %/quarter, lowest to highest), so the "Sell" side carries no information.
+
+**Fixes tested before building anything, all rejected** (pre-registered; pass line pooled IC ≥ 0.03, t ≥ 2.5 and positive in both 2012-18 and 2019-25):
+
+| Candidate | Pooled IC | t | Result |
+|---|---:|---:|---|
+| Baseline composite | +0.011 | 0.62 | n/a |
+| Rank of raw DCF upside (removes the saturation at ±100) | +0.012 | 0.71 | Rejected — ordering carries no more information |
+| Composite + momentum | +0.006 | 0.47 | Rejected — worse |
+| Composite + ROA | +0.001 | 0.09 | Rejected — worse |
+| Composite + momentum + ROA | +0.002 | 0.12 | Rejected — worse |
+| Regime gate (act only when the value spread is wide) | +0.012 | 0.52 | Rejected — gate was ON 37 of 41 dates (the spread trended up), so it never discriminated |
+
+Two further tests in the same sprint also found nothing: five classic factors (12-1 momentum, low volatility, earnings yield, FCF yield, ROA) on the same EDGAR data (53 quarters, none above noise, multi-factor combination IC -0.025), and a Lazy-Prices-style measure of how much each company's 10-K risk-factor section changed year over year (1,531 filings, IC -0.005, t -0.22; stopped at its pre-registered kill gate).
+
+**Further tests, same discipline (all pre-registered, 28 trials counted, bar raised to t ≥ 2.5):**
+
+- **Is the DCF's own confidence informative?** Stability measures from the Monte Carlo and the WACC × growth grid do not predict returns (stable vs unstable calls: IC +0.006 vs +0.010). The diagnosis: "stable" mostly means "extreme upside" (correlation 0.58–0.72), and the most extreme-upside fifth of calls has *negative* IC (-0.019), i.e. the model's most confident calls are its extrapolation artefacts. A second round (a stability veto on Buy calls: +0.78 pts/quarter, t 1.6, absent in 2012–18; dropping the extreme fifth: IC +0.011) also failed. The Monte Carlo spread adds nothing about realised moves beyond trailing volatility (partial correlation +0.007), so those flags stay informational.
+- **Would a bigger learned model do better?** A walk-forward gradient-boosting/ridge model on 47k point-in-time rows reaches IC +0.023 at one quarter (t 1.0) and **+0.060 at four quarters** (Newey-West t 1.7, against the composite's +0.015), the best number found, but below the promotion bar and unstable by year; it stays display-only and is the designated challenger for the live record.
+- **Does filing tone carry information?** Change in Loughran-McDonald negative-word share across consecutive 10-K risk-factor sections: IC +0.022, t 1.0, vanishing in the second half; uncertainty words: nothing. With the sentence-level change test, the filing-text idea is exhausted on this data.
+- **Is there any survivorship-free route?** Measured, not assumed: the survivor-only universe overstates equal-weight index returns by about 1.9 points a year (2012–2024, versus the equal-weight S&P 500 ETF), and yfinance holds history for none of 183 delisted former members. Tiingo's public ticker list covers 131 of those 183, so the one open route is a free Tiingo key plus name-based filer matching; until then every single-stock figure above is an upper bound and `scripts/live_record.py` is the clean forward test.
+
+**What this changes about the product claim:** FinSight is a transparent, auditable valuation-and-research tool whose own evaluation says plainly that its Buy/Hold/Sell score has no demonstrated return-predictive edge over equal-weight ownership. It does not claim otherwise, and the generated reports already carry the canonical accuracy number and a not-investment-advice disclaimer. The contribution is the evaluation discipline (point-in-time data, sealed holdout, pre-registered pass lines, trial counting), not a return claim.
+
+**Reproduce:** the sandbox is in `research/` on branch `research/returns-sprint` (`edgar_pit.py` → `prices.py` → `pit_composite.py run` → `pit_composite_ic.py`; `why_composite_fails.py`, `fix_candidates.py`); every pre-registration and result is in `SPRINT_TRACKER.md`.
+
+**Reproduce:** `python scripts/walkforward_backtest.py [--top-n N | --strategy rank_tilt]` (equity curve/holdings/trade log); `python scripts/composite_score_ic_analysis.py` (IC/decile CSVs behind findings 1 and 3).
+
+---
+
+## 10. Known limitations
 
 Documented here rather than left implicit, in the same spirit as the rest of this file.
 
@@ -353,7 +455,8 @@ Numbers that survive a follow-up question are worth more than a single flatterin
 - Built a point-in-time backtesting harness with explicit no-look-ahead controls (filing-lag gating, trailing-window beta, as-of pricing) across 1,000+ tickers and two independent historical windows; used it to find and remove a recommendation rule that measurably hurt accuracy (15–20 points on the affected subset) rather than assuming it helped.
 - Diagnosed that a cross-encoder reranker was silently *degrading* RAG retrieval quality via a hand-labeled precision/NDCG/MRR evaluation, and shipped the fix (raw retrieval) with the disproved approach documented in place, not deleted.
 - Fine-tuned a retrieval embedding model with contrastive learning (`MultipleNegativesRankingLoss`) and designed a frozen-candidate-pool evaluation methodology to isolate the embedding model as the only variable under test.
-- Built an ML valuation classifier (Logistic Regression vs. XGBoost) with stratified k-fold CV, a held-out test split, and per-class metrics — while being explicit that a 39-row training set doesn't yet clear the bar for a production signal, and gating it out of the system's actual recommendation logic until it does.
+- Built an ML valuation classifier (Logistic Regression vs. XGBoost) with ticker-grouped k-fold CV, a group-safe held-out test split, and per-class metrics — grown to 1,700 real training rows and tested twice (a linear blend weight, then a prediction-agreement gate) for whether it actually improves the production recommendation composite, and gated out of that composite both times on honest, out-of-sample evidence that it doesn't, not on a row-count floor.
 - Rewrote a report-faithfulness evaluator after realizing its v1 metric was structurally unsatisfiable (penalizing exactly the paraphrasing behavior the generation prompt asked for) — an example of debugging an eval, not just a model.
 - Ported the agent's planner-dispatches-tools control flow onto LangGraph as a StateGraph, kept alongside the original hand-rolled controller, and benchmarked the two — including catching and discarding a misleading first result (network I/O variance masquerading as a 30x orchestration difference) before reporting the real, isolated ~7-13ms dispatch-overhead number.
 - Added a Redis caching layer with two deliberately different strategies (content-addressed for correctness-sensitive valuation/narrative output, TTL-only for genuinely time-bound statement data) and measured real 500-1,700x speedups on cache hits — after catching a cross-contamination bug in the benchmark's own methodology first.
+- Built a walk-forward portfolio backtest (quarterly rebalancing, transaction costs, Sharpe/Sortino/max-drawdown, 275 tickers over 3 years) rather than stopping at per-ticker directional accuracy, reusing the existing point-in-time discipline by splitting the fetch/score steps so each ticker is priced once and reused across all 13 rebalance dates instead of re-fetched — and reported the honest result: the composite-score-driven strategy underperformed a no-signal equal-weight baseline on every metric, a finding that directly shaped the project's move away from "predicts stocks" positioning.

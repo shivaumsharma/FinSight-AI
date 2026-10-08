@@ -149,6 +149,47 @@ export interface TrackRecord {
   reproduce: string;
 }
 
+// From app/reporting/calibrated_confidence.py -- UNLIKE TrackRecord
+// above, this IS specific to this report: how often a call THIS TYPE
+// (Buy/Hold/Sell), in THIS sector, has actually been right
+// historically. null whenever there isn't enough sector-specific (or
+// even overall-by-rating) sample size to back a real number.
+export interface CalibratedConfidence {
+  accuracy_pct: number;
+  n: number;
+  // How often the same call given to every stock in this scope would have been right.
+  base_rate_pct: number;
+  edge_pts: number;
+  scope: "sector" | "overall";
+  sector: string | null;
+  rating: "Buy" | "Hold" | "Sell";
+}
+
+// From app/analysis/data_quality.py -- display-only; never changes the rating.
+export interface DataQuality {
+  score: number;
+  level: "HIGH" | "MEDIUM" | "LOW";
+  no_view: boolean;
+  issues: string[];
+  fields_present: number;
+  fields_total: number;
+}
+
+// From app/analysis/risk_range.py -- size of a plausible move, not direction.
+export interface RiskRangeBand {
+  low: number;
+  high: number;
+  low_pct: number;
+  high_pct: number;
+}
+export interface RiskRange {
+  annualised_volatility_pct: number;
+  current_price: number;
+  coverage: string;
+  ranges: Record<string, RiskRangeBand>;
+  note: string;
+}
+
 export interface ReportData {
   currency?: string;
   currency_symbol?: string;
@@ -163,6 +204,9 @@ export interface ReportData {
   };
   signal_quality?: SignalQuality;
   track_record?: TrackRecord | null;
+  calibrated_confidence?: CalibratedConfidence | null;
+  data_quality?: DataQuality | null;
+  risk_range?: RiskRange | null;
   narrative?: Partial<Record<NarrativeSection, string>>;
   market_earnings_snapshot?: MarketEarningsSnapshot;
   valuation_analysis?: ValuationAnalysis;
@@ -190,9 +234,8 @@ export interface ResearchResult {
   llm_usage?: Record<string, number> | null;
 }
 
-// POST /v1/research/{job_id}/what-if's response shape -- ports
-// streamlit_app.py's "What-If: Adjust DCF Assumptions" sliders panel
-// (app/valuation/what_if_dcf.py) to the API. `available` is the
+// POST /v1/research/{job_id}/what-if's response shape (the "What-If: Adjust
+// DCF Assumptions" sliders panel, app/valuation/what_if_dcf.py). `available` is the
 // discriminant: when false, DCF simply isn't computable for this
 // company (an expected, common case, not a failure) and no other
 // field is guaranteed present. All *_pct fields are percentage-POINT
@@ -227,6 +270,19 @@ export interface WhatIfResponse {
     terminal_growth_pct: number;
   };
   result?: WhatIfResult;
+  // The composite-score formula/thresholds themselves (see
+  // app/reporting/report_data_builder.py's own BUY_THRESHOLD/
+  // SELL_THRESHOLD/DCF_WEIGHT/RELATIVE_WEIGHT/SCORE_CAP constants) --
+  // sourced from the backend rather than re-typed here, so the
+  // composite-score breakdown UI can never silently drift from the
+  // real scoring formula.
+  scoring?: {
+    buy_threshold: number;
+    sell_threshold: number;
+    dcf_weight: number;
+    relative_weight: number;
+    score_cap: number;
+  };
 }
 
 // POST /v1/research/{job_id}/model-compare's response shape -- an
@@ -316,6 +372,49 @@ export interface ScoreboardResponse {
   generated_at: number;
 }
 
+// GET /v1/accuracy-tearsheet's response shape (see
+// app/reporting/accuracy_tearsheet.py). Distinct from Scoreboard above:
+// Scoreboard is live production calls in recent (7/30/90-day) windows;
+// this is the one canonical BACKTESTED number (scripts/canonical_accuracy.py,
+// a broad 1,000+ ticker historical evaluation, not live production
+// traffic) plus, when Snowflake is configured, live per-sector/Buy-vs-
+// Sell/trend-over-time breakdowns of that same backtest population.
+export interface AccuracyTearsheetSource {
+  file: string;
+  n_scored: number;
+  as_of_range: [string, string] | null;
+}
+
+export interface AccuracyTearsheetCanonical {
+  metric: string;
+  methodology: string;
+  n: number;
+  model_accuracy_pct: number;
+  model_ci_95: [number, number];
+  always_buy_baseline_pct: number;
+  always_buy_ci_95: [number, number];
+  beats_baseline: boolean;
+  sources: AccuracyTearsheetSource[];
+  live_tracker_n: number;
+  live_tracker_note: string;
+  generated_at: string;
+  reproduce: string;
+  summary_line: string;
+}
+
+// Each row is a tuple whose shape depends on which named query
+// produced it -- see snowflake_accuracy_store.py's VALIDATION_QUERIES
+// (precision_by_sector: [universe, n_calls, n_correct, precision_pct];
+// buy_vs_sell_precision: [call, n_calls, n_correct, precision_pct];
+// accuracy_trend_by_run_date: [run_date, n_calls, accuracy_pct]) --
+// left as unknown[][] rather than named per-query types since the
+// frontend only ever indexes into these positionally by column.
+export interface AccuracyTearsheetResponse {
+  available: boolean;
+  canonical: AccuracyTearsheetCanonical | null;
+  live_breakdowns: Record<string, unknown[][]> | null;
+}
+
 // GET /v1/stocks/{ticker}/overview's response shape -- powers
 // web/src/app/stock/[ticker]/page.tsx's header/price-statistics/
 // fundamentals/company-info cards. Every numeric field here is null
@@ -366,59 +465,6 @@ export interface StockOverview {
     target_low_price: number | null;
     number_of_analyst_opinions: number | null;
   };
-}
-
-// GET /v1/stocks/{ticker}/options's per-contract row shape (one entry
-// of either `calls` or `puts` below). market_price/strike are the only
-// fields guaranteed non-null -- implied_vol_pct/theoretical_price/the
-// greeks/bid/ask/open_interest can each independently fail to compute
-// (thin quotes, a strike Black-Scholes can't solve IV for, etc.) and
-// come back null; render those as "--", never "0"/"NaN".
-export interface OptionContractRow {
-  strike: number;
-  market_price: number;
-  bid: number | null;
-  ask: number | null;
-  implied_vol_pct: number | null;
-  // yfinance's own pre-computed IV, surfaced purely as a sanity-check
-  // alongside implied_vol_pct (which is solved fresh against this
-  // row's real market price -- see app/derivatives/options_pricer.py's
-  // module docstring for why the two can differ). Not rendered as its
-  // own column, just available if a future pass wants it.
-  yfinance_implied_vol_pct?: number | null;
-  theoretical_price: number | null;
-  delta: number | null;
-  gamma: number | null;
-  theta: number | null;
-  vega: number | null;
-  rho: number | null;
-  in_the_money: boolean;
-  open_interest: number | null;
-}
-
-// GET /v1/stocks/{ticker}/options?expiry=YYYY-MM-DD's response shape --
-// live options chain plus Black-Scholes-derived theoretical pricing/
-// greeks for the selected expiry. On failure (no listed options for
-// this ticker at all, or the ticker doesn't resolve) the backend
-// returns an ApiErrorBody instead of this shape -- most tickers,
-// especially non-US ones, simply have no options chain, so that's an
-// expected, calmly-handled outcome in OptionsPanel.tsx, not an error
-// state.
-export interface OptionsAnalysis {
-  ticker: string;
-  spot_price: number;
-  currency: string;
-  risk_free_rate: number;
-  // Null when the realized-vol fetch itself fails (e.g. a brand-new
-  // listing with under a year of price history) -- see
-  // build_options_analysis's own try/except, this degrades to null
-  // rather than failing the whole request.
-  realized_volatility_pct: number | null;
-  expiries: string[];
-  selected_expiry: string;
-  days_to_expiry: number;
-  calls: OptionContractRow[];
-  puts: OptionContractRow[];
 }
 
 export type JobStatus = "queued" | "running" | "done" | "error";
@@ -659,6 +705,24 @@ export interface PortfolioAnalysis {
   rating_counts: { Buy: number; Hold: number; Sell: number };
   value_weighted_pct: { Buy: number; Hold: number; Sell: number } | null;
   unresearched_tickers: string[];
+}
+
+// GET /v1/portfolio/risk-overlay's response (app/analysis/vol_overlay.py): a volatility-targeting risk view of the user's
+// self-reported holdings. Drawdown protection, not a return forecast -- `evidence.takeaway` and `disclaimer` say so and the
+// card must always show them. `available: false` carries a plain-language `reason` instead of numbers.
+export interface PortfolioRiskOverlay {
+  available: boolean;
+  reason?: string;
+  realised_volatility_pct?: number;
+  target_volatility_pct?: number;
+  suggested_exposure_pct?: number;
+  suggested_cash_pct?: number;
+  max_drawdown_in_window_pct?: number;
+  window_days?: number;
+  evidence?: { market: string; takeaway: string; max_drawdown_cut: Record<string, string>; sharpe: Record<string, string> };
+  disclaimer?: string;
+  excluded_tickers?: string[];
+  holdings_used?: string[];
 }
 
 // POST /v1/orders' response shape -- a simulated market order's

@@ -402,7 +402,7 @@ const VoiceInputButton = forwardRef<VoiceInputHandle, {
         onClick={handleClick}
         disabled={disabled || state === "transcribing"}
         title={state === "recording" ? "Listening -- stops automatically, or click to stop now" : "Speak your question"}
-        className={`flex items-center justify-center rounded p-1 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+        className={`flex items-center justify-center rounded p-2 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
           state === "recording"
             ? "animate-pulse text-danger"
             : state === "error"

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { currencySymbol } from "@/lib/currency";
 import { fmtCompactNumber } from "@/lib/stockFormat";
+import { formatPercent } from "@/lib/numberFormat";
 import { useThemeColors } from "@/lib/useThemeColors";
 import { cagr, fdMaturity, lumpsumFutureValue, ppfMaturity, sipFutureValue, type GrowthResult } from "@/lib/calculators";
 
@@ -209,7 +210,7 @@ function CagrCalculator({ symbol }: { symbol: string }) {
       <div className="mt-4 rounded-lg border border-border bg-card px-4 py-4 text-center">
         <div className="font-mono text-[9px] tracking-wide text-dim">CAGR</div>
         <div className="mt-1 font-mono text-xl font-bold text-accent">
-          {rate !== null ? `${rate.toFixed(2)}%` : "--"}
+          {rate !== null ? formatPercent(rate) : "--"}
         </div>
         {rate === null && (
           <p className="mt-1 font-mono text-[10px] text-dim">Enter positive initial/final values and a positive time period.</p>

@@ -3,8 +3,7 @@ evaluation_tool.py
 
 Wraps the existing EvaluationEngine (grounding, retrieval, citation
 coverage, completeness, latency) as a tool so it shows up in the
-registry/trace like every other step, instead of being called ad hoc
-from streamlit_app.py as it was before.
+registry/trace like every other step, instead of being called ad hoc.
 
 Latency is derived from `context.request_time`, which
 `ResearchContext` already stamps at construction time via

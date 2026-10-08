@@ -1,11 +1,12 @@
+import os
 import time
 from datetime import date
 
 import yfinance as yf
-import pandas as pd
 
 from app.core.cache import cache_get, cache_set, make_key
 from app.core.retry import retry_on_transient_error
+from app.data import edgar_fundamentals
 
 # TTL-only caching (see app/core/cache.py's module docstring for why
 # this is a different strategy than the content-addressed caches in
@@ -22,10 +23,9 @@ STATEMENT_CACHE_TTL_SECONDS = 12 * 3600
 
 class TickerNotFoundError(Exception):
     """Raised when yfinance has no usable data for a ticker -- it
-    doesn't exist, is delisted, or was mistyped. Caught centrally in
-    streamlit_app.py to show a friendly message instead of a raw
-    traceback from whichever statement fetch happens to hit an empty
-    DataFrame first."""
+    doesn't exist, is delisted, or was mistyped. Caught centrally by the
+    API layer to show a friendly message instead of a raw traceback from
+    whichever statement fetch happens to hit an empty DataFrame first."""
 
 
 class MarketDataUnavailableError(Exception):
@@ -57,7 +57,7 @@ _quote_cache: dict = {}
 _QUOTE_CACHE_TTL_SECONDS = 45
 
 
-def get_quote(ticker: str) -> dict:
+def get_quote(ticker: str, max_age_seconds: float = _QUOTE_CACHE_TTL_SECONDS) -> dict:
     """Cheap current-price lookup for the Watchlist -- {"price",
     "change_pct", "previous_close", "currency"}. previous_close is
     exposed (already fetched internally to compute change_pct) so
@@ -72,7 +72,7 @@ def get_quote(ticker: str) -> dict:
     ticker = ticker.upper()
 
     cached = _quote_cache.get(ticker)
-    if cached is not None and time.time() - cached[0] < _QUOTE_CACHE_TTL_SECONDS:
+    if cached is not None and time.time() - cached[0] < max_age_seconds:
         return cached[1]
 
     try:
@@ -410,20 +410,54 @@ class MarketDataLoader:
      cache_set(key, df, ttl_seconds=STATEMENT_CACHE_TTL_SECONDS)
      return df
 
+  @staticmethod
+  def fundamentals_source():
+     """FUNDAMENTALS_SOURCE: "auto" (default) = yfinance first, SEC EDGAR only
+     when yfinance's annual statements fail or come back empty; "yfinance" =
+     never use EDGAR; "edgar" = EDGAR first (deeper, as-filed history for US
+     filers), yfinance only if EDGAR has nothing. See edgar_fundamentals.py."""
+     value = os.environ.get("FUNDAMENTALS_SOURCE", "auto").strip().lower()
+     return value if value in ("auto", "yfinance", "edgar") else "auto"
+
+  def _edgar_statement(self, index):
+     if not hasattr(self, "_edgar_cache"):
+        self._edgar_cache = edgar_fundamentals.get_statements(self.ticker)
+     return None if self._edgar_cache is None else self._edgar_cache[index]
+
+  def _annual_statement(self, name, fetch_fn, error_message, edgar_index):
+     """yfinance annual statement with the EDGAR fallback described above.
+     When nothing works the ORIGINAL yfinance error is re-raised, so callers
+     (and market_data_tool.py's error handling) behave exactly as before."""
+     source = self.fundamentals_source()
+     original_error = None
+     if source != "edgar":
+        try:
+           return self._cached_statement(name, fetch_fn, error_message)
+        except Exception as exc:
+           if source == "yfinance":
+              raise
+           original_error = exc
+
+     key = make_key("statement_edgar", self.ticker, name)
+     cached = cache_get(key)
+     if cached is not None:
+        return cached
+     df = self._edgar_statement(edgar_index)
+     if df is not None and not df.empty:
+        cache_set(key, df, ttl_seconds=STATEMENT_CACHE_TTL_SECONDS)
+        return df
+     if source == "edgar":  # forced EDGAR found nothing: fall back to yfinance rather than fail
+        return self._cached_statement(name, fetch_fn, error_message)
+     raise original_error
+
   def get_income_statement(self):
-     return self._cached_statement(
-        "income", lambda: self.stock.financials, "Income Statement unavailable"
-     )
+     return self._annual_statement("income", lambda: self.stock.financials, "Income Statement unavailable", 0)
 
   def get_balance_sheet(self):
-     return self._cached_statement(
-        "balance_sheet", lambda: self.stock.balance_sheet, "Balance Sheet unavailable"
-     )
+     return self._annual_statement("balance_sheet", lambda: self.stock.balance_sheet, "Balance Sheet unavailable", 1)
 
   def get_cash_flow(self):
-     return self._cached_statement(
-        "cash_flow", lambda: self.stock.cashflow, "Cash flow statement unavailable"
-     )
+     return self._annual_statement("cash_flow", lambda: self.stock.cashflow, "Cash flow statement unavailable", 2)
 
   # Quarterly counterparts -- same caching/error convention as the
   # annual statements above, just pointed at yfinance's quarterly_*

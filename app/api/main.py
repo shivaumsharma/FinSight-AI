@@ -1,17 +1,10 @@
 """
 main.py
 
-FastAPI service boundary in front of the research pipeline -- step 1 of
-a staged, mobile-aware rollout (see the approved plan for the full
-context and the later step deliberately NOT in this pass: push
-notifications -- hosted inference, the shared-secret API key check,
-real per-user auth/rate-limiting, signed PDF share links, and
-disclaimer language, see below, are now all in place). streamlit_app.py
-is unchanged by this file and still calls ResearchAgent/
-LangGraphResearchAgent in-process directly -- rewiring it to call this
-API instead is a later step, done deliberately minimally when it
-happens, since Streamlit is staying a debug tool, not becoming the
-product.
+FastAPI service in front of the research pipeline: hosted inference, the
+shared-secret API key check, per-user auth and rate limiting, signed PDF
+share links and disclaimer language are all in place. The Next.js
+frontend (web/) is the only client of this API.
 
 Two auth layers, not one, stacked deliberately (see _API_KEY's own
 comment below for the full reasoning): X-API-Key gates the deployment
@@ -42,6 +35,8 @@ plain on-demand endpoints, triggered by a free external cron (see
 alive between requests.
 """
 
+import asyncio
+import hmac
 import logging
 import os
 import re
@@ -58,13 +53,12 @@ from pydantic import BaseModel, field_validator
 from app.api import auth, db, errors, jobs
 from app.api.serialization import financial_df_from_json
 from app.core.company_resolver import resolve_companies, suggest_companies
-from app.data import sarvam_client, sarvam_realtime_client, sarvam_tts_client
+from app.data import price_hub, sarvam_client, sarvam_realtime_client, sarvam_tts_client
 from app.data.market_data import (
     TickerNotFoundError, get_corporate_actions, get_corporate_actions_history, get_quote, get_usd_conversion_rate,
 )
 from app.analysis.growth_metrics import build_financial_performance, build_growth_metrics
 from app.analysis.technical_indicators import build_technicals
-from app.derivatives.options_pricer import OptionsUnavailableError, build_options_analysis
 from app.reasoning.peer_comparison import build_peer_comparison
 from app.reasoning.similar_stocks import find_similar_stocks
 from app.reasoning.stock_score import build_stock_insights
@@ -84,6 +78,11 @@ from app.reasoning.real_estate_guidance import get_real_estate_guidance
 from app.reporting.news_client import fetch_company_news, fetch_market_news
 from app.reporting.corporate_actions_feed import build_corporate_actions_feed
 from app.reporting.portfolio_summary import build_portfolio_view
+from app.reporting.portfolio_risk_overlay import build_risk_overlay
+from app.reporting.accuracy_tearsheet import build_accuracy_tearsheet
+from app.reporting.report_data_builder import (
+    BUY_THRESHOLD, SELL_THRESHOLD, DCF_WEIGHT, RELATIVE_WEIGHT, SCORE_CAP,
+)
 from app.valuation import what_if_dcf
 from app.valuation.fcff_engine import FCFFEngine
 from app.valuation.what_if_dcf import compute_what_if
@@ -100,6 +99,14 @@ MAX_VOICE_AUDIO_BYTES = 25 * 1024 * 1024
 # a code change.
 DAILY_JOB_LIMIT = int(os.environ.get("DAILY_JOB_LIMIT", db.DEFAULT_DAILY_JOB_LIMIT))
 RATE_LIMIT_WINDOW_SECONDS = 24 * 3600
+
+# See db.claim_ticker_resolution_attempt's own docstring -- caps how
+# often resolve_ticker_or_400 below may fall through to the fuzzy
+# resolve_companies() fallback (and, on a further miss, a real LLM call)
+# per user per day.
+TICKER_RESOLUTION_RATE_LIMIT = int(
+    os.environ.get("TICKER_RESOLUTION_RATE_LIMIT", db.DEFAULT_TICKER_RESOLUTION_RATE_LIMIT)
+)
 
 # See db.find_recent_duplicate_job's docstring -- how recently an
 # identical (ticker/question/orchestrator) DONE job must have completed
@@ -191,7 +198,11 @@ async def require_api_key(request: Request, call_next):
         _API_KEY
         and request.url.path.startswith("/v1")
         and request.method != "OPTIONS"
-        and request.headers.get("X-API-Key") != _API_KEY
+        # Constant-time, matching every other secret comparison in this
+        # codebase (auth.py's password/PDF-share/voice-token checks) --
+        # a naive `!=` leaks how many leading bytes of a guess matched
+        # via response timing.
+        and not hmac.compare_digest(request.headers.get("X-API-Key") or "", _API_KEY)
     ):
         return JSONResponse(
             status_code=401,
@@ -809,12 +820,10 @@ def get_conversation_listen_token(current_user: str = Depends(auth.get_current_u
     backend half of a real-time main-loop STT path is built and unit-
     tested here, but the frontend doesn't call this yet -- the current
     batch-record voice session (VoiceInputButton.tsx) stays the live
-    production default until this is wired up behind a flag, since a
-    WebSocket connection to this backend doesn't work in production
-    at all yet (see infra/api_gateway.tf's own comment: the current
-    stopgap API Gateway is HTTP-only and can't carry a WebSocket
-    upgrade -- this endpoint is real, tested, and only blocked from
-    prod browser use by that separate infra gap).
+    production default until this is wired up behind a flag. A browser
+    must reach this socket through CloudFront or the backend directly,
+    not the HTTP-only API Gateway (checked 2026-10-09: CloudFront
+    answers a WebSocket handshake with 101).
     """
     return {
         "token": auth.sign_realtime_voice_token(current_user, auth.PURPOSE_CONVERSATION),
@@ -865,6 +874,81 @@ async def conversation_listen(websocket: WebSocket):
         await websocket.close(code=1000)
     except Exception:
         pass
+
+
+@app.get("/v1/prices/stream-token")
+def get_price_stream_token(current_user: str = Depends(auth.get_current_user)):
+    """Short-lived credential for /v1/prices/stream below, scoped so it cannot be replayed on the voice sockets.
+    Same shape and reasoning as GET /v1/voice/wake-listen-token: the real session token lives in an httpOnly cookie."""
+    return {
+        "token": auth.sign_realtime_voice_token(current_user, auth.PURPOSE_PRICE_STREAM),
+        "expires_in": auth.REALTIME_VOICE_TOKEN_TTL_SECONDS,
+    }
+
+
+PRICE_STREAM_HEARTBEAT_SECONDS = 15
+
+
+@app.websocket("/v1/prices/stream")
+async def price_stream(websocket: WebSocket):
+    """
+    Live quotes for the watchlist, positions and chart screens. The browser connects here directly: Next.js route
+    handlers cannot proxy WebSockets and the HTTP-only API Gateway cannot carry them, so this must be reached on the
+    Elastic Beanstalk backend itself (or through CloudFront).
+
+    Protocol (JSON text frames):
+      client -> server  {"token": "..."}                          first message, from GET /v1/prices/stream-token
+                        {"type": "subscribe", "tickers": [...]}   replaces the subscription set
+                        {"type": "ping"}
+      server -> client  {"type": "hello", "interval": seconds, "source": "yahoo-poll"}
+                        {"type": "subscribed", "tickers": [...]}
+                        {"type": "ticks", "ticks": [{"t", "p", "c", "cur", "ts"}, ...]}   latest price per ticker
+                        {"type": "hb"} when idle, {"type": "pong"}
+    """
+    await websocket.accept()
+    try:
+        first = await websocket.receive_json()
+    except Exception:
+        await websocket.close(code=4001, reason="Expected a JSON auth message first.")
+        return
+
+    user_id = auth.verify_realtime_voice_token(str(first.get("token", "")), auth.PURPOSE_PRICE_STREAM)
+    if user_id is None:
+        await websocket.close(code=4401, reason="Invalid or expired token.")
+        return
+
+    hub = price_hub.get_hub()
+    client = hub.register()
+
+    async def sender():
+        while True:
+            try:
+                await asyncio.wait_for(client.ready.wait(), timeout=PRICE_STREAM_HEARTBEAT_SECONDS)
+            except asyncio.TimeoutError:
+                await websocket.send_json({"type": "hb"})
+                continue
+            ticks = client.take()
+            if ticks:
+                await websocket.send_json({"type": "ticks", "ticks": ticks})
+
+    send_task = asyncio.create_task(sender())
+    try:
+        await websocket.send_json({"type": "hello", "interval": hub.interval, "source": "yahoo-poll"})
+        while True:
+            message = await websocket.receive_json()
+            kind = message.get("type") if isinstance(message, dict) else None
+            if kind == "subscribe" and isinstance(message.get("tickers"), list):
+                accepted = hub.set_subscriptions(client, message["tickers"])
+                await websocket.send_json({"type": "subscribed", "tickers": accepted})
+            elif kind == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("price stream failed for user %s", user_id)
+    finally:
+        send_task.cancel()
+        hub.unregister(client)
 
 
 @app.post("/v1/research")
@@ -1099,8 +1183,7 @@ def model_compare(job_id: str, current_user: str = Depends(auth.get_current_user
 class WhatIfRequest(BaseModel):
     # Percentage-POINT units (e.g. 6.4 meaning 6.4%) -- matches this
     # codebase's existing slider-unit convention, see what_if_dcf.py's
-    # own comments and streamlit_app.py's whatif_growth_pct/etc.
-    # sliders. Omitted fields are defaulted server-side (see below),
+    # own comments. Omitted fields are defaulted server-side (see below),
     # not left unset -- the response always needs to report the actual
     # bounds/defaults for the frontend to seed its sliders on first load.
     growth_rate_pct: Optional[float] = None
@@ -1110,17 +1193,15 @@ class WhatIfRequest(BaseModel):
 
 @app.post("/v1/research/{job_id}/what-if")
 def what_if(job_id: str, body: WhatIfRequest, current_user: str = Depends(auth.get_current_user)):
-    """On-demand DCF assumption explorer -- ports streamlit_app.py's
-    "What-If: Adjust DCF Assumptions" sliders panel to the API (the
-    Next.js frontend is a separate process, so it can't call
-    app/valuation/what_if_dcf.py's compute_what_if() in-process the way
-    streamlit_app.py does). Cheap, single-shot DCF recompute (no LLM
-    call, no Monte Carlo loop), so safe to call on every slider move.
+    """On-demand DCF assumption explorer behind the web UI's "What-If"
+    sliders (the frontend is a separate process, so it calls this instead of
+    app/valuation/what_if_dcf.py's compute_what_if() directly). Cheap,
+    single-shot DCF recompute (no LLM call, no Monte Carlo loop), so safe to
+    call on every slider move.
 
     `available: False` is NOT an error -- it's the expected, common
     response whenever DCF wasn't computable for this company at all
-    (mirrors compute_what_if's own "base FCFF can't be computed" case
-    and streamlit_app.py's own try/except around building `whatif`)."""
+    (mirrors compute_what_if's own "base FCFF can't be computed" case)."""
     job = db.get_job(job_id)
     if job is None:
         raise errors.job_not_found(job_id)
@@ -1201,6 +1282,21 @@ def what_if(job_id: str, body: WhatIfRequest, current_user: str = Depends(auth.g
             "terminal_growth_pct": terminal_growth_pct,
         },
         "result": computed,
+        # The composite-score formula/thresholds themselves, sourced
+        # directly from report_data_builder.py's own constants (not
+        # re-typed here) -- lets the frontend render an accurate
+        # composite-score breakdown (component weights, Buy/Hold/Sell
+        # zone boundaries) without a second, driftable copy of numbers
+        # that already live in one place. See what_if_dcf.py's own
+        # module docstring for why this whole endpoint avoids
+        # reimplementing the scoring math a second time.
+        "scoring": {
+            "buy_threshold": BUY_THRESHOLD,
+            "sell_threshold": SELL_THRESHOLD,
+            "dcf_weight": DCF_WEIGHT,
+            "relative_weight": RELATIVE_WEIGHT,
+            "score_cap": SCORE_CAP,
+        },
     }
 
 
@@ -1422,6 +1518,16 @@ def get_market_sentiment(current_user: str = Depends(auth.get_current_user)):
     }
 
 
+@app.get("/v1/accuracy-tearsheet")
+def get_accuracy_tearsheet(current_user: str = Depends(auth.get_current_user)):
+    # Body extracted to app/reporting/accuracy_tearsheet.py, same
+    # reasoning as build_corporate_actions_feed/build_portfolio_view's
+    # own module docstrings. Not a per-user metric -- the backtest is
+    # global, same "one number for the whole model" scope
+    # report_data_builder.py's _load_track_record() already commits to.
+    return build_accuracy_tearsheet()
+
+
 @app.get("/v1/stocks/{ticker}/overview")
 def get_stock_overview_endpoint(ticker: str, current_user: str = Depends(auth.get_current_user)):
     # Same fuzzy-input fallback as the watchlist/portfolio/orders POST
@@ -1475,26 +1581,6 @@ def get_stock_technicals(
         return build_technicals(ticker, range_period=range)
     except (ValueError, TickerNotFoundError):
         raise errors.ticker_not_found(ticker)
-
-
-@app.get("/v1/stocks/{ticker}/options")
-def get_stock_options(
-    ticker: str,
-    expiry: Optional[str] = Query(default=None),
-    current_user: str = Depends(auth.get_current_user),
-):
-    # Black-Scholes pricing/Greeks over the real live options chain --
-    # see build_options_analysis's own docstring. OptionsUnavailableError
-    # (no listed options market for this ticker, or an `expiry` that
-    # isn't actually listed) is distinct from TickerNotFoundError (the
-    # ticker itself doesn't resolve) -- see options_pricer.py's own
-    # comment on why the two error types aren't conflated.
-    try:
-        return build_options_analysis(ticker, expiry=expiry)
-    except (ValueError, TickerNotFoundError):
-        raise errors.ticker_not_found(ticker)
-    except OptionsUnavailableError:
-        raise errors.options_unavailable(ticker)
 
 
 @app.get("/v1/stocks/{ticker}/insights")
@@ -1644,29 +1730,49 @@ def get_watchlist(current_user: str = Depends(auth.get_current_user)):
     return {"items": items}
 
 
+def resolve_ticker_or_400(current_user: str, ticker: str):
+    """Shared fast-path-then-fuzzy-fallback ticker validation for the 4
+    endpoints below that accept a user-typed ticker/company name
+    (watchlist, portfolio, orders, alerts): try `ticker` directly
+    first -- it's already a real, directly-quotable symbol ("AAPL",
+    "TSLA") most of the time -- and only on a miss fall back to
+    resolve_companies, the same NLP/NSE-aware resolver the main search
+    bar uses, so a fuzzy company name (including a non-US one, e.g.
+    "Bajaj Finance" -> BAJFINANCE.NS, resolve_companies' own docstring
+    example) works here too, not just a bare ticker.
+
+    That fallback is rate-limited via db.claim_ticker_resolution_attempt
+    (see its own docstring): a raw-ticker miss that also comes up empty
+    in resolve_companies' deterministic matching falls through to a
+    real LLM call (company_resolver.py's _llm_propose_company_name), so
+    leaving this unbounded would let a user spam garbage input at any
+    of these 4 endpoints to run up real-money LLM cost.
+
+    Raises errors.ticker_resolution_rate_limit_exceeded /
+    errors.ticker_not_found directly -- every call site's own handling
+    of both was identical anyway. Returns (resolved_ticker, quote).
+    """
+    try:
+        return ticker, get_quote(ticker)
+    except TickerNotFoundError:
+        pass
+
+    window_start = time.time() - RATE_LIMIT_WINDOW_SECONDS
+    if not db.claim_ticker_resolution_attempt(current_user, TICKER_RESOLUTION_RATE_LIMIT, window_start):
+        raise errors.ticker_resolution_rate_limit_exceeded(TICKER_RESOLUTION_RATE_LIMIT)
+
+    resolved = resolve_companies(ticker)
+    if not resolved:
+        raise errors.ticker_not_found(ticker)
+    try:
+        return resolved[0], get_quote(resolved[0])
+    except TickerNotFoundError:
+        raise errors.ticker_not_found(ticker)
+
+
 @app.post("/v1/watchlist")
 def add_to_watchlist(body: WatchlistRequest, current_user: str = Depends(auth.get_current_user)):
-    # Fast path: body.ticker is already a real, directly-quotable
-    # symbol ("AAPL", "TSLA"). Only when that fails do we fall back to
-    # resolve_companies -- the same NLP/NSE-aware resolver the main
-    # search bar uses -- so a fuzzy company name (including a non-US
-    # one, e.g. "Bajaj Finance" -> BAJFINANCE.NS, resolve_companies'
-    # own docstring example) works here too, not just a bare ticker.
-    # Without this fallback the watchlist quietly required stricter,
-    # more technical input than the rest of the app.
-    ticker = body.ticker
-    try:
-        get_quote(ticker)
-    except TickerNotFoundError:
-        resolved = resolve_companies(body.ticker)
-        if not resolved:
-            raise errors.ticker_not_found(body.ticker)
-        ticker = resolved[0]
-        try:
-            get_quote(ticker)
-        except TickerNotFoundError:
-            raise errors.ticker_not_found(body.ticker)
-
+    ticker, _ = resolve_ticker_or_400(current_user, body.ticker)
     db.add_watchlist_item(current_user, ticker)
     return {"status": "ok"}
 
@@ -1696,23 +1802,16 @@ def get_portfolio(current_user: str = Depends(auth.get_current_user)):
     return build_portfolio_view(current_user)
 
 
+@app.get("/v1/portfolio/risk-overlay")
+def get_portfolio_risk_overlay(current_user: str = Depends(auth.get_current_user)):
+    # Volatility-targeting risk view over the user's holdings -- drawdown protection, not a return forecast
+    # (see app/analysis/vol_overlay.py's docstring for the measured evidence and its limits).
+    return build_risk_overlay(current_user)
+
+
 @app.post("/v1/portfolio")
 def add_or_update_portfolio_holding(body: PortfolioRequest, current_user: str = Depends(auth.get_current_user)):
-    # Same fast-path-then-resolve_companies-fallback validation as
-    # POST /v1/watchlist, so a fuzzy/Indian company name works here too.
-    ticker = body.ticker
-    try:
-        get_quote(ticker)
-    except TickerNotFoundError:
-        resolved = resolve_companies(body.ticker)
-        if not resolved:
-            raise errors.ticker_not_found(body.ticker)
-        ticker = resolved[0]
-        try:
-            get_quote(ticker)
-        except TickerNotFoundError:
-            raise errors.ticker_not_found(body.ticker)
-
+    ticker, _ = resolve_ticker_or_400(current_user, body.ticker)
     db.upsert_portfolio_holding(current_user, ticker, body.quantity, body.avg_cost, body.buy_date)
     return {"status": "ok"}
 
@@ -1785,21 +1884,7 @@ def get_portfolio_analysis(current_user: str = Depends(auth.get_current_user)):
 
 @app.post("/v1/orders")
 def place_order(body: OrderRequest, current_user: str = Depends(auth.get_current_user)):
-    # Same fast-path-then-resolve_companies-fallback validation as
-    # POST /v1/portfolio/POST /v1/watchlist, so a fuzzy/Indian company
-    # name works here too, not just a bare ticker.
-    ticker = body.ticker
-    try:
-        quote = get_quote(ticker)
-    except TickerNotFoundError:
-        resolved = resolve_companies(body.ticker)
-        if not resolved:
-            raise errors.ticker_not_found(body.ticker)
-        ticker = resolved[0]
-        try:
-            quote = get_quote(ticker)
-        except TickerNotFoundError:
-            raise errors.ticker_not_found(body.ticker)
+    ticker, quote = resolve_ticker_or_400(current_user, body.ticker)
 
     try:
         result = db.execute_order(
@@ -1825,21 +1910,7 @@ def get_orders(limit: int = Query(default=20, le=50), current_user: str = Depend
 
 @app.post("/v1/alerts")
 def create_price_alert(body: PriceAlertRequest, current_user: str = Depends(auth.get_current_user)):
-    # Same fast-path-then-resolve_companies-fallback validation as
-    # POST /v1/orders, so a fuzzy/Indian company name works here too.
-    ticker = body.ticker
-    try:
-        get_quote(ticker)
-    except TickerNotFoundError:
-        resolved = resolve_companies(body.ticker)
-        if not resolved:
-            raise errors.ticker_not_found(body.ticker)
-        ticker = resolved[0]
-        try:
-            get_quote(ticker)
-        except TickerNotFoundError:
-            raise errors.ticker_not_found(body.ticker)
-
+    ticker, _ = resolve_ticker_or_400(current_user, body.ticker)
     alert_id = db.create_price_alert(
         current_user, ticker, body.side, body.direction, body.target_price, body.auto_execute,
     )

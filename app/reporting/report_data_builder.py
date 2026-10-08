@@ -23,8 +23,11 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from app.analysis.data_quality import build_data_quality
+from app.analysis.risk_range import build_risk_range
 from app.core.currency import currency_symbol
 from app.core.research_context import ResearchContext
+from app.reporting.calibrated_confidence import build_calibrated_confidence
 
 
 def _is_nan(value) -> bool:
@@ -1006,11 +1009,24 @@ def build_report_data(context: ResearchContext) -> Dict[str, Any]:
         # boundary and exactly which already-computed values feed it.
         "signal_quality": signal_quality,
 
+        # Display-only; neither changes the rating. See the two modules' docstrings.
+        "data_quality": build_data_quality(financial, valuation_results, info),
+        "risk_range": build_risk_range(context.historical_prices),
+
         # FinSight's one canonical backtested accuracy number, the same
         # on every report -- not this ticker's outcome, the whole
         # pipeline's historical track record. None if the artifact
         # hasn't been generated yet (see _load_track_record's docstring).
         "track_record": _load_track_record(),
+
+        # UNLIKE track_record above, this IS specific to this report --
+        # how often a call THIS TYPE (Buy/Hold/Sell), in THIS sector,
+        # has actually been right historically. None whenever there
+        # isn't enough sector-specific (or even overall-by-rating) data
+        # to back a real number -- see calibrated_confidence.py's own
+        # docstring for the sample-size floor and the yfinance-vs-GICS
+        # sector-naming mismatch this has to bridge.
+        "calibrated_confidence": build_calibrated_confidence(info.get("sector"), recommendation["rating"]),
 
         "references": _references(context),
 

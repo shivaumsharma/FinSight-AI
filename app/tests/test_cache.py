@@ -69,3 +69,50 @@ def test_round_trip_with_a_fake_in_memory_client(monkeypatch):
 
     cache.cache_set(key, {"wacc": 0.09}, ttl_seconds=60)
     assert cache.cache_get(key) == {"wacc": 0.09}
+
+
+def test_cache_get_refuses_to_unpickle_an_unsigned_payload(monkeypatch):
+    """A pickle written directly into the backing store (e.g. by
+    anything other than this process's own cache_set -- the exact
+    scenario an attacker with write access to the Redis keyspace would
+    be in) must never reach pickle.loads(). Regression test for the
+    unsigned-pickle RCE this HMAC layer exists to close."""
+    import pickle as _pickle
+
+    store = {}
+
+    class _FakeClient:
+        def get(self, key):
+            return store.get(key)
+
+        def setex(self, key, ttl, value):
+            store[key] = value
+
+    monkeypatch.setattr(cache, "_client_or_none", lambda: _FakeClient())
+
+    key = cache.make_key("test", "AAPL", "v1")
+    # No HMAC prefix at all -- what an external writer's raw pickle.dumps() would look like.
+    store[key] = _pickle.dumps({"malicious": "payload"})
+    assert cache.cache_get(key) is None
+
+
+def test_cache_get_refuses_a_tampered_payload_even_with_a_present_signature(monkeypatch):
+    """A payload that WAS legitimately signed, then modified in place
+    (the signature no longer matches the bytes that follow it), must
+    also be rejected -- not just payloads missing a signature entirely."""
+    store = {}
+
+    class _FakeClient:
+        def get(self, key):
+            return store.get(key)
+
+        def setex(self, key, ttl, value):
+            store[key] = value
+
+    monkeypatch.setattr(cache, "_client_or_none", lambda: _FakeClient())
+
+    key = cache.make_key("test", "AAPL", "v1")
+    cache.cache_set(key, {"wacc": 0.09}, ttl_seconds=60)
+    sig, payload = store[key][: cache._SIG_LEN], store[key][cache._SIG_LEN :]
+    store[key] = sig + payload.replace(b"wacc", b"hack")
+    assert cache.cache_get(key) is None

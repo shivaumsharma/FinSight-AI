@@ -1,28 +1,12 @@
-# FastAPI research service (app/api/) -- deployed to Google Cloud Run in
-# production (see README.md's "Deploying the API + frontend" section);
-# also fully supported on Railway via railway.json as an alternative.
-# Nothing in this Dockerfile is platform-specific -- both read $PORT at
-# runtime (see the CMD line below).
+# Backend image (FastAPI, app/api). Deployed to AWS Elastic Beanstalk by
+# .github/workflows/deploy-aws.yml; Railway and DigitalOcean also work. Reads
+# $PORT at runtime (see the CMD line).
 #
-# Deliberately NOT a minimal image: RAG retrieval (chromadb +
-# sentence-transformers) and FinBERT sentiment scoring are separate
-# local models used regardless of LLM_PROVIDER -- torch/transformers/
-# chromadb are real, load-bearing dependencies here, not leftovers.
-# Only llama-cpp-python (app/rag/report_generator.py's local narrative
-# backend) is conditional: LocalLlamaProvider lazy-imports it, so it's
-# only ever touched when LLM_PROVIDER=local actually generates text --
-# verified with LLM_PROVIDER=hosted set, across three real code paths
-# (API import, a real ToolRegistry construction, and an actual
-# generate() call): llama_cpp never appears in sys.modules, while
-# torch/transformers/chromadb/sentence_transformers correctly do (RAG +
-# FinBERT need them regardless of LLM_PROVIDER). This is why the image
-# is still multi-GB despite that guard working correctly -- torch alone
-# is ~500MB -- not evidence the guard failed. See EVALUATION.md and
-# app/core/llm_provider.py for the full picture.
+# Not minimal on purpose: RAG (chromadb + sentence-transformers) and FinBERT need
+# torch/transformers whatever LLM_PROVIDER is, so the image is multi-GB. Only
+# llama-cpp-python is conditional (LLM_PROVIDER=local).
 #
-# Multi-stage: build-essential/cmake (needed only if llama-cpp-python
-# or chromadb's native deps fall back to a source build) stay in the
-# builder stage and never reach the final image.
+# Multi-stage: build tools stay in the builder stage and never reach the final image.
 FROM python:3.11-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -50,6 +34,18 @@ COPY --from=builder /install /usr/local
 
 WORKDIR /app
 COPY . .
+
+# Non-root: the app writes its persistent state (jobs.db, reports/,
+# llm_logs/, logs/, filings_cache/, vector_db/, and mlruns/ if a
+# training script ever runs here) directly under WORKDIR by default --
+# see app/core/paths.py's own DATA_DIR docstring: DATA_DIR only points
+# elsewhere (a mounted volume) when explicitly set, and defaults to the
+# repo root otherwise. chown the whole tree rather than enumerating
+# each write path individually, since a new one could be added later
+# without this Dockerfile being updated to match.
+RUN useradd --create-home --shell /bin/false appuser \
+    && chown -R appuser:appuser /app
+USER appuser
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1

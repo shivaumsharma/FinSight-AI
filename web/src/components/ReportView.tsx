@@ -6,7 +6,8 @@ import ModelCompare from "./ModelCompare";
 import RatingBadge, { ratingColorClass } from "./RatingBadge";
 import Tabs from "./Tabs";
 import WhatIfPanel from "./WhatIfPanel";
-import type { NewsSources, ResearchResult, SignalQuality, TrackRecord } from "@/lib/types";
+import type { CalibratedConfidence, DataQuality, NewsSources, ResearchResult, RiskRange, SignalQuality, TrackRecord } from "@/lib/types";
+import { formatCompactMoney, formatNumber, formatPercent, formatPrice, formatQuantity, formatRatio, formatSignedNumber, formatTrimmed } from "@/lib/numberFormat";
 
 function ShareButton({ jobId }: { jobId: string }) {
   const [state, setState] = useState<"idle" | "sharing" | "copied" | "error">("idle");
@@ -150,11 +151,65 @@ function TrackRecordBlock({ trackRecord }: { trackRecord: TrackRecord | null | u
   );
 }
 
+// UNLIKE TrackRecordBlock above (one number, same on every report),
+// this is specific to THIS report's own call -- see
+// app/reporting/calibrated_confidence.py's own docstring.
+function CalibratedConfidenceBlock({ calibrated }: { calibrated: CalibratedConfidence | null | undefined }) {
+  if (!calibrated) return null;
+  const scopeNote = calibrated.scope === "sector" ? `in ${calibrated.sector}` : "across all sectors";
+
+  return (
+    <div className="mt-2 rounded-lg border border-border bg-card px-3 py-2 text-[11px] text-muted">
+      <strong className="text-text">Calibrated confidence:</strong> {calibrated.rating} calls {scopeNote} have
+      historically been right <strong className="text-text">{calibrated.accuracy_pct}%</strong> of the time (n=
+      {calibrated.n}, 12-month backtest). Giving every stock the same call would have been right{" "}
+      <strong className="text-text">{calibrated.base_rate_pct}%</strong> of the time, so the call's edge is{" "}
+      <strong className="text-text">
+        {calibrated.edge_pts > 0 ? "+" : ""}
+        {calibrated.edge_pts} pts
+      </strong>
+      .
+    </div>
+  );
+}
+
+function DataQualityBlock({ quality }: { quality: DataQuality | null | undefined }) {
+  if (!quality) return null;
+  return (
+    <div className="mt-2 rounded-lg border border-border bg-card px-3 py-2 text-[11px] text-muted">
+      <strong className="text-text">Data quality:</strong> {quality.level} ({quality.score}/100,{" "}
+      {quality.fields_present}/{quality.fields_total} key financial fields present).{" "}
+      {quality.no_view
+        ? "Key inputs are missing, so this rating rests on partial data. In testing, missing inputs did not make the model less accurate, so this is a disclosure, not a correction."
+        : "The rating is based on reasonably complete inputs."}
+      {quality.issues.length > 0 && <span className="text-dim"> {quality.issues.join("; ")}.</span>}
+    </div>
+  );
+}
+
+function RiskRangeBlock({ risk, symbol }: { risk: RiskRange | null | undefined; symbol: string }) {
+  if (!risk) return null;
+  return (
+    <div className="mt-2 rounded-lg border border-border bg-card px-3 py-2 text-[11px] text-muted">
+      <strong className="text-text">Plausible price range</strong> ({risk.coverage}, from {risk.annualised_volatility_pct}%
+      annual volatility):{" "}
+      {Object.entries(risk.ranges).map(([horizon, band], i) => (
+        <span key={horizon}>
+          {i > 0 && " · "}
+          {horizon} {symbol}
+          {band.low}–{symbol}
+          {band.high}
+        </span>
+      ))}
+      . <span className="text-dim">{risk.note}</span>
+    </div>
+  );
+}
+
 type NewsArticleItem = NonNullable<NewsSources["all_articles"]>[number];
 
 // Retrieved-but-unused articles are capped -- same reason as
-// pdf_report_builder.py's MAX_UNUSED_ARTICLES_SHOWN and
-// streamlit_app.py's equivalent: an active mega-cap can retrieve
+// pdf_report_builder.py's MAX_UNUSED_ARTICLES_SHOWN: an active mega-cap can retrieve
 // 200+ articles in a single pull, and this list shouldn't render every
 // one just because a reader opened this tab. Used articles (the ones
 // that actually informed the report) are never capped.
@@ -208,9 +263,8 @@ function ToneTile({ label, tone }: { label: string; tone: string }) {
 // report_data_builder.py hands back raw numbers for every field here --
 // nothing is pre-formatted server-side (confirmed against a real job
 // response: WACC=0.1100821..., "Intrinsic Value (per share)"=96.6947...).
-// The old Streamlit UI never rendered these fields directly (only the
-// PDF builder formatted them), so this formatting never existed until
-// now. Dispatches on the field's *name*, not a value heuristic, since
+// Only the PDF builder formatted these fields before, so this formatting
+// is new here. Dispatches on the field's *name*, not a value heuristic, since
 // the key vocabulary is fixed and small (report_data_builder.py's
 // build_report_data()) -- a fraction like WACC and a percentage-point
 // value like "Revenue Growth (%)" are both plain floats and
@@ -220,10 +274,8 @@ const DOLLAR_LARGE_KEYS = new Set(["Revenue", "EBIT", "Net Income", "Free Cash F
 const DOLLAR_SMALL_KEYS = new Set(["Current Price", "Intrinsic Value (per share)", "EPS"]);
 
 function fmtLargeDollar(v: number, symbol: string): string {
-  const abs = Math.abs(v);
-  if (abs >= 1e9) return `${symbol}${(v / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `${symbol}${(v / 1e6).toFixed(2)}M`;
-  return `${symbol}${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  if (Math.abs(v) >= 1e6) return formatCompactMoney(v, symbol);
+  return `${v < 0 ? "-" : ""}${symbol}${formatTrimmed(Math.abs(v), 2)}`;
 }
 
 // "P/E vs Own History"/"P/B vs Own History" (app/analysis/alpha_factors.py)
@@ -245,16 +297,16 @@ function formatFieldValue(key: string, value: unknown, symbol: string): string {
   if (value === null || value === undefined) return "N/A";
   if (isVsHistoryValue(value)) {
     const pct = value.vs_history_pct ?? 0;
-    return `${value.current}x vs ${value.historical_avg}x ${value.years_used}yr avg (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%, ${value.signal})`;
+    return `${value.current}x vs ${value.historical_avg}x ${value.years_used}yr avg (${formatPercent(pct, { decimals: 1, signed: true })}, ${value.signal})`;
   }
   if (typeof value !== "number") return String(value);
 
-  if (FRACTION_KEYS.has(key)) return `${(value * 100).toFixed(2)}%`;
-  if (key.endsWith("(%)")) return `${value.toFixed(2)}%`;
+  if (FRACTION_KEYS.has(key)) return formatPercent(value, { fraction: true });
+  if (key.endsWith("(%)")) return formatPercent(value);
   if (DOLLAR_LARGE_KEYS.has(key)) return fmtLargeDollar(value, symbol);
-  if (DOLLAR_SMALL_KEYS.has(key)) return `${symbol}${value.toFixed(2)}`;
-  if (key === "Debt to Equity") return `${value.toFixed(2)}x`;
-  return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (DOLLAR_SMALL_KEYS.has(key)) return formatPrice(value, symbol);
+  if (key === "Debt to Equity") return formatRatio(value);
+  return formatTrimmed(value, 2);
 }
 
 // Underscore-prefixed keys (e.g. alpha_factors' "_market_note"/
@@ -301,13 +353,11 @@ function FactorCategory({ label, data, symbol }: { label: string; data: Record<s
 }
 
 function fmtScore(n: number | null | undefined): string {
-  if (n === null || n === undefined) return "N/A";
-  return `${n >= 0 ? "+" : ""}${n.toFixed(1)}`;
+  return formatSignedNumber(n, 1);
 }
 
 function fmtMoney(n: number | null | undefined, symbol: string): string {
-  if (n === null || n === undefined) return "N/A";
-  return `${symbol}${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatPrice(n, symbol);
 }
 
 const NARRATIVE_SECTIONS = [
@@ -365,6 +415,9 @@ export default function ReportView({
         investment decisions.
       </div>
       <TrackRecordBlock trackRecord={rd.track_record} />
+      <CalibratedConfidenceBlock calibrated={rd.calibrated_confidence} />
+      <DataQualityBlock quality={rd.data_quality} />
+      <RiskRangeBlock risk={rd.risk_range} symbol={symbol} />
 
       {/* Verdict card -- border color set inline since it's chosen from
           a runtime value (rating); a Tailwind class built via template
@@ -395,8 +448,7 @@ export default function ReportView({
           <div className="text-right">
             <div className="font-mono text-[10px] text-muted">UPSIDE</div>
             <div className={`font-mono text-lg font-bold ${upsideNum >= 0 ? "text-accent" : "text-danger"}`}>
-              {upsideNum >= 0 ? "+" : ""}
-              {upsideNum.toFixed(1)}%
+              {formatPercent(upsideNum, { decimals: 1, signed: true })}
             </div>
           </div>
         )}
@@ -404,7 +456,7 @@ export default function ReportView({
       <p className="mt-2 text-xs text-muted">{rec.basis}</p>
       {rec.confidence_flag && (
         <div className="mt-2 rounded-lg border border-amber-900/60 bg-amber-950/40 px-3 py-2 text-xs text-warn">
-          <strong>Low-confidence signal:</strong> {rec.confidence_flag}
+          <strong>Sensitivity to assumptions:</strong> {rec.confidence_flag}
         </div>
       )}
       <SignalQualityBlock signalQuality={rd.signal_quality} />
@@ -425,7 +477,7 @@ export default function ReportView({
         </div>
       )}
       {latencySeconds !== null && (
-        <div className="mt-2 text-right text-[10px] font-mono text-dim">generated in {latencySeconds.toFixed(1)}s</div>
+        <div className="mt-2 text-right text-[10px] font-mono text-dim">generated in {formatNumber(latencySeconds, 1)}s</div>
       )}
 
       {/* Tabs */}
@@ -489,12 +541,12 @@ export default function ReportView({
                   {monteCarlo && (
                     <div>
                       <div className="mb-2 font-mono text-[11px] font-bold tracking-wide text-muted">
-                        MONTE CARLO ({monteCarlo.n_samples.toLocaleString()} samples)
+                        MONTE CARLO ({formatQuantity(monteCarlo.n_samples)} samples)
                       </div>
                       <div className="flex gap-2">
                         <StatTile label="MEAN" value={fmtMoney(monteCarlo.mean, symbol)} />
                         <StatTile label="MEDIAN" value={fmtMoney(monteCarlo.median, symbol)} />
-                        <StatTile label="P(UNDERVALUED)" value={`${(monteCarlo.prob_undervalued * 100).toFixed(1)}%`} />
+                        <StatTile label="P(UNDERVALUED)" value={formatPercent(monteCarlo.prob_undervalued, { fraction: true, decimals: 1 })} />
                       </div>
                       <p className="mt-2 text-[11px] text-muted">
                         90% CI: {fmtMoney(monteCarlo.ci_lower, symbol)} - {fmtMoney(monteCarlo.ci_upper, symbol)}
@@ -511,7 +563,7 @@ export default function ReportView({
                         <StatTile label="VERDICT" value={mlClassifier.verdict} />
                         <StatTile
                           label="CONFIDENCE"
-                          value={`${((mlClassifier.probabilities[mlClassifier.verdict] || 0) * 100).toFixed(1)}%`}
+                          value={formatPercent(mlClassifier.probabilities[mlClassifier.verdict] || 0, { fraction: true, decimals: 1 })}
                         />
                       </div>
                     </div>
@@ -524,7 +576,7 @@ export default function ReportView({
                       </div>
                       <div className="flex gap-2">
                         <StatTile label="DDM VALUE" value={fmtMoney(ddm.intrinsic_value, symbol)} />
-                        <StatTile label="UPSIDE VS. PRICE" value={`${ddm.upside_pct >= 0 ? "+" : ""}${ddm.upside_pct.toFixed(1)}%`} />
+                        <StatTile label="UPSIDE VS. PRICE" value={formatPercent(ddm.upside_pct, { decimals: 1, signed: true })} />
                         <StatTile label="SIGNAL" value={ddm.signal} />
                       </div>
                       <p className="mt-2 text-[11px] text-dim">

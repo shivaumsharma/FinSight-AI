@@ -11,6 +11,10 @@ import {
   type UTCTimestamp,
   createChart,
 } from "lightweight-charts";
+import ConnectionBanner from "./ConnectionBanner";
+import { ChartFrame } from "./ui";
+import { applyTickToBar, type Bar } from "@/lib/liveCandle";
+import { useLivePrices } from "@/lib/livePrices";
 
 const RANGES = ["1mo", "3mo", "6mo", "1y", "2y", "5y", "max"] as const;
 type Range = (typeof RANGES)[number];
@@ -67,11 +71,21 @@ export default function PriceChart({ ticker, currency }: { ticker: string; curre
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const overlaySeriesRef = useRef<Partial<Record<OverlayKey, ISeriesApi<"Line">[]>>>({});
+  // True from "new data applied" until the user pans/zooms: while set, every
+  // size change re-fits. autoSize settles asynchronously (and the chart is
+  // recreated when theme colors resolve), so the first fit can happen at a
+  // not-yet-final width and leave the bars squeezed against one edge.
+  const autoFitRef = useRef(true);
+  // The bar currently drawn last, kept so a streamed price can extend it without refetching.
+  const lastBarRef = useRef<Bar | undefined>(undefined);
 
   const [range, setRange] = useState<Range>("1y");
   const [data, setData] = useState<TechnicalsResponse | null>(null);
   const [error, setError] = useState(false);
   const [visibleOverlays, setVisibleOverlays] = useState<Set<OverlayKey>>(new Set(["ema_20"]));
+
+  const live = useLivePrices([ticker]);
+  const liveQuote = live.prices[ticker.toUpperCase()];
 
   const accent = useThemeColor("--accent", "#00d97e");
   const danger = useThemeColor("--danger", "#ff4d4f");
@@ -80,12 +94,22 @@ export default function PriceChart({ ticker, currency }: { ticker: string; curre
   const borderColor = useThemeColor("--border-subtle", "#131a22");
 
   useEffect(() => {
+    // Guards against a slow earlier response (e.g. 5Y) landing after a
+    // later one (e.g. 1M) and overwriting it when ranges are clicked fast.
+    let stale = false;
     setData(null);
     setError(false);
     fetch(`/api/stock/${encodeURIComponent(ticker)}/technicals?range=${range}`)
       .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then(setData)
-      .catch(() => setError(true));
+      .then((d) => {
+        if (!stale) setData(d);
+      })
+      .catch(() => {
+        if (!stale) setError(true);
+      });
+    return () => {
+      stale = true;
+    };
   }, [ticker, range]);
 
   // Chart creation -- once per mount, torn down on unmount. Colors are
@@ -110,11 +134,23 @@ export default function PriceChart({ ticker, currency }: { ticker: string; curre
     });
     volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
+    chart.timeScale().subscribeSizeChange(() => {
+      if (autoFitRef.current) chart.timeScale().fitContent();
+    });
+    const stopAutoFit = () => {
+      autoFitRef.current = false;
+    };
+    const el = containerRef.current;
+    el.addEventListener("pointerdown", stopAutoFit);
+    el.addEventListener("wheel", stopAutoFit, { passive: true });
+
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
 
     return () => {
+      el.removeEventListener("pointerdown", stopAutoFit);
+      el.removeEventListener("wheel", stopAutoFit);
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
@@ -170,8 +206,23 @@ export default function PriceChart({ ticker, currency }: { ticker: string; curre
       ];
     }
 
+    autoFitRef.current = true;
     chart.timeScale().fitContent();
+    lastBarRef.current = data.price_history.length ? data.price_history[data.price_history.length - 1] : undefined;
   }, [data, visibleOverlays, accent, danger, dim]);
+
+  // Streamed price -> update the last candle in place (or start today's), without touching the rest of the series.
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series || !liveQuote || !lastBarRef.current) return;
+    const result = applyTickToBar(lastBarRef.current, liveQuote.price, liveQuote.ts, liveQuote.currency);
+    if (!result) return;
+    lastBarRef.current = result.bar;
+    series.update({
+      time: result.bar.date as unknown as UTCTimestamp,
+      open: result.bar.open, high: result.bar.high, low: result.bar.low, close: result.bar.close,
+    });
+  }, [liveQuote]);
 
   function toggleOverlay(key: OverlayKey) {
     setVisibleOverlays((prev) => {
@@ -182,10 +233,24 @@ export default function PriceChart({ ticker, currency }: { ticker: string; curre
     });
   }
 
+  const chartState = error ? "error" : !data ? "loading" : data.price_history.length === 0 ? "empty" : "ready";
+
+  // The chart container is always rendered at full size (ChartFrame draws loading/error/empty on top of it): with
+  // display:none until data arrived, lightweight-charts was created at width 0 and the candles ended up squeezed
+  // against the right edge on first load.
   return (
-    <div className="mt-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-mono text-[10px] tracking-wide text-dim">PRICE CHART</p>
+    <ChartFrame
+      title={
+        <>
+          PRICE CHART
+          {live.status === "live" && (
+            <span className="ml-2 text-accent" data-testid="chart-live">
+              ● LIVE
+            </span>
+          )}
+        </>
+      }
+      controls={
         <div className="flex gap-1 rounded-lg border border-border bg-card p-0.5">
           {RANGES.map((r) => (
             <button
@@ -200,32 +265,30 @@ export default function PriceChart({ ticker, currency }: { ticker: string; curre
             </button>
           ))}
         </div>
-      </div>
-
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {OVERLAY_TOGGLES.map((o) => (
-          <button
-            key={o.key}
-            type="button"
-            onClick={() => toggleOverlay(o.key)}
-            className={`rounded border px-2 py-0.5 font-mono text-[10px] font-bold ${
-              visibleOverlays.has(o.key) ? "border-accent text-accent" : "border-border text-dim hover:text-muted"
-            }`}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-2 rounded-lg border border-border bg-card px-2 py-2">
-        {error ? (
-          <p className="py-10 text-center font-mono text-[11px] text-dim">Couldn&apos;t load price history for this ticker.</p>
-        ) : !data ? (
-          <div className="h-[320px] animate-pulse rounded bg-card/60" />
-        ) : null}
-        <div ref={containerRef} className={data && !error ? "h-[320px] w-full" : "hidden"} />
-      </div>
-      <p className="mt-1 font-mono text-[9px] text-dim">Currency: {currency}. Daily bars -- intraday (1D/1W) ranges aren&apos;t available.</p>
-    </div>
+      }
+      banner={<ConnectionBanner status={live.status} />}
+      toolbar={
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {OVERLAY_TOGGLES.map((o) => (
+            <button
+              key={o.key}
+              type="button"
+              onClick={() => toggleOverlay(o.key)}
+              className={`rounded border px-2 py-0.5 font-mono text-[10px] font-bold ${
+                visibleOverlays.has(o.key) ? "border-accent text-accent" : "border-border text-dim hover:text-muted"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      }
+      state={chartState}
+      errorMessage="Couldn't load price history for this ticker."
+      emptyMessage="No price history available for this range."
+      caption={`Currency: ${currency}. Daily bars -- intraday (1D/1W) ranges aren't available.`}
+    >
+      <div ref={containerRef} className="h-[320px] w-full" />
+    </ChartFrame>
   );
 }

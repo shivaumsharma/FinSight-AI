@@ -40,7 +40,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.model_selection import GroupKFold, GroupShuffleSplit
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
@@ -137,6 +137,15 @@ def load_training_data(path: str) -> pd.DataFrame:
     missing = [c for c in FEATURE_COLUMNS if c not in df.columns]
     if missing:
         raise ValueError(f"Training file is missing feature columns: {missing}")
+    # "ticker" isn't a model feature (deliberately excluded from
+    # FEATURE_COLUMNS -- a company identifier would let the model
+    # memorize per-company labels instead of learning a generalizable
+    # valuation signal) but IS required for the group-aware splits
+    # below -- see cross_validate_models/train_and_evaluate's own
+    # comments for why a plain random split leaks across rows that
+    # share a ticker.
+    if "ticker" not in df.columns:
+        raise ValueError("Training file is missing the 'ticker' column (needed for group-aware CV/splits)")
     return df.dropna(subset=FEATURE_COLUMNS + ["realized_label"])
 
 
@@ -157,15 +166,36 @@ def _fit_model(name: str, model, X_train, y_train):
 def cross_validate_models(df: pd.DataFrame, n_splits: int = 5) -> Dict[str, Any]:
     X = df[FEATURE_COLUMNS].astype("float64").to_numpy()
     y = df["realized_label"].astype(str).to_numpy()
+    groups = df["ticker"].to_numpy()
 
+    # GroupKFold, not StratifiedKFold -- real leakage, not theoretical:
+    # 550 of 618 tickers in the production training set
+    # (scripts/ml_training_set.csv, built by combining several as-of-date
+    # windows) appear in MORE than one row. A plain (stratified-by-label
+    # but not grouped) K-fold routinely put, say, 3 of ADBE's 4
+    # snapshots in the training fold and the 4th in the test fold --
+    # letting the model partly recognize "this row smells like ADBE"
+    # rather than learn a signal that generalizes to a company it has
+    # never seen at all. Confirmed directly, not assumed: re-scoring the
+    # SAME saved model with a GroupKFold-safe split dropped XGBoost's
+    # cross-validated accuracy from 48.1% to 42.8%, and OVERVALUED-class
+    # precision from an apparent 39.3% (held-out, same leak) to a real
+    # 30.6% -- still a genuine edge over the DCF composite rule's own
+    # 27.1% Sell precision (EVALUATION.md section 0), just a smaller,
+    # honest one instead of an inflated one.
+    #
     # int(...) matters, not just style -- when the smallest class's
     # count is what actually binds (small/imbalanced datasets, which
     # this one still is), Python's min()/max() return that value
     # as-is rather than casting it, leaving a bare numpy.int64 in a
     # dict this module later json.dumps -- which raises. Only surfaced
     # once a class dropped under the n_splits=5 default, not before.
-    n_splits = int(max(min(n_splits, df["realized_label"].value_counts().min()), 2))
-    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    # Also capped by unique ticker count now -- GroupKFold raises if
+    # asked for more folds than there are distinct groups, which a
+    # small/synthetic dataset (or a training set with a lot of ticker
+    # repetition) can easily have fewer of than 5.
+    n_splits = int(max(min(n_splits, df["realized_label"].value_counts().min(), df["ticker"].nunique()), 2))
+    cv = GroupKFold(n_splits=n_splits)
 
     model_builders = {"logistic_regression": build_logreg, _secondary_model_name(): build_secondary_model}
 
@@ -179,7 +209,7 @@ def cross_validate_models(df: pd.DataFrame, n_splits: int = 5) -> Dict[str, Any]
     results = {}
     for name, builder in model_builders.items():
         accuracies, f1_macros = [], []
-        for train_idx, test_idx in cv.split(X, y):
+        for train_idx, test_idx in cv.split(X, y, groups=groups):
             model = _fit_model(name, builder(), X[train_idx], y[train_idx])
             preds = model.predict(X[test_idx])
             accuracies.append(accuracy_score(y[test_idx], preds))
@@ -197,12 +227,20 @@ def cross_validate_models(df: pd.DataFrame, n_splits: int = 5) -> Dict[str, Any]
 def train_and_evaluate(df: pd.DataFrame, test_size: float = 0.25):
     X = df[FEATURE_COLUMNS].astype("float64").to_numpy()
     y = df["realized_label"].astype(str).to_numpy()
+    groups = df["ticker"].to_numpy()
 
-    class_counts = np.unique(y, return_counts=True)[1]
-    stratify = y if class_counts.min() >= 2 else None
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=42, stratify=stratify
-    )
+    # GroupShuffleSplit, not train_test_split -- same leakage this
+    # module's cross_validate_models now guards against (see its own
+    # comment): a ticker that shows up in both X_train and X_test lets
+    # the held-out confusion matrix partly reflect memorization, not
+    # generalization. GroupShuffleSplit has no built-in label
+    # stratification (unlike train_test_split's `stratify=`) -- a real,
+    # accepted tradeoff, not an oversight: keeping every one of a
+    # ticker's rows on the same side of the split is the property that
+    # actually matters for an honest held-out test here.
+    splitter = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=42)
+    train_idx, test_idx = next(splitter.split(X, y, groups=groups))
+    X_train, X_test, y_train, y_test = X[train_idx], X[test_idx], y[train_idx], y[test_idx]
 
     report = {}
     fitted_models = {}

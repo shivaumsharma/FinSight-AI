@@ -9,21 +9,17 @@ The DataFrame problem
 ----------------------
 context.report_data["valuation_analysis"]["sensitivity_table"] (see
 report_data_builder.py) is a raw pandas DataFrame -- FastAPI's default
-encoder can't serialize it as-is. Checked directly (not assumed):
-streamlit_app.py never reads it (`grep -n "sensitivity" streamlit_app.py`
-returns nothing) -- only pdf_report_builder.py does, and that already
-runs server-side inside report_tool.py before this function is ever
-called, producing plain PDF bytes. So it's KEPT here (converted via
-.to_dict(), not dropped) purely because a future client legitimately
-might want to show it, not because anything currently reads it.
+encoder can't serialize it as-is. Only pdf_report_builder.py reads it, and
+that runs server-side inside report_tool.py before this function is called
+(producing plain PDF bytes). It is KEPT here (converted via .to_dict(), not
+dropped) only because a client might want to show it.
 
 context.valuation_results["fcff_forecasts"] is a second, separate
 DataFrame that genuinely is dropped -- nothing (not even the PDF
 builder) reads it today, and this function doesn't include raw
 valuation_results at all, only report_data plus the one thing a client
 needs that report_data doesn't carry: normalized_financials, needed by
-the What-If DCF sliders (FCFFEngine(financial_df)... in streamlit_app.py,
-once that's rewired to call this API in step 4).
+the What-If DCF sliders (FCFFEngine(financial_df)...).
 
 normalized_financials round-trips via to_json(orient="split") /
 read_json(orient="split") -- the orientation that preserves both the
@@ -77,9 +73,8 @@ def context_to_api_dict(context: ResearchContext) -> Dict[str, Any]:
         "report_data": report_data,
         "normalized_financials": normalized_financials_json,
         # Not part of report_data (which only carries the display-formatted
-        # "Raw WACC" percentage string) -- the raw fraction, needed by
-        # streamlit_app.py's What-If DCF sliders to seed the WACC slider's
-        # default/range the same way the real DCF computed it.
+        # "Raw WACC" percentage string): the raw fraction, which seeds the
+        # What-If WACC slider's default/range as the real DCF computed it.
         "raw_wacc": raw_wacc,
         "tool_trace": context.tool_trace,
     }
@@ -89,7 +84,7 @@ def financial_df_from_json(raw_json: str) -> Optional[pd.DataFrame]:
     """
     Reverses the to_json(orient="split") conversion above. Deliberately
     lives next to context_to_api_dict rather than in whatever eventually
-    consumes it (a rewired streamlit_app.py, a future mobile client) --
+    consumes it (the What-If endpoint, a future mobile client) --
     single source of truth for both directions of this specific
     conversion, so they can't drift out of sync with each other.
 

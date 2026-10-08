@@ -1,21 +1,10 @@
----
-title: FinSight AI
-colorFrom: blue
-colorTo: green
-sdk: streamlit
-sdk_version: "1.56.0"
-app_file: streamlit_app.py
-pinned: false
-python_version: "3.11"
----
-
 # FinSight AI — Agentic Financial Research & Trading Platform
 
 An agentic equity-research and paper-trading platform built using Python, FastAPI, Next.js, and a self-hosted or hosted LLM backend to plan, retrieve, value, and write institutional-style research on any publicly listed company — grounded in live market data and real SEC/NSE filings, not the model's training data.
 
 The platform combines an LLM tool-planning agent, a real DCF valuation engine, retrieval-augmented generation over live regulatory filings, a self-evaluation scoring pass, a 31-signal quantitative factor scorecard, a simulated paper-trading layer, voice input, and a rigorously benchmarked evaluation framework into one deployable, tested system.
 
-**[Try the research demo →](https://huggingface.co/spaces/shivaumsharma/finsight-ai)** · **[Try the full platform →](https://web-ten-blond-39.vercel.app)**
+**[Try the full platform →](https://web-ten-blond-39.vercel.app)**
 
 ---
 
@@ -42,9 +31,8 @@ The longer-term direction is a full voice-driven research copilot — "Hey FinSi
 - Voice input/output: tap-to-talk mic button (Sarvam AI Speech-to-Text, auto-stops on silence) plus opt-in spoken replies (Sarvam AI Text-to-Speech) and a hands-free continuous voice session on Chat and Home
 - Voice-driven onboarding: new users can answer the risk-tolerance/goals questionnaire by voice, classified against the expected answer set
 - A shared conversational assistant (multi-turn memory, portfolio-grounded answers) surfaced both as a full Chat page and a compact always-active widget on Home
-- Real Black-Scholes-Merton options pricing: Greeks (delta/gamma/theta/vega/rho) and implied volatility solved numerically against **live** option chains, alongside realized volatility — a separate, from-scratch quantitative model, not a third-party pricing API
 - Full auth system (PBKDF2, HMAC-signed share links), Progressive Web App with offline support and Web Push notifications
-- Point-in-time backtesting harness with explicit no-look-ahead controls, run across 1,000+ tickers
+- Point-in-time backtesting harness with explicit no-look-ahead controls, run across 1,000+ tickers, plus a walk-forward portfolio backtest (quarterly rebalancing, transaction costs, Sharpe/Sortino/max drawdown) against S&P 500 and no-signal-baseline comparators
 
 ---
 
@@ -56,14 +44,16 @@ Ask a question, get back a 14-section institutional-style report — company ove
 ### Predictive & Quantitative Analytics
 A custom WACC/FCFF/DCF engine, a Logistic Regression vs. XGBoost valuation classifier (display-only, honestly gated on training-set size), and a 31-factor quantitative scorecard spanning financial, quality, valuation, market, risk, sentiment, and macro signals.
 
-### Options & Derivatives
-A from-scratch Black-Scholes-Merton pricer (`app/derivatives/options_pricer.py`) computes theoretical price and the five Greeks against every strike in a ticker's real, live option chain, near the money. Implied volatility is solved numerically per contract (Newton-Raphson with a bisection fallback) against the option's actual market price — not read off a third-party field — then cross-checked alongside realized volatility from historical returns. Degrades honestly: a quote priced below its own intrinsic value returns `null` Greeks rather than a fabricated number, and a ticker with no listed options market (most non-US listings) returns a clear "unavailable" state, not an error.
-
 ### Evaluation Framework
 Every report is scored, not just produced — grounding (40%), retrieval quality (20%), citation coverage (20%), and completeness (20%). A dedicated benchmark harness checks prompt/retrieval/model changes against a fixed baseline instead of eyeballing them. Full methodology and results — including the ones that didn't come out as hoped — in [EVALUATION.md](EVALUATION.md).
 
 ### Trading Platform
 Self-reported portfolio tracking, a global watchlist, Top Movers and a market Sentiment Gauge over a real tracked universe, Corporate Actions and Global Indices feeds, and simulated paper order execution — a rehearsal tool for a trade decision against real prices, never a real broker connection.
+
+### Live Prices
+A WebSocket feed (`/v1/prices/stream`) pushes price ticks to the watchlist, positions, stock header and the chart's last candle. The browser connects to the backend directly (route handlers can't proxy WebSockets and the HTTP-only API Gateway can't carry them), authenticated by a 60-second token. The client reconnects on its own with jittered exponential backoff, treats a silent connection as dropped, and shows a "reconnecting" banner while it recovers. The source is the same Yahoo quote lookup used elsewhere, polled every 5 seconds and forwarded only when a price changed, so prices are near-real-time, not exchange ticks.
+
+**Render cost under a fast feed** (React Profiler, production build, 100 rows, 500 ticks/s for 4 s, ticks spread evenly across all rows, `cd web && npm run bench`): one render per tick cost about **1.03 ms of React render time per tick**; batching ticks into 100 ms updates and memoizing rows cut that to **0.035 ms per tick, about 29x less** (about 25x less total render time, 60x fewer row renders, 51x fewer commits). Per-commit time rises because each commit does more, but the worst commit stays under 9 ms. Details and raw runs in `web/bench/results.json`. Measured on one machine in headless Chromium; the ratios matter, not the milliseconds. Not measured: real-device or low-end-phone performance.
 
 ### Voice Input
 A mic button transcribes your spoken question via Sarvam AI's Speech-to-Text API and fills it into the question box for you to review before submitting — never auto-submitted, so a mistranscription costs nothing but the API call.
@@ -77,7 +67,7 @@ Session-based auth, HMAC-signed shareable PDF links, a service worker with offli
 
 ```mermaid
 flowchart TD
-    UI["Streamlit UI / Next.js Frontend"] --> Agent["ResearchAgent"]
+    UI["Next.js Frontend"] --> Agent["ResearchAgent"]
     Agent --> Resolver["Ticker Resolver\n(deterministic company/ticker lookup)"]
     Agent --> Planner["Planner\n(LLM proposal ∪ rule-based fallback)"]
     Planner --> Plan["Ordered tool plan"]
@@ -116,7 +106,7 @@ Every tool reads from and writes to one shared `ResearchContext` object. The pla
 | Retrieval | ChromaDB + `BAAI/bge-base-en-v1.5` embeddings, raw (a cross-encoder reranker was tried and measured worse — see [EVALUATION.md](EVALUATION.md)) |
 | Filing sourcing | Live SEC EDGAR API (US tickers) + live NSE India corporate-announcements API (`.NS` tickers) — any ticker with coverage, not a fixed set |
 | Sentiment | FinBERT (`ProsusAI/finbert`) — scored separately for filing tone and news tone |
-| Financial data | yfinance, with in-process caching and a batched-request pattern to survive cloud-datacenter IP throttling |
+| Financial data | yfinance, with in-process caching and a batched-request pattern to survive cloud-datacenter IP throttling; SEC EDGAR XBRL as an as-filed fallback for annual statements (`FUNDAMENTALS_SOURCE=auto\|yfinance\|edgar`) |
 | News | Finnhub company-news API, keyword-categorized by risk type |
 | Voice | Sarvam AI Speech-to-Text (`saaras:v3`), browser `MediaRecorder` + Web Audio silence detection |
 | Valuation | Custom WACC / FCFF / DCF engines, Monte Carlo simulation, Logistic Regression / XGBoost classifier |
@@ -125,8 +115,8 @@ Every tool reads from and writes to one shared `ResearchContext` object. The pla
 | Orchestration | Hand-rolled controller, plus a LangGraph port kept alongside it as a documented, benchmarked alternative — see [EVALUATION.md](EVALUATION.md) |
 | Caching | Redis — content-addressed for valuation/narrative output, TTL-only for statement fetches; degrades to a no-op if unreachable |
 | Report output | reportlab (downloadable PDF) |
-| Deployment | AWS Elastic Beanstalk (API, Terraform-defined) + CloudFront (HTTPS termination in front of it) + Vercel (frontend); Google Cloud Run supported but currently down (GCP project billing disabled); Hugging Face Spaces (research demo, free-tier CPU quota shared across all Spaces on the account); Railway and a plain DigitalOcean droplet (`infra/digitalocean_droplet_setup.sh`) both supported as alternatives |
-| Testing / CI | pytest (1,088 test functions, 62 files), GitHub Actions with failure-annotation diagnostics |
+| Deployment | AWS Elastic Beanstalk (API, Terraform-defined) + CloudFront (HTTPS termination in front of it) + Vercel (frontend); Google Cloud Run supported but currently down (GCP project billing disabled); Railway and a plain DigitalOcean droplet (`infra/digitalocean_droplet_setup.sh`) both supported as alternatives |
+| Testing / CI | pytest (1,171 test functions, 69 files), GitHub Actions with failure-annotation diagnostics |
 
 ---
 
@@ -142,14 +132,13 @@ Autonomous_Financial_Research_Agent/
 │   ├── benchmarks/               # Fixed evaluation benchmark sets
 │   ├── core/                   # LLM provider abstraction, retry, cache, currency
 │   ├── data/                   # SEC EDGAR, NSE India, Sarvam STT/TTS, market data clients
-│   ├── derivatives/               # Black-Scholes options pricer, Greeks, implied vol
 │   ├── evaluation/               # Grounding / citation / retrieval scorers
 │   ├── nlp/                    # Sentiment summarization
 │   ├── planner/                 # LLM + rule-based tool planning
 │   ├── rag/                    # Chunking, embeddings, ChromaDB, report generation
 │   ├── reasoning/               # Market movers, model consensus, backtest stats
 │   ├── reporting/               # Report/PDF building, news, institutional ratings
-│   ├── tests/                  # 1,088 tests across 62 files
+│   ├── tests/                  # 1,171 tests across 69 files
 │   ├── tools/                  # Agent tools (market, valuation, RAG, sentiment, ...)
 │   ├── training/                # GRPO / RLVR fine-tuning pipeline
 │   ├── utils/
@@ -163,7 +152,6 @@ Autonomous_Financial_Research_Agent/
 │   └── public/                  # Service worker, PWA icons
 │
 ├── scripts/                    # Backtests, benchmarks, training-set builders
-├── streamlit_app.py              # Original Streamlit research demo
 ├── EVALUATION.md                 # Full evaluation results & methodology
 ├── requirements.txt
 ├── Dockerfile
@@ -186,7 +174,7 @@ Autonomous_Financial_Research_Agent/
 - Reverse-engineered a live, undocumented NSE India filings API through a manual endpoint spike (not guesswork), correctly identifying which subdomains required browser-spoofed headers — verified end-to-end against the production deployment before shipping.
 - Diagnosed a 3-day silent CI outage by building a GitHub Actions failure-annotation mechanism rather than guessing at fixes, tracing it to a live-network test blocked by GitHub's own IP ranges.
 - Added a two-tier Redis caching layer (content-addressed for correctness-sensitive output, TTL-only for genuinely time-bound data) and measured real 500–1,700x cache-hit speedups — after catching a cross-contamination bug in the benchmark's own methodology first.
-- Built a Black-Scholes-Merton options pricer from scratch (no third-party pricing library) with a numerically-solved implied-volatility root-finder against live market quotes, not a pre-computed vendor field; verified against textbook reference values to 4 decimal places and, separately, against a real live option chain where theoretical price matched market price to the cent everywhere the solver converged.
+- Root-caused a losing walk-forward portfolio backtest rather than reporting the loss and stopping: an Information Coefficient analysis found a weak scoring signal (+0.093 over nine quarters) that a later 53-quarter SEC-EDGAR re-test (2012–2025, pre-registered) did not reproduce (IC +0.011, t 0.6), a breadth sweep ruled out "just diversify more" (performance got *worse* from top-25 to top-150), and a winner/loser attribution found the actual mechanism — 45% of the sample's biggest single-period gainers were wrongly rated Sell, and every tested portfolio was Buy-only, so it structurally excluded them. A follow-up tilt strategy confirmed the diagnosis (better risk-adjusted return at the same CAGR once the hard exclusion was removed) without fully closing the gap to a no-signal baseline — reported as a still-open, honestly incomplete result, not dressed up as a fix.
 
 ---
 
@@ -198,23 +186,22 @@ Autonomous_Financial_Research_Agent/
 
 **RLVR / GRPO fine-tuning**: a from-scratch reinforcement-learning pipeline (`app/training/`) that fine-tunes a local LLM (Qwen2.5-7B) to predict Buy/Hold/Sell using realized stock returns as a binary, verifiable reward — built, unit-tested, and executed to real trained checkpoints (`scripts/train_grpo.py`, `scripts/train_sft.py`). On its 117-example held-out set, a rejection-sampling SFT run scored 43.6% against a 40.2% base — a gap of about four examples, which is within noise and not statistically significant, so it is reported as an inconclusive result, not an improvement. Pure GRPO alone (best run 41.0%) did no better than the base rate, diagnosed as reward-sparsity from too few rollouts per prompt (see `scripts/filter_informative_examples.py`'s own docstring). This is a separate, smaller-scale research track from FinSight's production canonical accuracy metric above — a different model, different evaluation set — and is not yet integrated into the live report pipeline.
 
-**Honest limitations**, documented rather than hidden: the DCF's fixed terminal-growth assumption used to structurally undervalue high-growth compounders relative to mature businesses — a three-stage growth fade plus quality-tiered terminal growth (both ROE-based) and now-sourced CAPM inputs (a live 10Y Treasury yield, Damodaran's published equity risk premium) have closed most of that specific skew, cleanly measured (mega-cap vs. deep-value median intrinsic-value/price went from a ~3x gap to ~1.1x). Whether that also moves overall predictive accuracy is still an open question — a rate-limiting episode during the last full re-run left the sample too small and its baseline too shifted to give a clean answer, and that's stated plainly rather than papered over. FinSight's one canonical accuracy metric — 12-month forward directional accuracy, pooled across two non-overlapping historical windows on a 1,002-ticker universe (`scripts/canonical_accuracy.py`) — currently stands at **36.4% (N=923) vs. a 60.0% naive Always-Buy baseline**, i.e. the model currently loses to doing nothing. This number is surfaced on every generated report, not just in this doc, and is due a clean full-sample re-run once external rate limits recover. Full numbers, methodology, and the reasoning behind every one of these findings are in [EVALUATION.md](EVALUATION.md).
+**Honest limitations**, documented rather than hidden: the DCF's fixed terminal-growth assumption used to structurally undervalue high-growth compounders relative to mature businesses — a three-stage growth fade plus quality-tiered terminal growth (both ROE-based) and now-sourced CAPM inputs (a live 10Y Treasury yield, Damodaran's published equity risk premium) have closed most of that specific skew, cleanly measured (mega-cap vs. deep-value median intrinsic-value/price went from a ~3x gap to ~1.1x). FinSight's one canonical accuracy metric — 12-month forward directional accuracy, pooled across two non-overlapping historical windows on the broad, non-cherry-picked 1,002-ticker S&P 500+400+600(partial) universe (`scripts/canonical_accuracy.py`) — is a clean full-sample re-run (98.4%/95.5% ticker success rates) that currently stands at **38.6% (N=1,907, 95% CI 36.4–40.8%) vs. a 58.4% Always-Buy baseline (95% CI 56.1–60.6%)**, i.e. the model currently loses to doing nothing. The reason isn't a broken model: every tested window sits inside a broadly rising market (+10.6% to +35.6% universe-average return), so "call everything Buy" is a genuinely strong baseline in that regime — decomposed by call type, Buy calls carry real signal (52.8–65% precision, beating the universe-average return in every window) while Sell calls don't (as low as 15.6% precision), most likely because the universe's hypergrowth/negative-FCF names get flagged overvalued by the DCF and then keep re-rating upward anyway. This number is surfaced on every generated report, not just in this doc. A follow-up walk-forward *portfolio* backtest (quarterly rebalancing, transaction costs, Sharpe/Sortino/max drawdown over a sector-stratified 275-ticker sample, 3 years) confirms the same conclusion at the portfolio level: the composite-score-driven strategy underperforms both S&P 500 buy-and-hold and a no-signal equal-weight baseline on every metric, and neither concentrating nor diversifying the position count nor a tilt-based reweighting (tested directly, not assumed) closes the gap — the scoring signal does not demonstrate a return-predictive edge: its Information Coefficient looked like +0.093 over nine quarters, but a longer, pre-registered re-test on SEC EDGAR as-filed data (984 tickers, 53 quarters, 2012–2025, sealed holdout untouched) found +0.011 (t 0.6) and rejected every tested fix (DCF re-ranking, momentum/quality blends, regime gating), so FinSight is positioned as a transparent valuation-research tool with a rigorous self-evaluation, not as a return predictor. Full numbers, methodology, and the reasoning behind every one of these findings are in [EVALUATION.md](EVALUATION.md).
 
 ---
 
 ## Installation
 
-**Research demo (Streamlit):**
+**Setup:**
 ```bash
 git clone https://github.com/shivaumsharma/FinSight-AI.git
 cd FinSight-AI
 pip install -r requirements.txt
 cp .env.example .env  # fill in FINNHUB_API_KEY and, for the default hosted LLM, LLM_BASE_URL/LLM_API_KEY/LLM_MODEL
-streamlit run streamlit_app.py
 ```
 The LLM defaults to a hosted, OpenAI-compatible chat API (`LLM_PROVIDER=hosted`). Set `LLM_PROVIDER=local` to run entirely on-box with no external LLM API key, via Qwen2.5-1.5B served locally through `llama.cpp`. First run downloads FinBERT and the embedding model (and Qwen2.5-1.5B, if running local) from Hugging Face; subsequent runs reuse the cached weights.
 
-**Full platform (FastAPI + Next.js):**
+**Run (FastAPI + Next.js):**
 ```bash
 # Backend
 python -m uvicorn app.api.main:app --port 8010 --env-file .env
@@ -245,12 +232,7 @@ See `.env.example` and `web/.env.example` for the full list of required/optional
 
 ## Deployment
 
-The FastAPI backend previously ran on **Google Cloud Run**, but that GCP project currently has billing disabled (no payment method attached), so the Cloud Run service is down. `infra/` defines an equivalent **AWS Elastic Beanstalk** stack via Terraform as the replacement — see `infra/README.md` for current status. The EC2/EB environment is applied and healthy, fronted by a **CloudFront** distribution for HTTPS termination (Single-Instance EB has no load balancer to terminate TLS itself) — live at `https://d3iltp1nnt4rbu.cloudfront.net`. The Next.js frontend deploys to **Vercel**; the research demo runs separately on **Hugging Face Spaces** (the local model set exceeds Streamlit Community Cloud's free-tier memory limit). Railway remains fully supported as an alternative single-service deploy for the API. The Cloud Run setup steps below are kept for reference since the same Dockerfile-based flow applies to any of these targets.
-
-**Research demo (Hugging Face Spaces):**
-1. Create a Space at [huggingface.co/new-space](https://huggingface.co/new-space) — SDK: **Streamlit**, Hardware: **CPU basic (free)**.
-2. Link it to this GitHub repo (Space Settings → "Link to a GitHub repository"), or push directly: `git remote add space https://huggingface.co/spaces/<you>/<space-name>` then `git push space main`.
-3. The `sdk`/`app_file` front matter at the top of this README configures the Space automatically.
+The FastAPI backend previously ran on **Google Cloud Run**, but that GCP project currently has billing disabled (no payment method attached), so the Cloud Run service is down. `infra/` defines an equivalent **AWS Elastic Beanstalk** stack via Terraform as the replacement — see `infra/README.md` for current status. The EC2/EB environment is applied and healthy, fronted by a **CloudFront** distribution for HTTPS termination (Single-Instance EB has no load balancer to terminate TLS itself) — live at `https://d3iltp1nnt4rbu.cloudfront.net`. The Next.js frontend deploys to **Vercel**. Railway remains fully supported as an alternative single-service deploy for the API. The Cloud Run setup steps below are kept for reference since the same Dockerfile-based flow applies to any of these targets.
 
 **Backend (Cloud Run), one-time setup:**
 1. Create a GCP project, enable Cloud Run, Cloud Build, and Artifact Registry.
@@ -276,7 +258,7 @@ curl -X POST https://<your-cloud-run-url>/v1/research \
 cd web
 npx vercel@latest link
 ```
-Then set `FINSIGHT_API_URL` (the Cloud Run URL above) and `FINSIGHT_API_KEY` (matching `API_KEY` on the backend) as Environment Variables in the Vercel dashboard.
+Then set `FINSIGHT_API_URL` (the Cloud Run URL above) and `FINSIGHT_API_KEY` (matching `API_KEY` on the backend) as Environment Variables in the Vercel dashboard. For the live price feed, set `PRICE_STREAM_WS_URL` to the backend's WebSocket address (for example `wss://<cloudfront-domain>/v1/prices/stream`); if unset it is derived from `FINSIGHT_API_URL`. It must reach the backend itself, because the API Gateway in front of the HTTP API cannot carry WebSocket connections. Checked on 2026-10-09: a WebSocket handshake to the deployed CloudFront domain is answered `101 Switching Protocols` by the Elastic Beanstalk nginx, so no extra proxy configuration is needed; CloudFront's default 30 s origin timeout is covered by the feed's 15 s heartbeat. Because the frontend's `FINSIGHT_API_URL` already points at CloudFront, the derived address works without setting `PRICE_STREAM_WS_URL`. The price endpoint itself goes live with the next backend deploy.
 
 **Redeploy the frontend:**
 ```bash
@@ -285,7 +267,7 @@ cd web && npx vercel@latest --prod
 
 **Alternative: Railway** — the committed `Dockerfile`/`railway.json` support a one-service Railway deploy for the API (`railway login`, `railway init`, attach a persistent volume for `jobs.db`/`reports/`, `railway variables set ...` for each `.env.example` key, `railway up`). Potentially simpler for a from-scratch setup, since Railway auto-provisions its own build trigger instead of the manual Cloud Console wizard above.
 
-**Alternative: DigitalOcean droplet** — a plain VM instead of a managed container platform, useful specifically to get off a shared free-tier CPU/GPU quota (e.g. Hugging Face Spaces' free tier, which is shared across every Space on the account and pauses whichever one trips it) onto dedicated, always-on compute. Uses the same platform-agnostic `Dockerfile` as Cloud Run/Railway above, nothing droplet-specific baked into the image itself.
+**Alternative: DigitalOcean droplet** — a plain VM instead of a managed container platform, useful for dedicated, always-on compute. Uses the same platform-agnostic `Dockerfile` as Cloud Run/Railway above, nothing droplet-specific baked into the image itself.
 
 Account-level setup (only the account owner can do this part):
 1. Redeem the DigitalOcean credit from the GitHub Student Developer Pack (`education.github.com` → Student Pack → DigitalOcean offer), which requires a DigitalOcean account with a payment method on file even though the credit covers the cost.
@@ -304,13 +286,13 @@ The script prints exactly what's still needed afterward (filling in real `.env` 
 
 ## Testing & Quality
 
-1,088 test functions across 62 files, covering the recommendation engine, valuation pipeline, options pricer (Black-Scholes reference values, put-call parity, implied-vol round-trip), auth, RAG retrieval, the job queue's concurrency behavior, every external API client (SEC EDGAR, NSE India, Sarvam, Finnhub), and the full HTTP API surface — run via `pytest app/tests/`. CI runs on every push via GitHub Actions, with pytest failures re-emitted as annotations so a break is diagnosable from the Checks API without needing repo sign-in.
+1,171 test functions across 69 files, covering the recommendation engine, valuation pipeline, auth, RAG retrieval, the job queue's concurrency behavior, every external API client (SEC EDGAR, NSE India, Sarvam, Finnhub), and the full HTTP API surface — run via `pytest app/tests/`. CI runs on every push via GitHub Actions, with pytest failures re-emitted as annotations so a break is diagnosable from the Checks API without needing repo sign-in.
 
 ---
 
 ## Roadmap
 
-**Completed:** financial statement normalization, DCF/FCFF/WACC engines, live SEC EDGAR + NSE India sourcing, ChromaDB retrieval, query intent classification, FinBERT sentiment, agentic LLM+rule-based tool planning, self-evaluation scoring, a benchmarked LangGraph orchestration alternative, Redis caching, full auth + PWA + Web Push, a simulated paper-trading platform, a 31-signal Alpha Factors scorecard, a Black-Scholes options-pricing/Greeks engine, two-way voice (input + spoken replies), voice-driven onboarding, and a shared multi-turn conversational assistant on both Chat and Home.
+**Completed:** financial statement normalization, DCF/FCFF/WACC engines, live SEC EDGAR + NSE India sourcing, ChromaDB retrieval, query intent classification, FinBERT sentiment, agentic LLM+rule-based tool planning, self-evaluation scoring, a benchmarked LangGraph orchestration alternative, Redis caching, full auth + PWA + Web Push, a simulated paper-trading platform, a 31-signal Alpha Factors scorecard, two-way voice (input + spoken replies), voice-driven onboarding, a shared multi-turn conversational assistant on both Chat and Home, and a walk-forward portfolio backtest with transaction costs and risk-adjusted return metrics.
 
 **Planned:** hybrid retrieval (vector + BM25), multi-quarter financial reasoning, an automated evaluation dashboard, portfolio-level analysis, a trained RLVR checkpoint, further voice-driven app navigation, Postgres migration, request-level rate limiting, a committed CD pipeline.
 

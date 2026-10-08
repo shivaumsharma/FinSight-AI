@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { formatPercent } from "@/lib/numberFormat";
+import { Table } from "./ui";
 
 interface GrowthData {
   revenue_cagr: Record<string, number | null>;
@@ -18,10 +20,7 @@ const ROWS: { key: keyof GrowthData; label: string }[] = [
 
 const BUCKETS = ["1y", "3y", "5y"] as const;
 
-function fmtCagr(v: number | null | undefined): string {
-  if (v === null || v === undefined) return "N/A";
-  return `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
-}
+const fmtCagr = (v: number | null | undefined): string => formatPercent(v, { decimals: 1, signed: true });
 
 // Independent fetch (own /financials call, same endpoint
 // FinancialPerformanceChart uses at its default "yearly" period) --
@@ -57,43 +56,18 @@ export default function GrowthMetrics({ ticker }: { ticker: string }) {
         ) : !hasAnyValue ? (
           <p className="py-2 text-center font-mono text-[11px] text-dim">Not enough annual history to compute growth rates.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[320px] font-mono text-xs">
-              <thead>
-                <tr className="text-[10px] uppercase tracking-wide text-dim">
-                  <th className="pb-2 text-left font-normal"></th>
-                  {BUCKETS.map((b) => (
-                    <th key={b} className="pb-2 text-right font-normal">
-                      {b}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {ROWS.map((row) => {
-                  const bucket = growth[row.key];
-                  return (
-                    <tr key={row.key} className="border-t border-border-subtle">
-                      <td className="py-1.5 text-dim">{row.label}</td>
-                      {BUCKETS.map((b) => {
-                        const v = bucket?.[b];
-                        return (
-                          <td
-                            key={b}
-                            className={`py-1.5 text-right ${
-                              v === null || v === undefined ? "text-dim" : v >= 0 ? "text-accent" : "text-danger"
-                            }`}
-                          >
-                            {fmtCagr(v)}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <Table
+            caption="Compound annual growth rates"
+            columns={["", ...BUCKETS]}
+            rows={ROWS.map((row) => ({
+              key: row.key,
+              label: row.label,
+              cells: BUCKETS.map((b) => {
+                const v = growth[row.key]?.[b];
+                return { value: fmtCagr(v), tone: v === null || v === undefined ? "muted" : v >= 0 ? "gain" : "loss" } as const;
+              }),
+            }))}
+          />
         )}
       </div>
     </div>

@@ -109,13 +109,24 @@ def _propose_manual(alert: dict, price: float, currency: str) -> None:
 
 def sweep_price_alerts() -> int:
     """Checks every active alert's ticker against a live quote; fires
-    at most once per alert (db.mark_price_alert_triggered is one-shot,
-    see its own docstring) and only after the notification/execution
+    at most once per alert and only after the notification/execution
     for it has actually succeeded -- same "don't mark it seen if the
     write itself failed" discipline as rating_alerts.py. A single
     alert's quote lookup or notification failing is caught and logged,
     never allowed to stop the sweep from checking every other alert.
-    Returns the number of alerts fired."""
+    Returns the number of alerts fired.
+
+    db.claim_price_alert() is called BEFORE firing, not after (see its
+    own docstring for why: this is a cron-triggered HTTP endpoint, not
+    an in-process scheduler, so two overlapping sweep invocations are a
+    real possibility, and firing before marking left a window where
+    both could fire the same alert). A failed claim (another concurrent
+    sweep already owns this alert) skips it entirely -- not an error,
+    just not this sweep's to handle. A claim that succeeds but is then
+    followed by a firing failure gets rolled back via
+    db.unclaim_price_alert() so the alert isn't lost, only deferred to
+    the next sweep.
+    """
     fired = 0
     for alert in db.get_active_price_alerts():
         try:
@@ -128,6 +139,9 @@ def sweep_price_alerts() -> int:
         if not _is_triggered(alert["direction"], price, alert["target_price"]):
             continue
 
+        if not db.claim_price_alert(alert["alert_id"]):
+            continue  # another concurrent sweep already claimed this one
+
         currency = quote.get("currency", "USD")
         try:
             if alert["auto_execute"]:
@@ -136,9 +150,9 @@ def sweep_price_alerts() -> int:
                 _propose_manual(alert, price, currency)
         except Exception as e:
             logger.warning(f"[price-alert sweep] failed for alert={alert['alert_id']} (non-fatal): {e}")
+            db.unclaim_price_alert(alert["alert_id"])
             continue
 
-        db.mark_price_alert_triggered(alert["alert_id"])
         fired += 1
 
     return fired

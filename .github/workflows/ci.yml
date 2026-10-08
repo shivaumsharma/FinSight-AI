@@ -1,0 +1,160 @@
+name: ci
+
+# Every check that must pass before code is trusted (and before deploy-aws.yml
+# runs): backend tests, lint, dependency audit, web tests and browser e2e. Jobs run in parallel
+# and report separately, so one failure does not hide the others.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push to the same branch/PR cancels the older run; main always runs fully.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Deliberately not requirements.txt: that pulls torch/transformers/chromadb
+      # (multi-GB, model downloads), which the unit tests never touch. This list is
+      # hand-curated, so a new import in app/ needs its package added here too --
+      # the usual symptom is a ModuleNotFoundError at test collection.
+      - name: Install test dependencies
+        run: pip install pandas numpy langgraph==1.2.9 redis fastapi httpx yfinance rapidfuzz python-dotenv pywebpush joblib scikit-learn python-multipart pypdf sarvamai xgboost shap reportlab -r requirements-dev.txt
+
+      # Excluded (run locally with the full environment):
+      #   test_finbert.py          manual smoke test, needs the model stack + Hugging Face
+      #   test_company_resolver.py builds its company index from live NSE/SEC fetches, which block cloud IPs
+      #   test_research_agent.py   imports ToolRegistry -> FinBERT -> transformers
+      # Failures are re-emitted as an error annotation so they are readable without a signed-in session.
+      - name: Run unit tests
+        run: |
+          set +e
+          pytest app/tests/ --ignore=app/tests/test_finbert.py --ignore=app/tests/test_company_resolver.py --ignore=app/tests/test_research_agent.py --tb=short 2>&1 | tee pytest_output.txt
+          exit_code=${PIPESTATUS[0]}
+          if [ "$exit_code" -ne 0 ]; then
+            summary=$(tail -150 pytest_output.txt | awk '{gsub(/%/,"%25"); gsub(/\r/,"%0D"); printf "%s%%0A", $0}')
+            echo "::error::pytest failed (exit $exit_code):%0A$summary"
+          fi
+          exit $exit_code
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the changed-files diff needs the base commit
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      # Repo-wide findings are warn-only (a backlog predates this gate); files touched by
+      # this push/PR must be clean, so the codebase only gets cleaner. If the base SHA is
+      # unresolvable (first commit, force-push) nothing is linted rather than everything.
+      - name: Lint (repo-wide, warn-only)
+        run: ruff check . --output-format=github --exit-zero
+
+      - name: Determine changed Python files
+        id: changed
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA" 2>/dev/null; then
+            files=$(git diff --name-only --diff-filter=ACMR "$BASE_SHA" "${{ github.sha }}" -- '*.py' | tr '\n' ' ')
+          else
+            files=""
+          fi
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+
+      - name: Lint changed files (blocking)
+        if: steps.changed.outputs.files != ''
+        run: ruff check ${{ steps.changed.outputs.files }}
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      # Warn-only: known vulnerabilities in pinned packages (chromadb, protobuf, transformers)
+      # still need triage. Drop `|| true` to make this blocking once they are resolved.
+      - name: Audit dependencies for known vulnerabilities
+        run: pip-audit -r requirements.txt || true
+
+  web-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run Vitest suite
+        run: npm test
+
+  # Real Next.js server and browser; the backend is mocked inside the test (web/e2e), so no secrets or database.
+  web-e2e:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/playwright-report
+          retention-days: 7

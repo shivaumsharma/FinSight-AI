@@ -3,7 +3,7 @@ from transformers import pipeline
 # Process-wide singleton, mirroring app/core/llm_provider.py. FinBERT
 # is otherwise reconstructed (and its HF pipeline reloaded from disk)
 # on every single request, since ResearchAgent/ToolRegistry/SentimentTool
-# are all rebuilt fresh per Streamlit click.
+# are all rebuilt fresh per request.
 _shared_pipeline = None
 
 

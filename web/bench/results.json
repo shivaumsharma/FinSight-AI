@@ -1,0 +1,54 @@
+{
+  "measuredAt": "2026-10-08T12:08:04.753Z",
+  "environment": "production build with React profiling, headless Chromium, one machine; relative numbers are the point",
+  "workload": "100 rows, 500 ticks/s for 4.414s, uniformly random tickers",
+  "results": [
+    {
+      "mode": "naive",
+      "rows": 100,
+      "ticksSent": 1755,
+      "tickRatePerSecond": 500,
+      "durationMs": 4414,
+      "commits": 1755,
+      "rowRenders": 177203,
+      "reactRenderMs": 1799.2,
+      "maxCommitMs": 8.6,
+      "p95CommitMs": 1.5,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "mode": "batched",
+      "rows": 100,
+      "ticksSent": 1965,
+      "tickRatePerSecond": 500,
+      "durationMs": 4406,
+      "commits": 34,
+      "rowRenders": 4857,
+      "reactRenderMs": 127.5,
+      "maxCommitMs": 8.4,
+      "p95CommitMs": 8,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "mode": "full",
+      "rows": 100,
+      "ticksSent": 1985,
+      "tickRatePerSecond": 500,
+      "durationMs": 4416,
+      "commits": 34,
+      "rowRenders": 2948,
+      "reactRenderMs": 70.3,
+      "maxCommitMs": 4.1,
+      "p95CommitMs": 3.9,
+      "longTasks": 0,
+      "longTaskMs": 0
+    }
+  ],
+  "reduction": {
+    "reactRenderMs": 25.6,
+    "rowRenders": 60.1,
+    "commits": 51.6
+  }
+}

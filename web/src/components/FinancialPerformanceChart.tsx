@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { formatPercent } from "@/lib/numberFormat";
 import {
   Bar,
   CartesianGrid,
@@ -53,7 +54,7 @@ function ChartTooltip({
       <div className="mb-1 font-bold text-text">{label}</div>
       {payload.map((p) => (
         <div key={p.name} style={{ color: p.color }}>
-          {p.name}: {p.name.includes("Margin") ? `${p.value.toFixed(2)}%` : `${symbol}${fmtCompactNumber(p.value)}`}
+          {p.name}: {p.name.includes("Margin") ? formatPercent(p.value) : `${symbol}${fmtCompactNumber(p.value)}`}
         </div>
       ))}
     </div>

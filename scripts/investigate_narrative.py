@@ -2,7 +2,7 @@
 investigate_narrative.py
 
 Runs the REAL production pipeline (ResearchAgent.run(), same entry
-point streamlit_app.py uses) end-to-end on a diverse set of tickers,
+point the API uses) end-to-end on a diverse set of tickers,
 back to back, to gather actual data on two open questions:
 
 1. How often does Executive Summary come out "Not available for this

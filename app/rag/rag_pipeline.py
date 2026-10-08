@@ -11,10 +11,31 @@ Responsibilities
 - Return retrieved chunks
 """
 
+import threading
+
 from app.data.nse_filings_client import NSEFilingsClient
 from app.data.sec_edgar_client import SECEdgarClient
 from app.rag.Text_chunker import FinancialTranscriptChunker
 from app.rag.chroma_store import ChromaVectorStore
+
+# Module-level (not per-RAGPipeline-instance) -- a fresh RAGPipeline is
+# constructed per request (see chroma_store.py's own comment), but
+# every instance points at the SAME on-disk Chroma store, so the lock
+# has to be shared across instances/threads to actually serialize
+# access to a given ticker's stored chunks. Keyed per-ticker rather
+# than one global lock so concurrent ingestion of DIFFERENT tickers
+# still runs in parallel.
+_ingest_locks_guard = threading.Lock()
+_ingest_locks = {}
+
+
+def _lock_for_ticker(ticker):
+    with _ingest_locks_guard:
+        lock = _ingest_locks.get(ticker)
+        if lock is None:
+            lock = threading.Lock()
+            _ingest_locks[ticker] = lock
+        return lock
 
 
 class RAGPipeline:
@@ -73,39 +94,56 @@ class RAGPipeline:
             return [], None
 
         latest_accession = disclosure.get("accession_number")
-        existing_accession = self.vector_store.get_ingested_accession(ticker)
 
-        if existing_accession is not None and existing_accession == latest_accession:
-            # Already have chunks from exactly this filing -- skip
-            # re-chunking/re-embedding, but still return disclosure
-            # metadata (cheap: fetch_company_disclosure is disk-cached)
-            # so citations always have a source URL/filing date.
-            return [], disclosure
+        # Everything from here on -- the accession check AND the
+        # delete-then-add re-ingest -- runs under one per-ticker lock.
+        # Previously these were two independent, unguarded vector_store
+        # calls: a concurrent re-ingest for the SAME ticker (e.g. two
+        # requests both landing right after a new filing posts) could
+        # interleave as delete(A) -> delete(B) -> add(A) -> add(B), or
+        # worse delete(A) -> add(A) -> delete(B) landing AFTER add(B),
+        # leaving the store empty for that ticker until whichever add()
+        # runs last. Any query in that window -- including the request
+        # that triggered the re-ingest -- silently got zero evidence,
+        # with no exception raised. Serializing per-ticker means a
+        # second caller either blocks and then sees the accession
+        # already matches (cheap skip) or waits for a clean delete+add
+        # to finish before its own runs -- the store is never
+        # observably empty mid-flight for a ticker actually being read.
+        with _lock_for_ticker(ticker):
+            existing_accession = self.vector_store.get_ingested_accession(ticker)
 
-        # Otherwise: either nothing is ingested yet, a newer filing is
-        # available, or the existing chunks predate accession-number
-        # tracking (unknown vintage, existing_accession is None but
-        # chunks may still exist). Clear out anything stale before
-        # ingesting fresh chunks -- unconditionally, not only when
-        # existing_accession is known, because chunk_ids are built
-        # from company+filing_date and would otherwise collide with
-        # old chunks for the SAME filing_date, silently blocking
-        # add_documents() from writing the new (accession-tagged)
-        # chunks at all. delete_company_documents() on a company with
-        # nothing stored is a harmless no-op.
-        self.vector_store.delete_company_documents(ticker)
+            if existing_accession is not None and existing_accession == latest_accession:
+                # Already have chunks from exactly this filing -- skip
+                # re-chunking/re-embedding, but still return disclosure
+                # metadata (cheap: fetch_company_disclosure is disk-cached)
+                # so citations always have a source URL/filing date.
+                return [], disclosure
 
-        chunker = FinancialTranscriptChunker(
-            company=ticker,
-            quarter=disclosure["filing_date"],
-            accession_number=latest_accession,
-        )
+            # Otherwise: either nothing is ingested yet, a newer filing is
+            # available, or the existing chunks predate accession-number
+            # tracking (unknown vintage, existing_accession is None but
+            # chunks may still exist). Clear out anything stale before
+            # ingesting fresh chunks -- unconditionally, not only when
+            # existing_accession is known, because chunk_ids are built
+            # from company+filing_date and would otherwise collide with
+            # old chunks for the SAME filing_date, silently blocking
+            # add_documents() from writing the new (accession-tagged)
+            # chunks at all. delete_company_documents() on a company with
+            # nothing stored is a harmless no-op.
+            self.vector_store.delete_company_documents(ticker)
 
-        chunks = chunker.chunk_text(disclosure["text"])
+            chunker = FinancialTranscriptChunker(
+                company=ticker,
+                quarter=disclosure["filing_date"],
+                accession_number=latest_accession,
+            )
 
-        self.vector_store.add_documents(chunks)
+            chunks = chunker.chunk_text(disclosure["text"])
 
-        return chunks, disclosure
+            self.vector_store.add_documents(chunks)
+
+            return chunks, disclosure
 
     # =========================================================
     # Retrieval

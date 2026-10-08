@@ -1,5 +1,6 @@
-import pandas as pd 
-import numpy as np 
+import pandas as pd
+
+from app.valuation.tax_rate import calculate_tax_rate
 
 
 class WACCEngine:
@@ -35,6 +36,15 @@ class WACCEngine:
   
   def calculate_debt_value(self):
     total_debt=(self.financial_df["total_debt"].dropna())
+    if total_debt.empty:
+      # Structurally absent debt history (every reported year is NaN)
+      # is treated the same as "this company has no debt" -- 0.0, not
+      # a crash. calculate_wacc() below already has to handle a
+      # genuinely debt-free company the same way, so there's no
+      # meaningful downstream difference between "known to be debt-free"
+      # and "debt data was never reported" as far as this engine is
+      # concerned.
+      return 0.0
     latest_debt_value=(total_debt.iloc[-1])
     return latest_debt_value
 
@@ -46,24 +56,27 @@ class WACCEngine:
     return total_value
   
   def calculate_tax_rate(self):
-    tax_expense=(self.financial_df["tax_expense"].dropna())
-    pretax_income=(self.financial_df["pretax_income"].dropna())
-    aligned_df=pd.concat([tax_expense,pretax_income],axis=1).dropna()
-    aligned_df.columns=["tax_expense","pretax_income"]
-    aligned_df=aligned_df[aligned_df["pretax_income"]>0]
-    aligned_df["tax_rate"]=(aligned_df["tax_expense"]/aligned_df["pretax_income"])
-    aligned_df["tax_rate"]=(aligned_df["tax_rate"].clip(0,0.5))
-    average_tax_rate=(aligned_df["tax_rate"].mean())
-    return average_tax_rate
+    return calculate_tax_rate(self.financial_df).mean()
 
   def calculate_wacc(self):
     equity_value=(self.market_cap)
     debt_value=(self.calculate_debt_value())
     total_value=(self.calculate_total_value())
     cost_of_equity=(self.calculate_cost_of_equity())
-    cost_of_debt=(self.calculate_cost_of_debt())
-    tax_rate=(self.calculate_tax_rate())
     equity_weight=(equity_value/total_value)
     debt_weight=(debt_value/total_value)
+    if debt_weight<=0:
+      # A genuinely debt-free company (or one with no usable debt
+      # history -- calculate_debt_value() already collapses both cases
+      # to debt_value=0.0) has a textbook WACC equal to its cost of
+      # equity. Skip cost_of_debt/tax_rate entirely rather than
+      # computing them anyway: calculate_cost_of_debt() averages over
+      # total_debt>0 rows, which is NaN (mean of an empty frame) exactly
+      # when there's no such row -- and 0 * NaN is NaN in IEEE-754, not
+      # 0, so multiplying that NaN by a legitimately-zero debt_weight
+      # used to poison the whole WACC anyway instead of cancelling out.
+      return equity_weight*cost_of_equity
+    cost_of_debt=(self.calculate_cost_of_debt())
+    tax_rate=(self.calculate_tax_rate())
     wacc=((equity_weight*cost_of_equity)+(debt_weight*cost_of_debt*(1-tax_rate)))
     return wacc

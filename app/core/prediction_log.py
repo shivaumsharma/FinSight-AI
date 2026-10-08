@@ -10,21 +10,32 @@ scan across hundreds of runs. This is the opposite: one line per
 report, only the handful of fields an accuracy check (Phase 2-style,
 but on live, non-backtested predictions) actually needs.
 
-Wired into ReportTool.run() (see app/tools/report_tool.py), not
-Streamlit -- ReportTool is the terminal tool of "almost every plan"
-(its own docstring), so every real report gets logged here regardless
-of which entry point produced it (Streamlit UI, a script, a future
-API), not just whichever caller remembers to call ResearchLogger.save().
+Wired into ReportTool.run() (see app/tools/report_tool.py), not a client --
+ReportTool is the terminal tool of "almost every plan" (its own docstring),
+so every real report gets logged here regardless of which entry point
+produced it (API, a script), not just whichever caller remembers to call
+ResearchLogger.save().
 """
 
 import json
 import os
+import threading
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from app.reporting.report_data_builder import compute_signal_agreement
 
 DEFAULT_LOG_PATH = os.path.join("logs", "prediction_log.jsonl")
+
+# The local file is lost on every redeploy. When Snowflake is configured (SNOWFLAKE_* env vars, see
+# scripts/snowflake_accuracy_store.py) each entry is also written to this table; without it, nothing changes.
+SNOWFLAKE_TABLE = "PREDICTION_LOG"
+_SNOWFLAKE_COLUMNS = ["timestamp", "ticker", "recommendation", "price_at_call", "upside_percent", "challenger_verdict",
+                      "data_quality_level", "range_low_1q", "range_high_1q", "agreement", "grounding_score", "overall_score"]
+_CREATE_SQL = f"""CREATE TABLE IF NOT EXISTS {SNOWFLAKE_TABLE} (
+    timestamp TIMESTAMP_TZ, ticker STRING, recommendation STRING, price_at_call FLOAT, upside_percent FLOAT,
+    challenger_verdict STRING, data_quality_level STRING, range_low_1q FLOAT, range_high_1q FLOAT,
+    agreement STRING, grounding_score FLOAT, overall_score FLOAT)"""
 
 
 class PredictionLogger:
@@ -55,10 +66,18 @@ class PredictionLogger:
         relative_valuation = valuation.get("relative_valuation")
         rating = recommendation.get("rating")
 
+        risk_range = (report_data.get("risk_range") or {}).get("ranges", {}).get("1 quarter") or {}
         entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "ticker": ticker,
             "recommendation": rating,
+            # Price at the call, so the outcome can be scored later; the challenger is the display-only ML
+            # classifier's verdict, logged so it can be compared with the rating on the same live calls.
+            "price_at_call": (report_data.get("market_earnings_snapshot") or {}).get("current_price"),
+            "challenger_verdict": (valuation.get("ml_classifier") or {}).get("verdict"),
+            "data_quality_level": (report_data.get("data_quality") or {}).get("level"),
+            "range_low_1q": risk_range.get("low"),
+            "range_high_1q": risk_range.get("high"),
             "dcf_available": valuation.get("DCF Available"),
             "upside_percent": self._none_if_unavailable(valuation.get("Upside (%)")),
             "relative_valuation_signal": (relative_valuation or {}).get("signal"),
@@ -70,7 +89,31 @@ class PredictionLogger:
         with open(self.log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
+        threading.Thread(target=self._mirror_to_snowflake, args=(entry,), daemon=True).start()
         return entry
+
+    @staticmethod
+    def _mirror_to_snowflake(entry: Dict[str, Any]) -> bool:
+        """Best-effort durable copy; False (never an exception) when not configured or unreachable."""
+        try:
+            from scripts import snowflake_accuracy_store as store
+
+            conn = store.connect()
+            if conn is None:
+                return False
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(_CREATE_SQL)
+                    cur.execute(
+                        f"INSERT INTO {SNOWFLAKE_TABLE} ({', '.join(_SNOWFLAKE_COLUMNS)}) "
+                        f"VALUES ({', '.join(['%s'] * len(_SNOWFLAKE_COLUMNS))})",
+                        [entry.get(c) for c in _SNOWFLAKE_COLUMNS],
+                    )
+                return True
+            finally:
+                conn.close()
+        except Exception:
+            return False
 
     @staticmethod
     def _none_if_unavailable(value):

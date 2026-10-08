@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { GetUserMediaTimeoutError, getUserMediaWithTimeout } from "@/lib/getUserMediaWithTimeout";
 
 const SAMPLE_RATE = 16000; // must match app/data/sarvam_realtime_client.py's connect() call exactly
@@ -172,7 +172,11 @@ export function useWakeWordListener(onWakeDetected: (text: string) => void) {
     }
   }, [openWs]);
 
-  const stop = useCallback(() => {
+  // Everything stop() needs to release EXCEPT the setState("idle") call
+  // -- factored out so the unmount cleanup below can release the same
+  // mic/AudioContext/WebSocket resources without also updating state on
+  // an already-unmounting component.
+  function releaseResources() {
     stoppedRef.current = true;
     teardownWs();
     processorRef.current?.disconnect();
@@ -185,6 +189,10 @@ export function useWakeWordListener(onWakeDetected: (text: string) => void) {
     audioContextRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+  }
+
+  const stop = useCallback(() => {
+    releaseResources();
     setState("idle");
   }, []);
 
@@ -194,6 +202,20 @@ export function useWakeWordListener(onWakeDetected: (text: string) => void) {
 
   const resume = useCallback(() => {
     pausedRef.current = false;
+  }, []);
+
+  // Unmount cleanup -- nothing previously released the mic/AudioContext/
+  // WebSocket if the owning component unmounted while the listener was
+  // still running (e.g. navigating away via BottomNav) rather than
+  // calling stop() itself. The mic-in-use indicator and the open
+  // WebSocket would otherwise persist indefinitely (until tab close).
+  useEffect(() => {
+    return () => {
+      if (!stoppedRef.current) {
+        releaseResources();
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return { state, errorMessage, start, stop, pause, resume };

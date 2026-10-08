@@ -3,9 +3,12 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import AddToWatchlistButton from "./AddToWatchlistButton";
+import LoadError from "./LoadError";
+import ListSkeleton from "./ListSkeleton";
 import { currencySymbol } from "@/lib/currency";
 import { fmtCompactNumber } from "@/lib/stockFormat";
 import type { ScreenerData, ScreenerFilters, ScreenerRow } from "@/lib/types";
+import { formatNumber, formatPercent, formatPrice } from "@/lib/numberFormat";
 
 const SORT_OPTIONS: { value: string; label: string }[] = [
   { value: "market_cap", label: "Market Cap" },
@@ -53,13 +56,11 @@ function ScreenerRowCard({ row }: { row: ScreenerRow }) {
           </div>
           <div className="text-right">
             <div className="font-mono text-sm text-text">
-              {currencySymbol(row.currency)}
-              {row.price.toFixed(2)}
+              {formatPrice(row.price, currencySymbol(row.currency))}
             </div>
             {row.change_pct !== null && (
               <div className={`font-mono text-[10px] font-bold ${row.change_pct >= 0 ? "text-accent" : "text-danger"}`}>
-                {row.change_pct >= 0 ? "+" : ""}
-                {row.change_pct.toFixed(2)}%
+                {formatPercent(row.change_pct, { signed: true })}
               </div>
             )}
           </div>
@@ -70,9 +71,9 @@ function ScreenerRowCard({ row }: { row: ScreenerRow }) {
       </div>
       <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-dim">
         <span>MCAP {row.market_cap !== null ? fmtCompactNumber(row.market_cap) : "--"}</span>
-        <span>P/E {row.pe_ratio !== null ? row.pe_ratio.toFixed(1) : "--"}</span>
-        <span>P/B {row.pb_ratio !== null ? row.pb_ratio.toFixed(1) : "--"}</span>
-        <span>DIV {row.dividend_yield !== null ? `${row.dividend_yield.toFixed(2)}%` : "--"}</span>
+        <span>P/E {row.pe_ratio !== null ? formatNumber(row.pe_ratio, 1) : "--"}</span>
+        <span>P/B {row.pb_ratio !== null ? formatNumber(row.pb_ratio, 1) : "--"}</span>
+        <span>DIV {row.dividend_yield !== null ? formatPercent(row.dividend_yield) : "--"}</span>
         <span>VOL {row.volume !== null ? fmtCompactNumber(row.volume) : "--"}</span>
       </div>
     </div>
@@ -91,19 +92,22 @@ export default function Screener() {
   const [sortDesc, setSortDesc] = useState(true);
   const [data, setData] = useState<ScreenerData | null>(null);
   const [showFilters, setShowFilters] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     setData(null);
+    setFailed(false);
     const query = buildQuery(filters, sortBy, sortDesc);
     fetch(`/api/market/screener?${query}`)
-      .then((r) => (r.ok ? r.json() : { results: [], total_matched: 0, universe_size: 0 }))
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then(setData)
-      .catch(() => setData({ results: [], total_matched: 0, universe_size: 0 }));
+      .catch(() => setFailed(true));
     // Re-runs whenever a filter, sort field, or sort direction changes --
     // no debounce needed since these are number inputs committed on
     // blur/change, not a per-keystroke search box.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, sortBy, sortDesc]);
+  }, [filters, sortBy, sortDesc, attempt]);
 
   function updateFilter(field: FilterField, raw: string) {
     setFilters((prev) => {
@@ -122,12 +126,12 @@ export default function Screener() {
     <div>
       <div className="flex items-center justify-between">
         <p className="font-mono text-[10px] tracking-wide text-dim">
-          {data ? `${data.total_matched} OF ${data.universe_size} TRACKED` : "LOADING..."}
+          {data ? `${data.total_matched} OF ${data.universe_size} TRACKED` : failed ? "UNAVAILABLE" : "LOADING..."}
         </p>
         <button
           type="button"
           onClick={() => setShowFilters((v) => !v)}
-          className="font-mono text-[10px] font-bold text-muted hover:text-accent"
+          className="-my-2 py-2 font-mono text-[10px] font-bold text-muted hover:text-accent"
         >
           {showFilters ? "HIDE FILTERS" : "SHOW FILTERS"}
         </button>
@@ -173,8 +177,10 @@ export default function Screener() {
         </button>
       </div>
 
-      {data === null ? (
-        <p className="mt-3 font-mono text-[11px] text-dim">Loading...</p>
+      {failed ? (
+        <LoadError what="the screener" onRetry={() => setAttempt((a) => a + 1)} />
+      ) : data === null ? (
+        <ListSkeleton rows={5} />
       ) : data.results.length > 0 ? (
         <div className="mt-3 flex flex-col gap-2">
           {data.results.map((row) => (

@@ -8,6 +8,8 @@ get_quote and auth.send_push_notification are the only things
 monkeypatched -- never a real network/push call.
 """
 
+import threading
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -118,6 +120,31 @@ def test_mark_price_alert_triggered_is_one_shot(temp_db):
     second_triggered_at = temp_db.list_price_alerts(user_id, active_only=False)[0]["triggered_at"]
 
     assert first_triggered_at == second_triggered_at  # not re-stamped
+
+
+def test_claim_price_alert_race_only_one_concurrent_caller_wins(temp_db):
+    # Regression test for the race claim_price_alert() closes: see its
+    # own docstring for the mechanism (two overlapping sweep
+    # invocations both reading the same untriggered alert before
+    # either marked it). Same threaded-concurrency approach as
+    # test_orders.py's test_execute_order_double_sell_race_never_oversells.
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    alert_id = temp_db.create_price_alert(user_id, "AAPL", "SELL", "below", 180.0)
+
+    n_threads = 20
+    results = [None] * n_threads
+
+    def _attempt(i):
+        results[i] = temp_db.claim_price_alert(alert_id)
+
+    threads = [threading.Thread(target=_attempt, args=(i,)) for i in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sum(1 for r in results if r is True) == 1  # exactly one sweep claims it
+    assert sum(1 for r in results if r is False) == n_threads - 1
 
 
 # ---------------------------------------------------------------- sweep_price_alerts

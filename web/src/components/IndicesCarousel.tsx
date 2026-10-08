@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import SectionSkeleton from "./SectionSkeleton";
+import LoadError from "./LoadError";
 import type { IndexQuote } from "@/lib/types";
+import { formatNumber, formatPercent } from "@/lib/numberFormat";
 
 // Horizontally scrolling strip of a fixed, curated index list (see
 // main.py's INDEX_LIST) -- not user-editable, unlike Watchlist. A
@@ -15,14 +17,27 @@ import type { IndexQuote } from "@/lib/types";
 // own comment on deliberately staying at 4 tabs).
 export default function IndicesCarousel() {
   const [indices, setIndices] = useState<IndexQuote[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     fetch("/api/market/indices")
-      .then((r) => (r.ok ? r.json() : { indices: [] }))
-      .then((data) => setIndices(data.indices))
-      .catch(() => setIndices([]));
-  }, []);
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((data) => {
+        setIndices(data.indices);
+        setFailed(false);
+      })
+      .catch(() => setFailed(true));
+  }, [attempt]);
 
+  if (failed) {
+    return (
+      <div className="mt-6">
+        <p className="font-mono text-[10px] tracking-wide text-dim">INDICES</p>
+        <LoadError what="indices" onRetry={() => setAttempt((a) => a + 1)} className="mt-2" />
+      </div>
+    );
+  }
   if (indices === null) return <SectionSkeleton label="INDICES" rows={4} variant="row" />;
   if (indices.length === 0) return null;
 
@@ -30,7 +45,7 @@ export default function IndicesCarousel() {
     <div className="mt-6">
       <div className="flex items-center justify-between">
         <p className="font-mono text-[10px] tracking-wide text-dim">INDICES</p>
-        <Link href="/indices" className="font-mono text-[10px] font-bold text-muted hover:text-accent">
+        <Link href="/indices" className="-my-2 inline-block py-2 font-mono text-[10px] font-bold text-muted hover:text-accent">
           VIEW ALL &rarr;
         </Link>
       </div>
@@ -45,12 +60,11 @@ export default function IndicesCarousel() {
               {idx.price !== null ? (
                 <>
                   <span className="font-mono text-sm font-bold text-text">
-                    {idx.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    {formatNumber(idx.price, 2)}
                   </span>
                   {idx.change_pct !== null && (
                     <span className={`font-mono text-[10px] ${idx.change_pct >= 0 ? "text-accent" : "text-danger"}`}>
-                      {idx.change_pct >= 0 ? "+" : ""}
-                      {idx.change_pct.toFixed(2)}%
+                      {formatPercent(idx.change_pct, { signed: true })}
                     </span>
                   )}
                 </>

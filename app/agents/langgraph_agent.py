@@ -41,6 +41,7 @@ None) so the orchestration-latency benchmark isn't skewed by checkpoint
 write overhead; see LangGraphResearchAgent.__init__.
 """
 
+import logging
 from typing import List, TypedDict
 
 from langgraph.graph import StateGraph, START, END
@@ -49,6 +50,8 @@ from app.core.research_context import ResearchContext
 from app.core.company_resolver import resolve_companies, is_comparison_question
 from app.agents.agent_constants import NoCompanyDetectedError, TRAILING_TOOLS
 from app.planner import Planner
+
+logger = logging.getLogger(__name__)
 
 # ToolRegistry is deliberately NOT imported at module level -- it pulls
 # in every tool's own imports (torch, transformers, chromadb,
@@ -118,17 +121,33 @@ def _evidence_dispatch(state: GraphState) -> str:
     return plan[step]
 
 
-def _make_evidence_node(tool):
+def _run_tool_isolated(name: str, tool, context: ResearchContext) -> None:
+    """Same per-tool isolation as ResearchAgent.run()'s loop (see its
+    own comment for why: one tool's failure must not crash the whole
+    run and lose every OTHER tool's already-gathered evidence, and
+    report_tool/evaluation_tool -- always the last two nodes reached,
+    see TRAILING_TOOLS -- are themselves already resilient to a
+    missing upstream piece). Shared by both node factories below since
+    an evidence node and a trailing node otherwise differ only in
+    whether they also advance state["step"]."""
+    try:
+        tool.run(context)
+    except Exception as e:
+        logger.warning(f"[langgraph_agent] {name} failed for '{context.question}' (non-fatal, continuing): {e}")
+        context.metadata.setdefault("tool_errors", []).append({"tool": name, "error": str(e)})
+
+
+def _make_evidence_node(name: str, tool):
     def node(state: GraphState) -> GraphState:
-        tool.run(state["context"])
+        _run_tool_isolated(name, tool, state["context"])
         state["step"] += 1
         return state
     return node
 
 
-def _make_trailing_node(tool):
+def _make_trailing_node(name: str, tool):
     def node(state: GraphState) -> GraphState:
-        tool.run(state["context"])
+        _run_tool_isolated(name, tool, state["context"])
         return state
     return node
 
@@ -160,11 +179,11 @@ def build_graph(checkpointer=None, tools=None, planner=None):
     graph.add_node("route", _route_passthrough_node)
 
     for name in EVIDENCE_TOOLS:
-        graph.add_node(name, _make_evidence_node(tools[name]))
+        graph.add_node(name, _make_evidence_node(name, tools[name]))
         graph.add_edge(name, "route")
 
     for name in TRAILING_TOOLS:
-        graph.add_node(name, _make_trailing_node(tools[name]))
+        graph.add_node(name, _make_trailing_node(name, tools[name]))
 
     graph.add_edge(START, "resolve_and_plan")
     graph.add_edge("resolve_and_plan", "route")

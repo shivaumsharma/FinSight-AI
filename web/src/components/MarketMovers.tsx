@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import SectionSkeleton from "./SectionSkeleton";
+import LoadError from "./LoadError";
 import AddToWatchlistButton from "./AddToWatchlistButton";
 import { currencySymbol } from "@/lib/currency";
 import type { MarketMoversData, MoverItem } from "@/lib/types";
+import { formatPercent, formatPrice } from "@/lib/numberFormat";
 
 function MoverRow({ item }: { item: MoverItem }) {
   return (
@@ -17,12 +19,10 @@ function MoverRow({ item }: { item: MoverItem }) {
         </div>
         <div className="text-right">
           <div className="font-mono text-sm text-text">
-            {currencySymbol(item.currency)}
-            {item.price.toFixed(2)}
+            {formatPrice(item.price, currencySymbol(item.currency))}
           </div>
           <div className={`font-mono text-[10px] font-bold ${item.change_pct >= 0 ? "text-accent" : "text-danger"}`}>
-            {item.change_pct >= 0 ? "+" : ""}
-            {item.change_pct.toFixed(2)}%
+            {formatPercent(item.change_pct, { signed: true })}
           </div>
         </div>
       </Link>
@@ -40,13 +40,30 @@ function MoverRow({ item }: { item: MoverItem }) {
 export default function MarketMovers() {
   const [data, setData] = useState<MarketMoversData | null>(null);
   const [tab, setTab] = useState<"gainers" | "losers">("gainers");
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+
+  function retry() {
+    setFailed(false);
+    setData(null);
+    setAttempt((a) => a + 1);
+  }
 
   useEffect(() => {
     fetch("/api/market/movers?limit=5")
-      .then((r) => (r.ok ? r.json() : { gainers: [], losers: [] }))
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then(setData)
-      .catch(() => setData({ gainers: [], losers: [] }));
-  }, []);
+      .catch(() => setFailed(true));
+  }, [attempt]);
+
+  if (failed) {
+    return (
+      <div className="mt-6">
+        <p className="font-mono text-[10px] tracking-wide text-dim">TOP MOVERS (TRACKED UNIVERSE)</p>
+        <LoadError what="market movers" onRetry={retry} className="mt-2" />
+      </div>
+    );
+  }
 
   if (data === null) return <SectionSkeleton label="TOP MOVERS (TRACKED UNIVERSE)" rows={3} />;
 

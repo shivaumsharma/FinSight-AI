@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import SectionSkeleton from "./SectionSkeleton";
 import type { MarketSentiment } from "@/lib/types";
+import { formatPercent } from "@/lib/numberFormat";
 
 // "FinSight Research Sentiment" -- the Buy/Sell share of every
 // distinct ticker's latest completed rating across ALL users, NOT a
@@ -36,8 +37,8 @@ export default function SentimentGauge() {
         {hasVotes ? (
           <>
             <div className="flex items-baseline justify-between font-mono text-[11px] font-bold">
-              <span className="text-accent">{data.buy_pct!.toFixed(0)}% BUY</span>
-              <span className="text-danger">{data.sell_pct!.toFixed(0)}% SELL</span>
+              <span className="text-accent">{formatPercent(data.buy_pct, { decimals: 0 })} BUY</span>
+              <span className="text-danger">{formatPercent(data.sell_pct, { decimals: 0 })} SELL</span>
             </div>
             <div className="mt-1.5 flex h-3 w-full overflow-hidden rounded-full border border-border-subtle bg-bg">
               <div className="h-full bg-accent" style={{ width: `${data.buy_pct}%` }} />

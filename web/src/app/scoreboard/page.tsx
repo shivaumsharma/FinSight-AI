@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import AuthGate from "@/components/AuthGate";
 import BottomNav from "@/components/BottomNav";
 import type { ScoreboardResponse, ScoreboardWindow } from "@/lib/types";
+import { formatPercent } from "@/lib/numberFormat";
 
 const WINDOWS: { key: "7" | "30" | "90"; label: string }[] = [
   { key: "7", label: "7 DAYS" },
@@ -63,7 +64,7 @@ function ScoreboardContent() {
 }
 
 function fmtPct(v: number | null): string {
-  return v === null ? "N/A" : `${v.toFixed(1)}%`;
+  return formatPercent(v, { decimals: 1 });
 }
 
 // Visually blunt on purpose: the model's own number is red whenever it
@@ -113,7 +114,7 @@ function WindowCard({ label, window }: { label: string; window: ScoreboardWindow
                   <div key={key} className="flex items-center justify-between font-mono text-[11px]">
                     <span className="uppercase text-muted">{key}</span>
                     <span className="text-text">
-                      {b.precision_pct === null ? "N/A" : `${b.precision_pct.toFixed(1)}%`}
+                      {formatPercent(b.precision_pct, { decimals: 1 })}
                       <span className="ml-1.5 text-dim">
                         ({b.correct}/{b.total})
                       </span>

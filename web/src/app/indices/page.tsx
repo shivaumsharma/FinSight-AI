@@ -4,7 +4,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import AuthGate from "@/components/AuthGate";
 import BottomNav from "@/components/BottomNav";
+import LoadError from "@/components/LoadError";
+import ListSkeleton from "@/components/ListSkeleton";
 import type { IndexQuote } from "@/lib/types";
+import { formatNumber, formatPercent } from "@/lib/numberFormat";
 
 // Full-size version of the home page's IndicesCarousel strip, split
 // into Indian/Global tabs by region (see main.py's INDEX_LIST) --
@@ -13,13 +16,21 @@ import type { IndexQuote } from "@/lib/types";
 export default function IndicesPage() {
   const [indices, setIndices] = useState<IndexQuote[] | null>(null);
   const [tab, setTab] = useState<"global" | "india">("global");
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+
+  function retry() {
+    setFailed(false);
+    setIndices(null);
+    setAttempt((a) => a + 1);
+  }
 
   useEffect(() => {
     fetch("/api/market/indices")
-      .then((r) => (r.ok ? r.json() : { indices: [] }))
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((data) => setIndices(data.indices))
-      .catch(() => setIndices([]));
-  }, []);
+      .catch(() => setFailed(true));
+  }, [attempt]);
 
   const shown = (indices || []).filter((idx) => idx.region === tab);
 
@@ -28,7 +39,7 @@ export default function IndicesPage() {
       {() => (
         <div className="min-h-screen bg-bg pb-safe-20">
           <div className="mx-auto max-w-2xl px-5 py-8">
-            <Link href="/" className="font-mono text-xs font-bold text-muted hover:text-accent">
+            <Link href="/" className="-my-2 inline-block py-2 font-mono text-xs font-bold text-muted hover:text-accent">
               &larr; HOME
             </Link>
             <h1 className="mt-3 font-mono text-lg font-bold text-text">Indices</h1>
@@ -48,6 +59,10 @@ export default function IndicesPage() {
               ))}
             </div>
 
+            {failed && <LoadError what="indices" onRetry={retry} />}
+
+            {indices === null && !failed && <ListSkeleton rows={6} />}
+
             {indices !== null && (
               <div className="mt-3 flex flex-col gap-2">
                 {shown.map((idx) => (
@@ -62,12 +77,11 @@ export default function IndicesPage() {
                     {idx.price !== null ? (
                       <div className="text-right">
                         <div className="font-mono text-sm text-text">
-                          {idx.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                          {formatNumber(idx.price, 2)}
                         </div>
                         {idx.change_pct !== null && (
                           <div className={`font-mono text-xs font-bold ${idx.change_pct >= 0 ? "text-accent" : "text-danger"}`}>
-                            {idx.change_pct >= 0 ? "+" : ""}
-                            {idx.change_pct.toFixed(2)}%
+                            {formatPercent(idx.change_pct, { signed: true })}
                           </div>
                         )}
                       </div>

@@ -18,6 +18,7 @@ import OrderTicket from "@/components/OrderTicket";
 import MarketNews from "@/components/MarketNews";
 import MarketMovers from "@/components/MarketMovers";
 import ScoreboardHomeCard from "@/components/ScoreboardHomeCard";
+import AccuracyTearsheetHomeCard from "@/components/AccuracyTearsheetHomeCard";
 import SentimentGauge from "@/components/SentimentGauge";
 import VoiceInputButton from "@/components/VoiceInputButton";
 import HomeAssistant from "@/components/HomeAssistant";
@@ -190,7 +191,7 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
               type="button"
               onClick={() => setShowSearch(true)}
               aria-label="Search reports and watchlist"
-              className="text-muted hover:text-accent"
+              className="-m-2 flex h-9 w-9 items-center justify-center text-muted hover:text-accent"
             >
               <SearchIcon />
             </button>
@@ -230,7 +231,7 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
               onChange={(e) => setQuery(e.target.value)}
               placeholder="ask about a ticker or thesis..."
               disabled={isBusy}
-              className="flex-1 bg-transparent font-mono text-sm text-text placeholder:text-muted focus:outline-none disabled:opacity-60"
+              className="flex-1 bg-transparent py-1.5 font-mono text-sm text-text placeholder:text-muted focus:outline-none disabled:opacity-60"
             />
             <VoiceInputButton onTranscript={setQuery} disabled={isBusy} />
           </div>
@@ -245,7 +246,7 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
                   setQuery(q);
                   run(q);
                 }}
-                className="rounded border border-border bg-card px-2.5 py-1 font-mono text-[11px] font-semibold text-muted hover:border-accent hover:text-accent disabled:opacity-50"
+                className="rounded border border-border bg-card px-3 py-1.5 font-mono text-[11px] font-semibold text-muted hover:border-accent hover:text-accent disabled:opacity-50"
               >
                 {t}
               </button>
@@ -303,6 +304,8 @@ function ResearchPage({ email, displayName }: { email: string | null; displayNam
         />
 
         <ScoreboardHomeCard />
+
+        <AccuracyTearsheetHomeCard />
 
         <IndicesCarousel />
 

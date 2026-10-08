@@ -17,6 +17,7 @@ models/
 # Disk cache for SEC EDGAR fetches (ticker->CIK map + fetched filings) --
 # regenerated on demand, not source.
 filings_cache/
+edgar_facts_cache/
 
 # ChromaDB persistent store (embeddings + HNSW index binaries) -- fully
 # regenerated on demand by RAGPipeline.ingest_company_disclosure() from
@@ -113,3 +114,6 @@ mlruns/
 # Next.js frontend (web/) -- has its own .gitignore for build artifacts;
 # this repo-root .gitignore only needs to keep node_modules/ out.
 web/node_modules/
+
+# Research sprint sandbox data (large, regenerable)
+research/data/

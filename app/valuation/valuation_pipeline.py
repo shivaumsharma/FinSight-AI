@@ -313,7 +313,6 @@ class ValuationPipeline:
     # risk a real discontinuity, not just an inconsistency.
     effective_terminal_growth_rate = self.terminal_growth_rate + fcff_engine.quality_terminal_growth_adjustment()
 
-    revenue_forecasts=fcff_engine.forecast_revenue()
     fcff_forecasts=fcff_engine.forecast_fcff(terminal_growth_rate=effective_terminal_growth_rate)
 
     # forecast_fcff() returns None (not a crash) when the revenue CAGR
@@ -410,8 +409,23 @@ class ValuationPipeline:
 
     enterprise_value=dcf_engine.calculate_enterprise_value()
 
-    total_debt = self.financial_df["total_debt"].iloc[-1]
-    cash = self.financial_df["cash"].iloc[-1]
+    # .dropna() before .iloc[-1], matching _get_shares_outstanding's own
+    # pattern above -- a bare .iloc[-1] on a NaN latest-year value (a
+    # real, real-world yfinance XBRL-tagging gap) used to let NaN sail
+    # straight through equity_value into the enterprise_value ratio
+    # guard below, which then silently never fired: NaN comparisons are
+    # always False in Python, so "equity_value / enterprise_value < ..."
+    # doesn't catch a NaN equity_value at all -- it fell through as if
+    # the check had passed, handing a NaN intrinsic value to the user as
+    # though it were a real, vetted number.
+    total_debt_series = self.financial_df["total_debt"].dropna()
+    cash_series = self.financial_df["cash"].dropna()
+    if total_debt_series.empty or cash_series.empty:
+        return self._unavailable_result(
+            "DCF is not applicable -- this company's latest-year total debt or cash balance is unavailable."
+        )
+    total_debt = total_debt_series.iloc[-1]
+    cash = cash_series.iloc[-1]
 
     equity_value=(dcf_engine.calculate_equity_value(total_debt=total_debt,cash=cash))
     net_debt = total_debt - cash

@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import AuthGate from "@/components/AuthGate";
 import BottomNav from "@/components/BottomNav";
+import LoadError from "@/components/LoadError";
+import ListSkeleton from "@/components/ListSkeleton";
 import RatingBadge from "@/components/RatingBadge";
 import { relativeTime } from "@/lib/format";
 import type { ReportSummary } from "@/lib/types";
@@ -32,17 +34,31 @@ export default function ReportsPage() {
 
 function ReportsList() {
   const [reports, setReports] = useState<ReportSummary[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const router = useRouter();
+
+  // Reset in the handler, not the effect, so a retry shows the loading
+  // state again without a synchronous setState inside the effect body.
+  function retry() {
+    setFailed(false);
+    setReports(null);
+    setAttempt((a) => a + 1);
+  }
 
   useEffect(() => {
     fetch("/api/reports/recent?limit=50")
-      .then((r) => (r.ok ? r.json() : { reports: [] }))
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((data) => setReports(data.reports))
-      .catch(() => setReports([]));
-  }, []);
+      .catch(() => setFailed(true));
+  }, [attempt]);
+
+  if (failed) {
+    return <LoadError what="your reports" onRetry={retry} className="mt-6" />;
+  }
 
   if (reports === null) {
-    return <p className="mt-6 font-mono text-xs text-dim">loading...</p>;
+    return <ListSkeleton rows={4} className="mt-6" />;
   }
 
   if (reports.length === 0) {

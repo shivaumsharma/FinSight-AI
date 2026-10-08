@@ -19,14 +19,24 @@ def make_synthetic_training_df(n_per_label: int = 10) -> pd.DataFrame:
     rng = np.random.default_rng(42)
     labels = ["UNDERVALUED", "FAIRLY VALUED", "OVERVALUED"]
     rows = []
+    ticker_counter = 0
     for label in labels:
         # Give each label's features a distinct-ish mean so the models
         # have real signal to find -- an all-noise dataset would make
         # every downstream metric (F1, SHAP, ablations) meaningless.
         offset = {"UNDERVALUED": 1.0, "FAIRLY VALUED": 0.0, "OVERVALUED": -1.0}[label]
-        for _ in range(n_per_label):
+        for i in range(n_per_label):
             row = {col: float(rng.normal(loc=offset, scale=0.5)) for col in FEATURE_COLUMNS}
             row["realized_label"] = label
+            # Every OTHER row repeats the previous row's ticker (not a
+            # fresh one each time) -- deliberately exercises the
+            # group-aware split's actual job (keeping a repeated
+            # ticker's rows together) rather than degenerating into a
+            # plain row-level split where every group happens to have
+            # exactly one member.
+            if i % 2 == 0:
+                ticker_counter += 1
+            row["ticker"] = f"SYN{ticker_counter}"
             rows.append(row)
     return pd.DataFrame(rows)
 
@@ -75,6 +85,53 @@ def test_train_and_evaluate_returns_test_split_alongside_fitted_models(synthetic
     assert len(X_test) < len(synthetic_df)
     for name, model in fitted_models.items():
         assert hasattr(model, "predict_proba")
+
+
+def test_train_and_evaluate_never_splits_a_ticker_across_train_and_test(synthetic_df):
+    # The actual leakage regression test: synthetic_df has each ticker
+    # appearing in exactly 2 rows (see make_synthetic_training_df) --
+    # a plain (non-grouped) split would, over repeated runs, sometimes
+    # put one of those 2 rows in train and the other in test. Asserting
+    # this on the real X_test/y_test arrays alone isn't possible (they
+    # don't carry the ticker column through) -- so this reaches into
+    # the same GroupShuffleSplit call train_and_evaluate makes, using
+    # the identical arguments, to confirm the split itself is group-safe.
+    from sklearn.model_selection import GroupShuffleSplit
+
+    X = synthetic_df[FEATURE_COLUMNS].astype("float64").to_numpy()
+    y = synthetic_df["realized_label"].astype(str).to_numpy()
+    groups = synthetic_df["ticker"].to_numpy()
+
+    splitter = GroupShuffleSplit(n_splits=1, test_size=0.3, random_state=42)
+    train_idx, test_idx = next(splitter.split(X, y, groups=groups))
+
+    train_tickers = set(groups[train_idx])
+    test_tickers = set(groups[test_idx])
+    assert train_tickers.isdisjoint(test_tickers)
+    # Sanity check the fixture itself actually has repeated tickers --
+    # otherwise this test would trivially pass even against the old,
+    # leaky train_test_split (nothing to leak if every group has 1 row).
+    assert synthetic_df["ticker"].duplicated().any()
+
+
+def test_cross_validate_models_never_splits_a_ticker_across_folds(synthetic_df):
+    fold_ticker_sets = []
+    X = synthetic_df[FEATURE_COLUMNS].astype("float64").to_numpy()
+    y = synthetic_df["realized_label"].astype(str).to_numpy()
+    groups = synthetic_df["ticker"].to_numpy()
+
+    from sklearn.model_selection import GroupKFold
+
+    cv = GroupKFold(n_splits=5)
+    for _, test_idx in cv.split(X, y, groups=groups):
+        fold_ticker_sets.append(set(groups[test_idx]))
+
+    # No ticker appears as a held-out member of more than one fold --
+    # the group-safety property GroupKFold is supposed to guarantee.
+    seen = set()
+    for fold_tickers in fold_ticker_sets:
+        assert seen.isdisjoint(fold_tickers)
+        seen |= fold_tickers
 
 
 def test_train_returns_artifacts_with_a_fitted_best_model(tmp_path, monkeypatch, synthetic_df):

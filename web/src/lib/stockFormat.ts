@@ -1,36 +1,14 @@
-// Formatting helpers shared by the stock-detail-page cards
-// (StockHeader/PriceStatistics/FundamentalsCard/...). Deliberately
-// separate from ReportView.tsx's own fmtMoney/fmtLargeDollar (those are
-// module-private there, and this page has different formatting needs --
-// e.g. plain volume/share counts with no currency symbol at all).
+// Stock-detail-page helpers. Thin wrappers over numberFormat.ts, kept so existing call sites and signatures still work.
 
-export function fmtCompactNumber(n: number | null | undefined): string {
-  if (n === null || n === undefined) return "N/A";
-  const abs = Math.abs(n);
-  if (abs >= 1e12) return `${(n / 1e12).toFixed(2)}T`;
-  if (abs >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
-  if (abs >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
-  return n.toLocaleString();
-}
+import { formatCompact, formatCompactMoney, formatPercent, formatPrice, formatRatio } from "./numberFormat";
 
-export function fmtCompactMoney(n: number | null | undefined, symbol: string): string {
-  if (n === null || n === undefined) return "N/A";
-  return `${symbol}${fmtCompactNumber(n)}`;
-}
+export const fmtCompactNumber = (n: number | null | undefined): string => formatCompact(n);
 
-export function fmtPrice(n: number | null | undefined, symbol: string): string {
-  if (n === null || n === undefined) return "N/A";
-  return `${symbol}${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+export const fmtCompactMoney = (n: number | null | undefined, symbol: string): string => formatCompactMoney(n, symbol);
 
-export function fmtPercent(n: number | null | undefined, alreadyFraction = false): string {
-  if (n === null || n === undefined) return "N/A";
-  const pct = alreadyFraction ? n * 100 : n;
-  return `${pct.toFixed(2)}%`;
-}
+export const fmtPrice = (n: number | null | undefined, symbol: string): string => formatPrice(n, symbol);
 
-export function fmtRatio(n: number | null | undefined, suffix = "x"): string {
-  if (n === null || n === undefined) return "N/A";
-  return `${n.toFixed(2)}${suffix}`;
-}
+export const fmtPercent = (n: number | null | undefined, alreadyFraction = false): string =>
+  formatPercent(n, { fraction: alreadyFraction });
+
+export const fmtRatio = (n: number | null | undefined, suffix = "x"): string => formatRatio(n, suffix);

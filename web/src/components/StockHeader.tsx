@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { currencySymbol } from "@/lib/currency";
 import { fmtPrice } from "@/lib/stockFormat";
+import { useLivePrices } from "@/lib/livePrices";
 import type { StockOverview } from "@/lib/types";
+import { formatPercent, formatSignedPrice } from "@/lib/numberFormat";
 
 function BackIcon() {
   return (
@@ -22,11 +24,12 @@ function BackIcon() {
 // just not claiming it.
 export default function StockHeader({ overview }: { overview: StockOverview }) {
   const symbol = currencySymbol(overview.currency);
+  const quote = useLivePrices([overview.ticker]).prices[overview.ticker.toUpperCase()];
+  const price = quote?.price ?? overview.price;
+  const changePct = quote ? quote.changePct : overview.change_pct;
   const changeAbs =
-    overview.change_pct !== null && overview.previous_close !== null
-      ? (overview.change_pct / 100) * overview.previous_close
-      : null;
-  const positive = (overview.change_pct ?? 0) >= 0;
+    changePct !== null && overview.previous_close !== null ? (changePct / 100) * overview.previous_close : null;
+  const positive = (changePct ?? 0) >= 0;
 
   return (
     <div className="flex items-start justify-between gap-3">
@@ -41,12 +44,11 @@ export default function StockHeader({ overview }: { overview: StockOverview }) {
         {overview.company_name && <div className="truncate font-mono text-xs text-muted">{overview.company_name}</div>}
       </div>
       <div className="shrink-0 text-right">
-        <div className="font-mono text-xl font-bold text-text">{fmtPrice(overview.price, symbol)}</div>
-        {overview.change_pct !== null && (
+        <div className="font-mono text-xl font-bold text-text">{fmtPrice(price, symbol)}</div>
+        {changePct !== null && (
           <div className={`font-mono text-xs font-bold ${positive ? "text-accent" : "text-danger"}`}>
-            {changeAbs !== null && `${positive ? "+" : "-"}${symbol}${Math.abs(changeAbs).toFixed(2)} `}
-            ({positive ? "+" : ""}
-            {overview.change_pct.toFixed(2)}%)
+            {changeAbs !== null && `${formatSignedPrice(changeAbs, symbol)} `}
+            ({formatPercent(changePct, { signed: true })})
           </div>
         )}
       </div>

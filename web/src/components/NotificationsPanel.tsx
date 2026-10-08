@@ -6,6 +6,7 @@ import { usePushNotifications } from "@/lib/usePushNotifications";
 import { relativeTime } from "@/lib/format";
 import RatingBadge from "./RatingBadge";
 import type { ReportSummary } from "@/lib/types";
+import ListSkeleton from "./ListSkeleton";
 
 const LAST_SEEN_KEY = "finsight:notifications:lastSeenAt";
 
@@ -29,16 +30,21 @@ export default function NotificationsPanel() {
   const [open, setOpen] = useState(false);
   const [reports, setReports] = useState<ReportSummary[] | null>(null);
   const [lastSeenAt, setLastSeenAt] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const router = useRouter();
   const { status, subscribe, unsubscribe } = usePushNotifications();
 
   useEffect(() => {
     setLastSeenAt(Number(localStorage.getItem(LAST_SEEN_KEY) || 0));
     fetch("/api/reports/recent?limit=10")
-      .then((r) => (r.ok ? r.json() : { reports: [] }))
-      .then((data) => setReports(data.reports))
-      .catch(() => setReports([]));
-  }, []);
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((data) => {
+        setReports(data.reports);
+        setFailed(false);
+      })
+      .catch(() => setFailed(true));
+  }, [attempt]);
 
   const unreadCount = useMemo(() => {
     if (!reports) return 0;
@@ -66,7 +72,7 @@ export default function NotificationsPanel() {
         type="button"
         onClick={toggleOpen}
         aria-label="Notifications"
-        className="relative text-muted hover:text-accent"
+        className="relative -m-2 flex h-9 w-9 items-center justify-center text-muted hover:text-accent"
       >
         <BellIcon />
         {unreadCount > 0 && (
@@ -94,9 +100,18 @@ export default function NotificationsPanel() {
           </div>
 
           <div className="max-h-80 overflow-y-auto">
-            {reports === null && <p className="px-3.5 py-4 font-mono text-[11px] text-dim">loading...</p>}
+            {reports === null && !failed && <ListSkeleton rows={2} className="px-3.5 py-3" />}
 
-            {reports !== null && reports.length === 0 && (
+            {failed && (
+              <p role="alert" className="px-3.5 py-4 text-center font-mono text-[11px] text-dim">
+                Couldn&apos;t load reports.{" "}
+                <button type="button" onClick={() => setAttempt((a) => a + 1)} className="font-bold text-muted hover:text-accent">
+                  RETRY
+                </button>
+              </p>
+            )}
+
+            {reports !== null && !failed && reports.length === 0 && (
               <p className="px-3.5 py-4 text-center font-mono text-[11px] text-dim">
                 Nothing yet -- completed reports show up here.
               </p>

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { formatShortDate } from "@/lib/format";
+import LoadError from "./LoadError";
+import ListSkeleton from "./ListSkeleton";
 import type { CorporateActionEvent, CorporateActionsFeedData } from "@/lib/types";
 
 const EVENT_LABEL: Record<CorporateActionEvent["type"], string> = {
@@ -16,14 +18,17 @@ const EVENT_LABEL: Record<CorporateActionEvent["type"], string> = {
 export default function CorporateActionsFeed() {
   const [data, setData] = useState<CorporateActionsFeedData | null>(null);
   const [scope, setScope] = useState<"all" | "portfolio">("all");
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     setData(null);
+    setFailed(false);
     fetch(`/api/corporate-actions/feed?scope=${scope}`)
-      .then((r) => (r.ok ? r.json() : { events: [], scope }))
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then(setData)
-      .catch(() => setData({ events: [], scope }));
-  }, [scope]);
+      .catch(() => setFailed(true));
+  }, [scope, attempt]);
 
   return (
     <div>
@@ -42,8 +47,10 @@ export default function CorporateActionsFeed() {
         ))}
       </div>
 
-      {data === null ? (
-        <p className="mt-3 font-mono text-[11px] text-dim">Loading...</p>
+      {failed ? (
+        <LoadError what="corporate actions" onRetry={() => setAttempt((a) => a + 1)} />
+      ) : data === null ? (
+        <ListSkeleton rows={3} />
       ) : data.events.length > 0 ? (
         <div className="mt-3 flex flex-col gap-2">
           {data.events.map((event, i) => (

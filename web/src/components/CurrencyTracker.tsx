@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import SectionSkeleton from "./SectionSkeleton";
 import type { FxRate } from "@/lib/types";
+import { formatPercent, formatPrice } from "@/lib/numberFormat";
 
 // Live USD/INR exchange rate -- the one FX pair this app actually
 // needs (see get_usd_conversion_rate's own comment: US via SEC, India
@@ -30,11 +31,10 @@ export default function CurrencyTracker() {
     <div className="mt-6">
       <p className="font-mono text-[10px] tracking-wide text-dim">CURRENCY</p>
       <div className="mt-2 flex items-center justify-between rounded-lg border border-border bg-card px-3.5 py-2.5">
-        <span className="font-mono text-sm font-bold text-text">1 USD = ₹{fx.rate.toFixed(2)}</span>
+        <span className="font-mono text-sm font-bold text-text">1 USD = {formatPrice(fx.rate, "₹")}</span>
         {fx.change_pct !== null && (
           <span className={`font-mono text-[10px] font-bold ${fx.change_pct >= 0 ? "text-accent" : "text-danger"}`}>
-            {fx.change_pct >= 0 ? "+" : ""}
-            {fx.change_pct.toFixed(2)}%
+            {formatPercent(fx.change_pct, { signed: true })}
           </span>
         )}
       </div>

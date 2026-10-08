@@ -16,7 +16,7 @@ from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak,
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
 )
 
 # A broad news pull retrieves everything matching a ticker in the last
@@ -210,7 +210,7 @@ def build_pdf_report(report_data: dict) -> bytes:
         }))
     if recommendation.get("confidence_flag"):
         story.append(Paragraph(
-            f'<font color="#9a6700"><b>Low-confidence signal:</b></font> {recommendation["confidence_flag"]}',
+            f'<font color="#9a6700"><b>Sensitivity to assumptions:</b></font> {recommendation["confidence_flag"]}',
             _BODY_STYLE,
         ))
 
@@ -321,8 +321,8 @@ def build_pdf_report(report_data: dict) -> bytes:
         if ml_classifier:
             story.append(Spacer(1, 10))
             story.append(Paragraph(
-                f"ML Valuation Classifier (informational only -- not part of the recommendation "
-                f"above; no accuracy track record yet):",
+                "ML Valuation Classifier (informational only -- not part of the recommendation "
+                "above; no accuracy track record yet):",
                 _BODY_STYLE,
             ))
             top_prob = ml_classifier["probabilities"].get(ml_classifier["verdict"], 0)
@@ -472,7 +472,7 @@ def build_pdf_report(report_data: dict) -> bytes:
     ))
     if recommendation.get("confidence_flag"):
         story.append(Paragraph(
-            f'<font color="#9a6700"><b>Low-confidence signal:</b></font> {recommendation["confidence_flag"]}',
+            f'<font color="#9a6700"><b>Sensitivity to assumptions:</b></font> {recommendation["confidence_flag"]}',
             _BODY_STYLE,
         ))
 

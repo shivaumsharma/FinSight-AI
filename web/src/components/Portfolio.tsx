@@ -1,15 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import RatingBadge from "./RatingBadge";
+import ConnectionBanner from "./ConnectionBanner";
 import SectionSkeleton from "./SectionSkeleton";
+import LoadError from "./LoadError";
+import PortfolioRiskCard from "./PortfolioRiskCard";
 import { currencySymbol } from "@/lib/currency";
 import { PORTFOLIO_UPDATED_EVENT, notifyPortfolioUpdated } from "@/lib/portfolioEvents";
+import { useLivePrices } from "@/lib/livePrices";
+import { applyLiveSummary, createLiveHoldingCache } from "@/lib/livePnl";
 import type { CompanySuggestion, PortfolioAnalysis, PortfolioHolding, PortfolioSummary } from "@/lib/types";
+import { formatNumber, formatPercent } from "@/lib/numberFormat";
 
 function fmt(n: number): string {
-  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return formatNumber(n, 2);
 }
 
 function todayIso(): string {
@@ -23,8 +29,9 @@ function todayIso(): string {
 // brokerage, and this never places or executes anything -- purely a
 // manual P&L calculator against live quotes.
 export default function Portfolio() {
-  const [holdings, setHoldings] = useState<PortfolioHolding[] | null>(null);
-  const [summary, setSummary] = useState<PortfolioSummary | null>(null);
+  const [baseHoldings, setHoldings] = useState<PortfolioHolding[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [baseSummary, setSummary] = useState<PortfolioSummary | null>(null);
   const [analysis, setAnalysis] = useState<PortfolioAnalysis | null>(null);
   const [ticker, setTicker] = useState("");
   const [quantity, setQuantity] = useState("");
@@ -37,17 +44,30 @@ export default function Portfolio() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [seeding, setSeeding] = useState(false);
 
+  // Server numbers are the baseline; streamed prices move each holding's value and P&L between loads.
+  const live = useLivePrices((baseHoldings ?? []).map((h) => h.ticker));
+  const [applyLive] = useState(createLiveHoldingCache);
+  const holdings = useMemo(
+    () => (baseHoldings ? baseHoldings.map((h) => applyLive(h, live.prices[h.ticker])) : null),
+    [baseHoldings, live.prices, applyLive],
+  );
+  const summary = useMemo(
+    () => (baseSummary && baseHoldings && holdings ? applyLiveSummary(baseSummary, baseHoldings, holdings) : baseSummary),
+    [baseSummary, baseHoldings, holdings],
+  );
+
   function refresh() {
     fetch("/api/portfolio")
-      .then((r) => (r.ok ? r.json() : { holdings: [], summary: null }))
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((data) => {
         setHoldings(data.holdings);
         setSummary(data.summary);
+        setLoadFailed(false);
       })
-      .catch(() => {
-        setHoldings([]);
-        setSummary(null);
-      });
+      // A failed load must not masquerade as "No holdings yet" -- keep any
+      // holdings already on screen and only show the error block when
+      // there is nothing to show.
+      .catch(() => setLoadFailed(true));
     // Combined portfolio analysis (rating rollup across already-
     // researched holdings) -- a separate, independent fetch from the
     // holdings list above, never blocking it if this one fails.
@@ -177,6 +197,14 @@ export default function Portfolio() {
     }
   }
 
+  if (holdings === null && loadFailed) {
+    return (
+      <div className="mt-6">
+        <p className="font-mono text-[10px] tracking-wide text-dim">PORTFOLIO</p>
+        <LoadError what="your portfolio" onRetry={refresh} className="mt-2" />
+      </div>
+    );
+  }
   if (holdings === null) return <SectionSkeleton label="PORTFOLIO" rows={2} />;
 
   return (
@@ -186,11 +214,13 @@ export default function Portfolio() {
         <button
           type="button"
           onClick={() => setShowForm((s) => !s)}
-          className="font-mono text-[10px] font-bold text-muted hover:text-accent"
+          className="-my-2 inline-block py-2 font-mono text-[10px] font-bold text-muted hover:text-accent"
         >
           {showForm ? "CANCEL" : "+ ADD HOLDING"}
         </button>
       </div>
+
+      <ConnectionBanner status={live.status} />
 
       {holdings.length > 0 && summary && summary.total_market_value !== null && (
         <div className="mt-2 rounded-lg border border-border bg-card px-3.5 py-2.5">
@@ -211,7 +241,7 @@ export default function Portfolio() {
                   {summary.total_unrealized_pnl >= 0 ? "+" : ""}
                   {currencySymbol(summary.currency)}
                   {fmt(summary.total_unrealized_pnl)}
-                  {summary.total_unrealized_pnl_pct !== null && ` (${summary.total_unrealized_pnl_pct.toFixed(2)}%)`}
+                  {summary.total_unrealized_pnl_pct !== null && ` (${formatPercent(summary.total_unrealized_pnl_pct)})`}
                 </span>
               </div>
             )}
@@ -233,7 +263,7 @@ export default function Portfolio() {
                   {summary.total_today_pnl >= 0 ? "+" : ""}
                   {currencySymbol(summary.currency)}
                   {fmt(summary.total_today_pnl)}
-                  {summary.total_today_pnl_pct !== null && ` (${summary.total_today_pnl_pct.toFixed(2)}%)`}
+                  {summary.total_today_pnl_pct !== null && ` (${formatPercent(summary.total_today_pnl_pct)})`}
                 </span>
               </div>
             )}
@@ -254,15 +284,17 @@ export default function Portfolio() {
             </span>
             {analysis.value_weighted_pct && (
               <span className="font-bold">
-                <span className="text-accent">{analysis.value_weighted_pct.Buy.toFixed(0)}% Buy</span>
+                <span className="text-accent">{formatPercent(analysis.value_weighted_pct.Buy, { decimals: 0 })} Buy</span>
                 {" · "}
-                <span className="text-danger">{analysis.value_weighted_pct.Sell.toFixed(0)}% Sell</span>
+                <span className="text-danger">{formatPercent(analysis.value_weighted_pct.Sell, { decimals: 0 })} Sell</span>
                 <span className="text-dim"> (by value)</span>
               </span>
             )}
           </div>
         </div>
       )}
+
+      {holdings.length > 0 && <PortfolioRiskCard />}
 
       {holdings.length > 0 && (
         <div className="mt-2 flex flex-col gap-2">
@@ -306,7 +338,7 @@ export default function Portfolio() {
                       {h.unrealized_pnl >= 0 ? "+" : ""}
                       {currencySymbol(h.currency)}
                       {fmt(h.unrealized_pnl)}
-                      {h.unrealized_pnl_pct !== null && ` (${h.unrealized_pnl_pct.toFixed(1)}%)`}
+                      {h.unrealized_pnl_pct !== null && ` (${formatPercent(h.unrealized_pnl_pct, { decimals: 1 })})`}
                     </div>
                   </div>
                 ) : (
@@ -335,7 +367,7 @@ export default function Portfolio() {
             type="button"
             onClick={seedSampleData}
             disabled={seeding}
-            className="shrink-0 font-mono text-[10px] font-bold text-muted hover:text-accent disabled:opacity-50"
+            className="-my-2 shrink-0 py-2 font-mono text-[10px] font-bold text-muted hover:text-accent disabled:opacity-50"
           >
             {seeding ? "LOADING..." : "TRY SAMPLE DATA"}
           </button>

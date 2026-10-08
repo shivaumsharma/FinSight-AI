@@ -61,6 +61,13 @@ ERROR_TIMEOUT = "TIMEOUT"
 DEFAULT_SESSION_TTL_SECONDS = 30 * 24 * 3600
 DEFAULT_DAILY_JOB_LIMIT = 20
 
+# Ceiling on how many times per day a user can fall through to
+# resolve_companies' fuzzy fallback (a raw ticker lookup miss) -- see
+# claim_ticker_resolution_attempt's own docstring for why this exists
+# at all. Looser than DEFAULT_DAILY_JOB_LIMIT since a real user just
+# fat-fingering a company name a few times a day is normal, not abuse.
+DEFAULT_TICKER_RESOLUTION_RATE_LIMIT = 30
+
 # How recently a user's own identical (same ticker/question/orchestrator)
 # DONE job must have completed for a new submission to be served that
 # result instead of recomputing it -- see find_recent_duplicate_job below.
@@ -437,6 +444,18 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ticker_resolution_attempts (
+                user_id TEXT NOT NULL,
+                attempted_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ticker_resolution_attempts_user "
+            "ON ticker_resolution_attempts(user_id, attempted_at)"
+        )
 
 
 # ---------------------------------------------------------------- users/sessions
@@ -771,6 +790,48 @@ def create_job_if_under_limit(
     return job_id
 
 
+def claim_ticker_resolution_attempt(user_id: str, limit: int, window_start: float) -> bool:
+    """Same atomic count-then-insert as create_job_if_under_limit above
+    (see its own docstring for why a separate count-then-insert races
+    under concurrency), gating a different resource: main.py's
+    resolve_ticker_or_400, called from every endpoint that accepts a
+    user-typed ticker/company name (watchlist, portfolio, orders,
+    alerts). A raw ticker lookup miss there falls through to
+    resolve_companies' fuzzy NLP matching, which -- if even THAT comes
+    up empty -- calls a real LLM (company_resolver.py's
+    _llm_propose_company_name). Without this, a user spamming garbage
+    input at any of those 4 endpoints could run up unbounded real-money
+    LLM cost with no limit at all.
+
+    Returns False (no attempt recorded, caller should reject) if
+    user_id already has `limit` or more recorded attempts since
+    window_start; True (and records this attempt) otherwise.
+    """
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.isolation_level = None
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM ticker_resolution_attempts WHERE user_id=? AND attempted_at > ?",
+                (user_id, window_start),
+            ).fetchone()
+            if row[0] >= limit:
+                conn.execute("ROLLBACK")
+                return False
+            conn.execute(
+                "INSERT INTO ticker_resolution_attempts (user_id, attempted_at) VALUES (?, ?)",
+                (user_id, time.time()),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+    return True
+
+
 def find_recent_duplicate_job(
     user_id: str, ticker: str, question: str, orchestrator: str, since: float
 ) -> Optional[str]:
@@ -1024,6 +1085,49 @@ def mark_price_alert_triggered(alert_id: str) -> None:
         )
 
 
+def claim_price_alert(alert_id: str) -> bool:
+    """Same UPDATE ... WHERE triggered_at IS NULL as
+    mark_price_alert_triggered above, but called BEFORE the alert's
+    trade/notification fires, not after -- and returns whether THIS
+    call actually claimed it (via cursor.rowcount), so the caller can
+    tell "I own this alert" from "someone else already does."
+
+    sweep_price_alerts() used to fire first and call
+    mark_price_alert_triggered() only afterward -- two overlapping
+    sweep invocations (a real possibility: this is a cron-triggered
+    HTTP endpoint, not an in-process scheduler, specifically because
+    Cloud Run can't host one) could both read the same untriggered
+    alert before either marked it, and both fire the trade/notification
+    independently. mark_price_alert_triggered's own one-shot guard only
+    protected the UPDATE itself from double-applying -- by the time it
+    ran, the double-fire had already happened. Claiming first closes
+    that window: only the sweep whose UPDATE actually matched a row
+    (rowcount > 0) proceeds to fire anything.
+    """
+    with _connect() as conn:
+        cur = conn.execute(
+            "UPDATE price_alerts SET triggered_at=? WHERE alert_id=? AND triggered_at IS NULL",
+            (time.time(), alert_id),
+        )
+        return cur.rowcount > 0
+
+
+def unclaim_price_alert(alert_id: str) -> None:
+    """Reverts a claim_price_alert() claim -- used when the claim
+    succeeded but the trade/notification that was supposed to follow it
+    then failed, so a future sweep retries this alert instead of it
+    being silently marked "handled" with nothing having actually
+    happened. Preserves the same "only mark it seen once the write
+    itself has actually succeeded" guarantee sweep_price_alerts always
+    had, just implemented as claim-then-rollback instead of fire-then-
+    mark."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE price_alerts SET triggered_at=NULL WHERE alert_id=?",
+            (alert_id,),
+        )
+
+
 def get_all_distinct_watchlist_tickers() -> list:
     """Every ticker on ANY user's watchlist, deduplicated -- part of
     Market Movers' "tracked universe" (the other part is the static
@@ -1173,52 +1277,81 @@ def execute_order(
     "price alert at $180 triggered", etc.). None for an order placed
     with no proposal behind it (e.g. the OrderTicket/TradeBar UI form)
     -- a missing reason is honest; a fabricated one wouldn't be.
+
+    Same BEGIN IMMEDIATE pattern as create_job_if_under_limit's own
+    docstring describes, for the identical reason: the read-then-write
+    below (SELECT current quantity, compute a new one in Python, then
+    write it) is not atomic under _connect()'s plain sqlite3.connect(),
+    which only implicitly opens a transaction on the first WRITE
+    statement -- not the read. Two concurrent orders for the same
+    (user_id, ticker) could otherwise both read the same pre-write
+    quantity, both pass the "can't sell more than held" check
+    independently, and both write their own independently-computed
+    new_quantity -- e.g. two concurrent SELL-8 requests against a
+    10-share position (a double-tap, or a client retry on a perceived
+    timeout) could both see current_quantity=10, both pass "8>10?"
+    No", and both commit new_quantity=2, silently recording 16 shares
+    "sold" from a 10-share position.
     """
     if side not in ("BUY", "SELL"):
         raise ValueError(f"Invalid order side: {side!r}")
 
     order_id = str(uuid.uuid4())
     now = time.time()
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT quantity, avg_cost FROM portfolio_holdings WHERE user_id=? AND ticker=?",
-            (user_id, ticker),
-        ).fetchone()
-        current_quantity = row[0] if row else 0.0
-        current_avg_cost = row[1] if row else 0.0
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.isolation_level = None
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT quantity, avg_cost FROM portfolio_holdings WHERE user_id=? AND ticker=?",
+                (user_id, ticker),
+            ).fetchone()
+            current_quantity = row[0] if row else 0.0
+            current_avg_cost = row[1] if row else 0.0
 
-        if side == "BUY":
-            new_quantity = current_quantity + quantity
-            new_avg_cost = (current_quantity * current_avg_cost + quantity * execution_price) / new_quantity
-        else:
-            if quantity > current_quantity:
-                raise ValueError(
-                    f"Cannot sell {quantity} shares of {ticker}: only {current_quantity} held."
+            if side == "BUY":
+                new_quantity = current_quantity + quantity
+                new_avg_cost = (current_quantity * current_avg_cost + quantity * execution_price) / new_quantity
+            else:
+                if quantity > current_quantity:
+                    conn.execute("ROLLBACK")
+                    raise ValueError(
+                        f"Cannot sell {quantity} shares of {ticker}: only {current_quantity} held."
+                    )
+                new_quantity = current_quantity - quantity
+                new_avg_cost = current_avg_cost
+
+            if new_quantity > 0:
+                conn.execute(
+                    """
+                    INSERT INTO portfolio_holdings (user_id, ticker, quantity, avg_cost, added_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id, ticker) DO UPDATE SET
+                        quantity=excluded.quantity,
+                        avg_cost=excluded.avg_cost
+                    """,
+                    (user_id, ticker, new_quantity, new_avg_cost, now),
                 )
-            new_quantity = current_quantity - quantity
-            new_avg_cost = current_avg_cost
+            else:
+                conn.execute("DELETE FROM portfolio_holdings WHERE user_id=? AND ticker=?", (user_id, ticker))
 
-        if new_quantity > 0:
             conn.execute(
                 """
-                INSERT INTO portfolio_holdings (user_id, ticker, quantity, avg_cost, added_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(user_id, ticker) DO UPDATE SET
-                    quantity=excluded.quantity,
-                    avg_cost=excluded.avg_cost
+                INSERT INTO orders (order_id, user_id, ticker, side, quantity, execution_price, currency, executed_at, rationale)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (user_id, ticker, new_quantity, new_avg_cost, now),
+                (order_id, user_id, ticker, side, quantity, execution_price, currency, now, rationale),
             )
-        else:
-            conn.execute("DELETE FROM portfolio_holdings WHERE user_id=? AND ticker=?", (user_id, ticker))
-
-        conn.execute(
-            """
-            INSERT INTO orders (order_id, user_id, ticker, side, quantity, execution_price, currency, executed_at, rationale)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (order_id, user_id, ticker, side, quantity, execution_price, currency, now, rationale),
-        )
+            conn.execute("COMMIT")
+        except Exception:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.OperationalError:
+                pass  # already rolled back above (the SELL-quantity ValueError path)
+            raise
+    finally:
+        conn.close()
 
     return {
         "order_id": order_id,
@@ -1260,10 +1393,23 @@ def pop_pending_order(user_id: str) -> Optional[dict]:
     """Same shape as get_pending_order, but atomically clears the row
     too -- for the two call sites that consume the pending order
     (confirmed execution, explicit cancellation, or an unrelated
-    message superseding it) rather than just checking it."""
+    message superseding it) rather than just checking it.
+
+    A single DELETE ... RETURNING statement, not a separate SELECT then
+    DELETE -- the previous two-statement version's SELECT was an
+    unlocked read on its own connection, so two concurrent callers (a
+    double-tap on "Confirm," or a client retry after a perceived
+    timeout) could both SELECT the same still-present row before
+    either's DELETE committed, and both would proceed to execute the
+    same trade. A single statement is atomic: whichever caller's DELETE
+    actually runs first gets the row back; the second caller's DELETE
+    finds nothing left to delete and correctly gets None, exactly like
+    calling this when nothing was ever pending.
+    """
     with _connect() as conn:
-        row = conn.execute("SELECT legs_json FROM pending_orders WHERE user_id=?", (user_id,)).fetchone()
-        conn.execute("DELETE FROM pending_orders WHERE user_id=?", (user_id,))
+        row = conn.execute(
+            "DELETE FROM pending_orders WHERE user_id=? RETURNING legs_json", (user_id,)
+        ).fetchone()
     return {"legs": json.loads(row[0])} if row is not None else None
 
 

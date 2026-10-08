@@ -1,9 +1,6 @@
-const COLORS: Record<string, string> = {
-  Buy: "text-accent border-accent",
-  Hold: "text-warn border-warn",
-  Sell: "text-danger border-danger",
-  "Insufficient Data": "text-muted border-dim",
-};
+import { Badge, type BadgeTone } from "./ui";
+
+const TONES: Record<string, BadgeTone> = { Buy: "gain", Hold: "warn", Sell: "loss" };
 
 export function ratingColorClass(rating: string): string {
   switch (rating) {
@@ -19,11 +16,9 @@ export function ratingColorClass(rating: string): string {
 }
 
 export default function RatingBadge({ rating, size = "md" }: { rating: string; size?: "sm" | "md" }) {
-  const cls = COLORS[rating] || COLORS["Insufficient Data"];
-  const sizing = size === "sm" ? "px-2 py-0.5 text-[10px]" : "px-3 py-1 text-sm";
   return (
-    <span className={`inline-block rounded font-mono font-bold uppercase tracking-wide border ${cls} ${sizing}`}>
+    <Badge tone={TONES[rating] ?? "neutral"} size={size}>
       {rating}
-    </span>
+    </Badge>
   );
 }

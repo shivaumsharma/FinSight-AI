@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import StatGrid from "./StatGrid";
+import StatGrid from "./StatGrid";
+import { Badge } from "./ui";
 import { currencySymbol } from "@/lib/currency";
 import { fmtPrice } from "@/lib/stockFormat";
+import { formatNumber } from "@/lib/numberFormat";
 
 interface TechnicalsData {
   indicators: {
@@ -23,18 +25,15 @@ interface TechnicalsData {
 }
 
 function fmtNum(v: number | null | undefined, decimals = 2): string {
-  if (v === null || v === undefined) return "N/A";
-  return v.toFixed(decimals);
+  return formatNumber(v, decimals);
 }
 
 function TrendBadge({ trend }: { trend: TechnicalsData["trend"] }) {
-  const cls = trend === "Bullish" ? "text-accent border-accent" : trend === "Bearish" ? "text-danger border-danger" : "text-muted border-dim";
-  return <span className={`inline-block rounded border px-3 py-1 font-mono text-sm font-bold uppercase tracking-wide ${cls}`}>{trend}</span>;
+  return <Badge tone={trend === "Bullish" ? "gain" : trend === "Bearish" ? "loss" : "neutral"}>{trend}</Badge>;
 }
 
 function VerdictBadge({ verdict }: { verdict: "Buy" | "Sell" | "Neutral" }) {
-  const cls = verdict === "Buy" ? "text-accent border-accent" : verdict === "Sell" ? "text-danger border-danger" : "text-muted border-dim";
-  return <span className={`inline-block rounded border px-2 py-0.5 font-mono text-xs font-bold uppercase ${cls}`}>{verdict}</span>;
+  return <Badge size="sm" tone={verdict === "Buy" ? "gain" : verdict === "Sell" ? "loss" : "neutral"}>{verdict}</Badge>;
 }
 
 // Self-fetches /technicals independently from PriceChart -- both live

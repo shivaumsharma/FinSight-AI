@@ -1,0 +1,13 @@
+[tool.ruff.lint]
+# F (pyflakes: unused imports/variables, undefined names, f-strings
+# with no placeholders, etc.) plus E9 (syntax errors) -- ruff's true
+# defaults are much broader (confirmed via `ruff check --isolated`)
+# and include rules like BLE001 (no blind `except Exception`) and
+# TRY002 that directly fight this codebase's own deliberate,
+# pervasive "one bad ticker/tool/alert must not crash the whole
+# request" resilience pattern (see e.g. app/reporting/portfolio_summary.py,
+# app/reasoning/price_alerts.py). Scoped to genuine likely-bugs instead,
+# so both the warn-only repo-wide pass and the blocking changed-files
+# pass in .github/workflows/tests.yml's `lint` job actually help
+# rather than fighting the codebase's own conventions on every commit.
+select = ["F", "E9"]

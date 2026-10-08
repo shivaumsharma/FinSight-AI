@@ -4,6 +4,8 @@ monkeypatched to a fake class per test (same convention as
 test_model_consensus.py) -- never hits real network.
 """
 
+import threading
+
 import pytest
 
 from app.api import db
@@ -177,6 +179,30 @@ def test_handle_portfolio_status_falls_back_to_the_raw_summary_on_llm_outage(mon
     assert "AAPL" in result
     assert "rated Buy" in result
     assert "800.00" in result
+
+
+def test_handle_portfolio_status_does_not_crash_on_a_real_zero_pnl_with_no_pnl_pct(monkeypatch):
+    # Regression test: portfolio_summary.py's total_unrealized_pnl_pct
+    # is None whenever total_cost_basis is 0 (falsy), even though
+    # total_unrealized_pnl itself can be a real 0.0 -- same mismatch
+    # daily_briefing.py's _portfolio_line already guards against. The
+    # old `if pnl is not None:` check here let pnl=0.0 through and then
+    # crashed formatting pnl_pct=None as f"{pnl_pct:+.1f}".
+    view = {
+        "holdings": [
+            {"ticker": "AAPL", "quantity": 4, "price": 200.0, "currency": "USD", "rating": "Buy"},
+        ],
+        "summary": {"total_market_value": 800.0, "total_unrealized_pnl": 0.0, "total_unrealized_pnl_pct": None},
+    }
+    monkeypatch.setattr(cr, "build_portfolio_view", lambda user_id: view)
+    monkeypatch.setattr(cr.db, "get_portfolio_holdings", lambda user_id: [{"ticker": "AAPL", "quantity": 4}])
+    monkeypatch.setattr(cr, "get_portfolio_sector_allocation", lambda holdings: {})
+    monkeypatch.setattr(cr, "HostedProvider", _RaisingProvider)  # exercise the fallback path
+
+    result = cr._handle_portfolio_status("u1", "hows my portfolio", [])
+
+    assert "800.00" in result
+    assert "AAPL" in result
 
 
 # ---------------------------------------------------------------- _handle_ticker_question
@@ -1277,6 +1303,36 @@ def test_execute_pending_order_reports_a_failed_leg_by_message(temp_db):
 
     assert "Couldn't place that order" in result
     assert db.get_pending_order(user_id) is None
+
+
+def test_pop_pending_order_double_tap_race_only_one_caller_gets_it(temp_db):
+    # Regression test for the TOCTOU race db.pop_pending_order's own
+    # docstring describes: a double-tap on "Confirm," or a client retry
+    # after a perceived timeout, both calling pop_pending_order for the
+    # same user concurrently. Same threaded-concurrency approach as
+    # test_orders.py's test_execute_order_double_sell_race_never_oversells.
+    user_id = temp_db.create_user("a@example.com", "h", "s")
+    db.set_pending_order(
+        user_id,
+        [{"ticker": "TCS", "side": "BUY", "quantity": 10.0, "price": 4000.0, "currency": "INR", "rationale": None}],
+    )
+
+    n_threads = 20
+    results = [None] * n_threads
+
+    def _attempt(i):
+        results[i] = db.pop_pending_order(user_id)
+
+    threads = [threading.Thread(target=_attempt, args=(i,)) for i in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    non_none = [r for r in results if r is not None]
+    assert len(non_none) == 1  # exactly one caller got the real legs back
+    assert non_none[0]["legs"][0]["ticker"] == "TCS"
+    assert db.get_pending_order(user_id) is None  # cleared, not left dangling
 
 
 # ---------------------------------------------------------------- add_holding

@@ -124,13 +124,15 @@ class CitationEvaluator:
     # -----------------------------
 
     def _explicitly_referenced(self, tag: str, index: int, report_norm: str) -> bool:
-
-        patterns = [
-            f"[{tag} {index}]",
-            f"{tag} {index}",
-        ]
-
-        return any(pattern in report_norm for pattern in patterns)
+        # (?!\d), not a bare substring check -- a plain `f"{tag} {index}"
+        # in report_norm let a shorter index match INSIDE a longer one
+        # ("evidence 1" is a literal substring of "evidence 12"),
+        # silently crediting citation 1 as used whenever the report
+        # actually only referenced citation 12 (or 10, 11, 100, ...).
+        # Also covers the bracketed "[evidence 1]" form -- the brackets
+        # aren't part of the match, just incidentally still contain it.
+        pattern = re.compile(rf"{re.escape(tag)}\s+{index}(?!\d)")
+        return bool(pattern.search(report_norm))
 
     # -----------------------------
 

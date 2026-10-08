@@ -179,6 +179,27 @@ def test_fuzzy_name_that_resolves_to_nothing_still_404s_cleanly(client, monkeypa
     assert resp.json()["code"] == "TICKER_NOT_FOUND"
 
 
+def test_repeated_unresolvable_tickers_trip_the_resolution_rate_limit(client, monkeypatch, auth_headers):
+    # Regression test: every raw-ticker miss here falls through to
+    # resolve_companies' fuzzy matching, which -- on a further miss --
+    # calls a real LLM (see resolve_ticker_or_400's own docstring in
+    # main.py). Without a limit, spamming garbage input could run up
+    # unbounded real-money LLM cost. Shrink the limit so this test
+    # doesn't need 30+ requests to prove it trips.
+    monkeypatch.setattr(main, "TICKER_RESOLUTION_RATE_LIMIT", 2)
+    monkeypatch.setattr(main, "get_quote", lambda ticker: (_ for _ in ()).throw(TickerNotFoundError(ticker)))
+    monkeypatch.setattr(main, "resolve_companies", lambda q: [])
+
+    for _ in range(2):
+        resp = client.post("/v1/watchlist", json={"ticker": "not a real company"}, headers=auth_headers)
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "TICKER_NOT_FOUND"
+
+    resp = client.post("/v1/watchlist", json={"ticker": "still not a real company"}, headers=auth_headers)
+    assert resp.status_code == 429
+    assert resp.json()["code"] == "RATE_LIMIT_EXCEEDED"
+
+
 # ---------------------------------------------------------------- per-ticker isolation
 
 def test_one_bad_ticker_does_not_500_the_whole_watchlist(client, monkeypatch, auth_headers):

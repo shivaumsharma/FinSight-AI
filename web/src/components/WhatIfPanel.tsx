@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import RatingBadge from "./RatingBadge";
 import type { WhatIfResponse, WhatIfResult } from "@/lib/types";
+import { formatNumber, formatPercent, formatPrice, formatSignedNumber } from "@/lib/numberFormat";
 
-// Ports streamlit_app.py's "What-If: Adjust DCF Assumptions" sliders
-// panel (app/valuation/what_if_dcf.py) to the API-backed frontend.
+// "What-If: Adjust DCF Assumptions" sliders panel (app/valuation/what_if_dcf.py).
 // Unlike ModelCompare.tsx (a single button click), this is
 // slider-driven: every drag debounces a re-POST to `endpoint` (see
 // web/src/app/api/research/[jobId]/what-if/route.ts) so dragging
@@ -25,6 +25,7 @@ export default function WhatIfPanel({ endpoint, symbol }: { endpoint: string; sy
   const [bounds, setBounds] = useState<NonNullable<WhatIfResponse["bounds"]> | null>(null);
   const [values, setValues] = useState<SliderValues | null>(null);
   const [result, setResult] = useState<WhatIfResult | null>(null);
+  const [scoring, setScoring] = useState<NonNullable<WhatIfResponse["scoring"]> | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchWhatIf = useCallback(
@@ -44,6 +45,7 @@ export default function WhatIfPanel({ endpoint, symbol }: { endpoint: string; sy
         setBounds(data.bounds);
         setValues(data.used);
         setResult(data.result);
+        setScoring(data.scoring ?? null);
         setState("ready");
       } catch {
         setState("error");
@@ -129,7 +131,7 @@ export default function WhatIfPanel({ endpoint, symbol }: { endpoint: string; sy
 
       {result.wacc_floored && (
         <p className="mt-3 text-[10px] text-warn">
-          Note: WACC floored to {result.wacc_used.toFixed(2)}% at this slider position to avoid
+          Note: WACC floored to {formatPercent(result.wacc_used)} at this slider position to avoid
           terminal-value instability (same floor the real DCF uses).
         </p>
       )}
@@ -137,20 +139,96 @@ export default function WhatIfPanel({ endpoint, symbol }: { endpoint: string; sy
       <div className="mt-4 flex flex-wrap gap-2">
         <StatTile
           label="INTRINSIC VALUE"
-          value={`${symbol}${result.intrinsic_value.toLocaleString(undefined, {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}`}
+          value={formatPrice(result.intrinsic_value, symbol)}
         />
-        <StatTile label="UPSIDE" value={`${result.upside_percent >= 0 ? "+" : ""}${result.upside_percent.toFixed(1)}%`} />
-        <StatTile
-          label="COMPOSITE SCORE"
-          value={result.composite_score !== null ? `${result.composite_score >= 0 ? "+" : ""}${result.composite_score.toFixed(1)}` : "N/A"}
-        />
+        <StatTile label="UPSIDE" value={formatPercent(result.upside_percent, { decimals: 1, signed: true })} />
       </div>
 
       <div className="mt-3">
         <RatingBadge rating={result.rating} size="sm" />
+      </div>
+
+      {scoring && <CompositeScoreBreakdown result={result} scoring={scoring} />}
+    </div>
+  );
+}
+
+// Shows HOW the composite score above was actually built -- both
+// weighted component contributions, not just the blended total, and
+// where that total falls relative to the real Buy/Hold/Sell zone
+// boundaries. scoring's numbers come straight from the backend (see
+// WhatIfResponse's own type comment) so this can never silently drift
+// from report_data_builder.py's actual formula.
+function CompositeScoreBreakdown({
+  result,
+  scoring,
+}: {
+  result: WhatIfResult;
+  scoring: NonNullable<WhatIfResponse["scoring"]>;
+}) {
+  if (result.composite_score === null) return null;
+  const { composite_score, dcf_score, relative_score } = result;
+  const { buy_threshold, sell_threshold, dcf_weight, relative_weight, score_cap } = scoring;
+
+  // Position as a 0-100% offset along the -score_cap..+score_cap scale.
+  const toPct = (v: number) => Math.min(100, Math.max(0, ((v + score_cap) / (2 * score_cap)) * 100));
+  const scorePct = toPct(composite_score);
+  const sellPct = toPct(sell_threshold);
+  const buyPct = toPct(buy_threshold);
+
+  const zoneColor =
+    composite_score >= buy_threshold ? "text-accent" : composite_score <= sell_threshold ? "text-danger" : "text-warn";
+  const zoneDotColor =
+    composite_score >= buy_threshold ? "bg-accent" : composite_score <= sell_threshold ? "bg-danger" : "bg-warn";
+
+  return (
+    <div className="mt-4 rounded-lg border border-border bg-card px-3.5 py-3">
+      <div className="flex items-center justify-between">
+        <p className="font-mono text-[10px] tracking-wide text-dim">COMPOSITE SCORE BREAKDOWN</p>
+        <span className={`font-mono text-sm font-bold ${zoneColor}`}>
+          {formatSignedNumber(composite_score)}
+        </span>
+      </div>
+
+      <div className="relative mt-3 h-2 rounded-full bg-border-subtle">
+        <div className="absolute inset-y-0 left-0 rounded-l-full bg-danger/30" style={{ width: `${sellPct}%` }} />
+        <div className="absolute inset-y-0 bg-warn/30" style={{ left: `${sellPct}%`, width: `${buyPct - sellPct}%` }} />
+        <div
+          className="absolute inset-y-0 right-0 rounded-r-full bg-accent/30"
+          style={{ left: `${buyPct}%` }}
+        />
+        <div
+          className={`absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-bg ${zoneDotColor}`}
+          style={{ left: `${scorePct}%` }}
+        />
+      </div>
+      <div className="mt-1 flex justify-between font-mono text-[9px] text-dim">
+        <span>SELL (&le;{formatNumber(sell_threshold, 1)})</span>
+        <span>HOLD</span>
+        <span>BUY (&ge;{formatNumber(buy_threshold, 1)})</span>
+      </div>
+
+      <div className="mt-3 flex flex-col gap-1 border-t border-border-subtle pt-2">
+        <div className="flex items-center justify-between font-mono text-[11px]">
+          <span className="text-muted">
+            DCF ({formatSignedNumber(dcf_score)}) &times;{" "}
+            {relative_score !== null ? formatPercent(dcf_weight, { fraction: true, decimals: 0 }) : "100%"}
+          </span>
+          <span className="text-text">
+            {formatNumber((relative_score !== null ? dcf_weight : 1) * dcf_score, 1)}
+          </span>
+        </div>
+        {relative_score !== null ? (
+          <div className="flex items-center justify-between font-mono text-[11px]">
+            <span className="text-muted">
+              Relative ({formatSignedNumber(relative_score)}) &times;{" "}
+              {formatPercent(relative_weight, { fraction: true, decimals: 0 })}
+            </span>
+            <span className="text-text">{formatNumber(relative_weight * relative_score, 1)}</span>
+          </div>
+        ) : (
+          <p className="font-mono text-[10px] text-dim">Relative valuation unavailable for this company -- DCF weighted at 100%.</p>
+        )}
       </div>
     </div>
   );
@@ -184,7 +262,7 @@ function SliderRow({
     <div>
       <div className="mb-1 flex items-baseline justify-between">
         <label className="font-mono text-[11px] text-muted">{label}</label>
-        <span className="font-mono text-xs font-bold text-accent">{value.toFixed(2)}%</span>
+        <span className="font-mono text-xs font-bold text-accent">{formatPercent(value)}</span>
       </div>
       <input
         type="range"

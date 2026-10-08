@@ -99,6 +99,49 @@ def test_fetch_company_disclosure_degrades_to_none_on_pdf_fetch_failure(monkeypa
     assert nse.fetch_company_disclosure("RELIANCE") is None
 
 
+def test_is_allowed_nse_host_accepts_known_nse_archive_hosts():
+    assert nse._is_allowed_nse_host("https://nsearchives.nseindia.com/x.pdf")
+    assert nse._is_allowed_nse_host("https://www.nseindia.com/x.pdf")
+
+
+def test_is_allowed_nse_host_rejects_a_non_nse_host():
+    # Regression test for the SSRF-adjacent finding: attchmntFile comes
+    # from an explicitly undocumented, reverse-engineered NSE endpoint
+    # with no validation before this module used to fetch it -- a
+    # compromised response could point anywhere.
+    assert not nse._is_allowed_nse_host("https://evil.example.com/x.pdf")
+    assert not nse._is_allowed_nse_host("https://nseindia.com.evil.example.com/x.pdf")
+    assert not nse._is_allowed_nse_host("http://169.254.169.254/latest/meta-data/")
+
+
+def test_fetch_pdf_bytes_refuses_a_non_nse_host(monkeypatch):
+    def _boom(*a, **kw):
+        raise AssertionError("must never reach the network for a disallowed host")
+
+    monkeypatch.setattr(nse, "_get_session", _boom)
+    with pytest.raises(ValueError, match="non-NSE host"):
+        nse._fetch_pdf_bytes("https://evil.example.com/x.pdf")
+
+
+def test_fetch_company_disclosure_degrades_to_none_when_attachment_is_not_an_nse_host(monkeypatch):
+    """End-to-end: a malicious/compromised attchmntFile field degrades
+    to no-evidence, same as any other fetch failure -- it never reaches
+    the real HTTP client. _fetch_pdf_bytes is deliberately NOT
+    monkeypatched here, unlike the other fetch_company_disclosure
+    tests, so this exercises the real host-allowlist check."""
+    monkeypatch.setattr(
+        nse, "_fetch_json",
+        lambda url, params: [_announcement(attchmnt_file="https://evil.example.com/x.pdf")],
+    )
+
+    def _boom(*a, **kw):
+        raise AssertionError("must never reach the network for a disallowed host")
+
+    monkeypatch.setattr(nse, "_get_session", _boom)
+
+    assert nse.fetch_company_disclosure("RELIANCE") is None
+
+
 def test_fetch_company_disclosure_empty_extracted_text_degrades_to_none(monkeypatch):
     # A scanned filing with no text layer -- out of scope this pass (no OCR).
     monkeypatch.setattr(nse, "_fetch_json", lambda url, params: [_announcement()])
