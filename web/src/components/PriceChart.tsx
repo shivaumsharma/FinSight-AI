@@ -11,6 +11,9 @@ import {
   type UTCTimestamp,
   createChart,
 } from "lightweight-charts";
+import ConnectionBanner from "./ConnectionBanner";
+import { applyTickToBar, type Bar } from "@/lib/liveCandle";
+import { useLivePrices } from "@/lib/livePrices";
 
 const RANGES = ["1mo", "3mo", "6mo", "1y", "2y", "5y", "max"] as const;
 type Range = (typeof RANGES)[number];
@@ -72,11 +75,16 @@ export default function PriceChart({ ticker, currency }: { ticker: string; curre
   // recreated when theme colors resolve), so the first fit can happen at a
   // not-yet-final width and leave the bars squeezed against one edge.
   const autoFitRef = useRef(true);
+  // The bar currently drawn last, kept so a streamed price can extend it without refetching.
+  const lastBarRef = useRef<Bar | undefined>(undefined);
 
   const [range, setRange] = useState<Range>("1y");
   const [data, setData] = useState<TechnicalsResponse | null>(null);
   const [error, setError] = useState(false);
   const [visibleOverlays, setVisibleOverlays] = useState<Set<OverlayKey>>(new Set(["ema_20"]));
+
+  const live = useLivePrices([ticker]);
+  const liveQuote = live.prices[ticker.toUpperCase()];
 
   const accent = useThemeColor("--accent", "#00d97e");
   const danger = useThemeColor("--danger", "#ff4d4f");
@@ -199,7 +207,21 @@ export default function PriceChart({ ticker, currency }: { ticker: string; curre
 
     autoFitRef.current = true;
     chart.timeScale().fitContent();
+    lastBarRef.current = data.price_history.length ? data.price_history[data.price_history.length - 1] : undefined;
   }, [data, visibleOverlays, accent, danger, dim]);
+
+  // Streamed price -> update the last candle in place (or start today's), without touching the rest of the series.
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series || !liveQuote || !lastBarRef.current) return;
+    const result = applyTickToBar(lastBarRef.current, liveQuote.price, liveQuote.ts, liveQuote.currency);
+    if (!result) return;
+    lastBarRef.current = result.bar;
+    series.update({
+      time: result.bar.date as unknown as UTCTimestamp,
+      open: result.bar.open, high: result.bar.high, low: result.bar.low, close: result.bar.close,
+    });
+  }, [liveQuote]);
 
   function toggleOverlay(key: OverlayKey) {
     setVisibleOverlays((prev) => {
@@ -213,7 +235,14 @@ export default function PriceChart({ ticker, currency }: { ticker: string; curre
   return (
     <div className="mt-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-mono text-[10px] tracking-wide text-dim">PRICE CHART</p>
+        <p className="font-mono text-[10px] tracking-wide text-dim">
+          PRICE CHART
+          {live.status === "live" && (
+            <span className="ml-2 text-accent" data-testid="chart-live">
+              ● LIVE
+            </span>
+          )}
+        </p>
         <div className="flex gap-1 rounded-lg border border-border bg-card p-0.5">
           {RANGES.map((r) => (
             <button
@@ -229,6 +258,8 @@ export default function PriceChart({ ticker, currency }: { ticker: string; curre
           ))}
         </div>
       </div>
+
+      <ConnectionBanner status={live.status} />
 
       <div className="mt-2 flex flex-wrap gap-1.5">
         {OVERLAY_TOGGLES.map((o) => (

@@ -1,21 +1,41 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useState } from "react";
 import Link from "next/link";
 import RatingBadge from "./RatingBadge";
 import { formatShortDate } from "@/lib/format";
 import { currencySymbol } from "@/lib/currency";
 import { formatPercent, formatPrice } from "@/lib/numberFormat";
+import type { LiveQuote } from "@/lib/livePrices";
 import type { WatchlistItem } from "@/lib/types";
+
+// Render counter used only by the benchmark page (src/app/bench); null in normal use.
+export const renderProbe: { onRender: ((ticker: string) => void) | null } = { onRender: null };
 
 interface Props {
   item: WatchlistItem;
+  // Latest streamed quote; its object only changes when the price does, so memo skips unchanged rows.
+  live?: LiveQuote;
   isDemo?: boolean;
   onRemove?: (ticker: string) => void;
 }
 
-// One watchlist line. Memoized so a re-render of the list only repaints rows whose item changed.
-function WatchlistRow({ item, isDemo = false, onRemove }: Props) {
+// One watchlist line. Memoized so a re-render of the list only repaints rows whose item or live quote changed.
+function WatchlistRow({ item, live, isDemo = false, onRemove }: Props) {
+  renderProbe.onRender?.(item.ticker);
+  const price = live?.price ?? item.price;
+  const changePct = live ? live.changePct : item.change_pct;
+
+  // Flash green/red when the price moves. The counter is the key of the price element, which restarts the CSS animation.
+  const [lastPrice, setLastPrice] = useState(price);
+  const [flash, setFlash] = useState<{ dir: "up" | "down"; n: number } | null>(null);
+  if (price !== lastPrice) {
+    setLastPrice(price);
+    if (price !== null && lastPrice !== null && price !== lastPrice) {
+      setFlash((f) => ({ dir: price > lastPrice ? "up" : "down", n: (f?.n ?? 0) + 1 }));
+    }
+  }
+
   const corporateActions = [
     item.next_earnings_date && `Earnings ${formatShortDate(item.next_earnings_date)}`,
     item.next_ex_dividend_date && `Ex-div ${formatShortDate(item.next_ex_dividend_date)}`,
@@ -36,14 +56,18 @@ function WatchlistRow({ item, isDemo = false, onRemove }: Props) {
               <span className="font-mono text-[10px] text-dim">not yet researched</span>
             )}
           </div>
-          {item.price !== null && (
+          {price !== null && (
             <div className="text-right">
-              <div className="font-mono text-sm text-text">
-                {formatPrice(item.price, currencySymbol(item.currency))}
+              <div
+                key={flash?.n ?? 0}
+                data-flash={flash ? flash.dir : undefined}
+                className={`rounded px-1 font-mono text-sm text-text ${flash ? (flash.dir === "up" ? "flash-up" : "flash-down") : ""}`}
+              >
+                {formatPrice(price, currencySymbol(live?.currency ?? item.currency))}
               </div>
-              {item.change_pct !== null && (
-                <div className={`font-mono text-[10px] ${item.change_pct >= 0 ? "text-accent" : "text-danger"}`}>
-                  {formatPercent(item.change_pct, { signed: true })}
+              {changePct !== null && (
+                <div className={`font-mono text-[10px] ${changePct >= 0 ? "text-accent" : "text-danger"}`}>
+                  {formatPercent(changePct, { signed: true })}
                 </div>
               )}
             </div>
@@ -68,4 +92,6 @@ function WatchlistRow({ item, isDemo = false, onRemove }: Props) {
   );
 }
 
+// The unmemoized body is exported for the benchmark, which compares it with the memoized default.
+export { WatchlistRow as WatchlistRowUnmemoized };
 export default memo(WatchlistRow);

@@ -92,3 +92,18 @@ body {
 .pb-safe-36 {
   padding-bottom: calc(9rem + env(safe-area-inset-bottom));
 }
+
+/* Price tick flash: a short background tint that fades out. Skipped for users who prefer reduced motion. */
+@keyframes flash-up {
+  from { background-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+  to { background-color: transparent; }
+}
+@keyframes flash-down {
+  from { background-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+  to { background-color: transparent; }
+}
+.flash-up { animation: flash-up 700ms ease-out; }
+.flash-down { animation: flash-down 700ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .flash-up, .flash-down { animation: none; }
+}

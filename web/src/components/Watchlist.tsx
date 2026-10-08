@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import ConnectionBanner from "./ConnectionBanner";
 import WatchlistRow from "./WatchlistRow";
 import LoadError from "./LoadError";
 import ListSkeleton from "./ListSkeleton";
+import { useLivePrices } from "@/lib/livePrices";
 import type { CompanySuggestion, WatchlistItem } from "@/lib/types";
 
 // Static, clearly-labeled sample rows shown only when a user's real
@@ -62,6 +64,7 @@ export default function Watchlist() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [suggestions, setSuggestions] = useState<CompanySuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const live = useLivePrices((items ?? []).map((i) => i.ticker));
 
   const refresh = useCallback(() => {
     fetch("/api/watchlist")
@@ -147,6 +150,7 @@ export default function Watchlist() {
   return (
     <div className="mt-6">
       <p className="font-mono text-[10px] tracking-wide text-dim">WATCHLIST</p>
+      <ConnectionBanner status={live.status} />
 
       {loadFailed && items === null && <LoadError what="your watchlist" onRetry={refresh} className="mt-2" />}
 
@@ -155,7 +159,7 @@ export default function Watchlist() {
       {items && items.length > 0 && (
         <div className="mt-2 flex flex-col gap-2">
           {items.map((item) => (
-            <WatchlistRow key={item.ticker} item={item} onRemove={handleRemove} />
+            <WatchlistRow key={item.ticker} item={item} live={live.prices[item.ticker]} onRemove={handleRemove} />
           ))}
         </div>
       )}

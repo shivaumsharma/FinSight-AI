@@ -65,4 +65,31 @@ describe("WatchlistRow", () => {
     rerender(<WatchlistRow item={item()} isDemo onRemove={onRemove} />);
     expect(screen.queryByRole("button", { name: "Remove AAPL from watchlist" })).not.toBeInTheDocument();
   });
+
+  it("prefers a live quote over the loaded price and change", () => {
+    render(<WatchlistRow item={item()} live={{ price: 240.5, changePct: -0.25, currency: "USD", ts: 1 }} />);
+    expect(screen.getByText("$240.50")).toBeInTheDocument();
+    expect(screen.getByText("-0.25%")).toBeInTheDocument();
+    expect(screen.queryByText("$233.10")).not.toBeInTheDocument();
+  });
+
+  it("flashes green when the price rises and red when it falls, and not on first paint", () => {
+    const quote = (price: number) => ({ price, changePct: 0, currency: "USD", ts: 1 });
+    const { rerender } = render(<WatchlistRow item={item()} live={quote(233.1)} />);
+    expect(screen.getByText("$233.10")).not.toHaveAttribute("data-flash");
+
+    rerender(<WatchlistRow item={item()} live={quote(234)} />);
+    expect(screen.getByText("$234.00")).toHaveAttribute("data-flash", "up");
+    expect(screen.getByText("$234.00").className).toContain("flash-up");
+
+    rerender(<WatchlistRow item={item()} live={quote(233)} />);
+    expect(screen.getByText("$233.00")).toHaveAttribute("data-flash", "down");
+  });
+
+  it("does not flash when a re-render brings the same price", () => {
+    const live = { price: 233.1, changePct: 0, currency: "USD", ts: 1 };
+    const { rerender } = render(<WatchlistRow item={item()} live={live} />);
+    rerender(<WatchlistRow item={item({ rating: "Hold" })} live={{ ...live }} />);
+    expect(screen.getByText("$233.10")).not.toHaveAttribute("data-flash");
+  });
 });
