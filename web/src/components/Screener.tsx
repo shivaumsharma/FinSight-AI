@@ -7,6 +7,7 @@ import LoadError from "./LoadError";
 import { currencySymbol } from "@/lib/currency";
 import { fmtCompactNumber } from "@/lib/stockFormat";
 import type { ScreenerData, ScreenerFilters, ScreenerRow } from "@/lib/types";
+import { formatNumber, formatPercent, formatPrice } from "@/lib/numberFormat";
 
 const SORT_OPTIONS: { value: string; label: string }[] = [
   { value: "market_cap", label: "Market Cap" },
@@ -54,13 +55,11 @@ function ScreenerRowCard({ row }: { row: ScreenerRow }) {
           </div>
           <div className="text-right">
             <div className="font-mono text-sm text-text">
-              {currencySymbol(row.currency)}
-              {row.price.toFixed(2)}
+              {formatPrice(row.price, currencySymbol(row.currency))}
             </div>
             {row.change_pct !== null && (
               <div className={`font-mono text-[10px] font-bold ${row.change_pct >= 0 ? "text-accent" : "text-danger"}`}>
-                {row.change_pct >= 0 ? "+" : ""}
-                {row.change_pct.toFixed(2)}%
+                {formatPercent(row.change_pct, { signed: true })}
               </div>
             )}
           </div>
@@ -71,9 +70,9 @@ function ScreenerRowCard({ row }: { row: ScreenerRow }) {
       </div>
       <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-dim">
         <span>MCAP {row.market_cap !== null ? fmtCompactNumber(row.market_cap) : "--"}</span>
-        <span>P/E {row.pe_ratio !== null ? row.pe_ratio.toFixed(1) : "--"}</span>
-        <span>P/B {row.pb_ratio !== null ? row.pb_ratio.toFixed(1) : "--"}</span>
-        <span>DIV {row.dividend_yield !== null ? `${row.dividend_yield.toFixed(2)}%` : "--"}</span>
+        <span>P/E {row.pe_ratio !== null ? formatNumber(row.pe_ratio, 1) : "--"}</span>
+        <span>P/B {row.pb_ratio !== null ? formatNumber(row.pb_ratio, 1) : "--"}</span>
+        <span>DIV {row.dividend_yield !== null ? formatPercent(row.dividend_yield) : "--"}</span>
         <span>VOL {row.volume !== null ? fmtCompactNumber(row.volume) : "--"}</span>
       </div>
     </div>

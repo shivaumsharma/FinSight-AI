@@ -7,6 +7,7 @@ import LoadError from "./LoadError";
 import AddToWatchlistButton from "./AddToWatchlistButton";
 import { currencySymbol } from "@/lib/currency";
 import type { MarketMoversData, MoverItem } from "@/lib/types";
+import { formatPercent, formatPrice } from "@/lib/numberFormat";
 
 function MoverRow({ item }: { item: MoverItem }) {
   return (
@@ -18,12 +19,10 @@ function MoverRow({ item }: { item: MoverItem }) {
         </div>
         <div className="text-right">
           <div className="font-mono text-sm text-text">
-            {currencySymbol(item.currency)}
-            {item.price.toFixed(2)}
+            {formatPrice(item.price, currencySymbol(item.currency))}
           </div>
           <div className={`font-mono text-[10px] font-bold ${item.change_pct >= 0 ? "text-accent" : "text-danger"}`}>
-            {item.change_pct >= 0 ? "+" : ""}
-            {item.change_pct.toFixed(2)}%
+            {formatPercent(item.change_pct, { signed: true })}
           </div>
         </div>
       </Link>

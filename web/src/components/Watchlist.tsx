@@ -7,6 +7,7 @@ import LoadError from "./LoadError";
 import { formatShortDate } from "@/lib/format";
 import { currencySymbol } from "@/lib/currency";
 import type { CompanySuggestion, WatchlistItem } from "@/lib/types";
+import { formatPercent, formatPrice } from "@/lib/numberFormat";
 
 // Static, clearly-labeled sample rows shown only when a user's real
 // watchlist is empty -- gives new users a sense of what the feature
@@ -170,13 +171,11 @@ export default function Watchlist() {
             {item.price !== null && (
               <div className="text-right">
                 <div className="font-mono text-sm text-text">
-                  {currencySymbol(item.currency)}
-                  {item.price.toFixed(2)}
+                  {formatPrice(item.price, currencySymbol(item.currency))}
                 </div>
                 {item.change_pct !== null && (
                   <div className={`font-mono text-[10px] ${item.change_pct >= 0 ? "text-accent" : "text-danger"}`}>
-                    {item.change_pct >= 0 ? "+" : ""}
-                    {item.change_pct.toFixed(2)}%
+                    {formatPercent(item.change_pct, { signed: true })}
                   </div>
                 )}
               </div>

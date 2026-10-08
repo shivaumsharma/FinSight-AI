@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { currencySymbol } from "@/lib/currency";
+import { formatPercent, formatPrice } from "@/lib/numberFormat";
 
 interface SimilarStock {
   ticker: string;
@@ -53,13 +54,11 @@ export default function SimilarStocks({ ticker }: { ticker: string }) {
             <span className="truncate font-mono text-xs font-bold text-text">{s.ticker}</span>
             <span className="truncate font-mono text-[9px] text-dim">{s.name}</span>
             <span className="font-mono text-xs text-text">
-              {currencySymbol(s.currency)}
-              {s.price.toFixed(2)}
+              {formatPrice(s.price, currencySymbol(s.currency))}
             </span>
             {s.change_pct !== null && (
               <span className={`font-mono text-[10px] font-bold ${s.change_pct >= 0 ? "text-accent" : "text-danger"}`}>
-                {s.change_pct >= 0 ? "+" : ""}
-                {s.change_pct.toFixed(2)}%
+                {formatPercent(s.change_pct, { signed: true })}
               </span>
             )}
           </Link>

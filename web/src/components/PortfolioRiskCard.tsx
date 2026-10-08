@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { PORTFOLIO_UPDATED_EVENT } from "@/lib/portfolioEvents";
 import type { PortfolioRiskOverlay } from "@/lib/types";
+import { formatPercent } from "@/lib/numberFormat";
 
 // Risk view of the user's holdings (app/analysis/vol_overlay.py): how much risk the portfolio carries now, not a market
 // forecast, and the card always says so. Renders nothing on fetch failure (same convention as PortfolioFitCard.tsx).
@@ -43,7 +44,7 @@ export default function PortfolioRiskCard() {
       <div className="flex items-center justify-between font-mono text-[10px]">
         <span className="tracking-wide text-dim">RISK VIEW (LAST {overlay.window_days} DAYS)</span>
         <span className="font-bold text-text">
-          {overlay.realised_volatility_pct?.toFixed(1)}% volatility · target {overlay.target_volatility_pct?.toFixed(0)}%
+          {formatPercent(overlay.realised_volatility_pct, { decimals: 1 })} volatility · target {formatPercent(overlay.target_volatility_pct, { decimals: 0 })}
         </span>
       </div>
       <div className="mt-2 h-2 w-full overflow-hidden rounded bg-border-subtle" aria-hidden="true">
@@ -51,9 +52,9 @@ export default function PortfolioRiskCard() {
       </div>
       <p className="mt-1.5 text-xs text-text/90">
         {reduced
-          ? `A volatility-targeting rule would hold about ${exposure.toFixed(0)}% invested and ${overlay.suggested_cash_pct?.toFixed(0)}% in cash right now.`
+          ? `A volatility-targeting rule would hold about ${formatPercent(exposure, { decimals: 0 })} invested and ${formatPercent(overlay.suggested_cash_pct, { decimals: 0 })} in cash right now.`
           : "Recent volatility is at or below the target, so the rule would stay fully invested."}
-        {" "}Worst dip in this window: {overlay.max_drawdown_in_window_pct?.toFixed(1)}%.
+        {" "}Worst dip in this window: {formatPercent(overlay.max_drawdown_in_window_pct, { decimals: 1 })}.
       </p>
       <p className="mt-1.5 text-[11px] text-muted">{overlay.evidence?.takeaway}</p>
       <p className="mt-1 text-[10px] text-dim">{overlay.disclaimer}</p>

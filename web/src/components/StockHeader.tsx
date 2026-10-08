@@ -4,6 +4,7 @@ import Link from "next/link";
 import { currencySymbol } from "@/lib/currency";
 import { fmtPrice } from "@/lib/stockFormat";
 import type { StockOverview } from "@/lib/types";
+import { formatPercent, formatSignedPrice } from "@/lib/numberFormat";
 
 function BackIcon() {
   return (
@@ -44,9 +45,8 @@ export default function StockHeader({ overview }: { overview: StockOverview }) {
         <div className="font-mono text-xl font-bold text-text">{fmtPrice(overview.price, symbol)}</div>
         {overview.change_pct !== null && (
           <div className={`font-mono text-xs font-bold ${positive ? "text-accent" : "text-danger"}`}>
-            {changeAbs !== null && `${positive ? "+" : "-"}${symbol}${Math.abs(changeAbs).toFixed(2)} `}
-            ({positive ? "+" : ""}
-            {overview.change_pct.toFixed(2)}%)
+            {changeAbs !== null && `${formatSignedPrice(changeAbs, symbol)} `}
+            ({formatPercent(overview.change_pct, { signed: true })})
           </div>
         )}
       </div>

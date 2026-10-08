@@ -6,6 +6,7 @@ import AuthGate from "@/components/AuthGate";
 import BottomNav from "@/components/BottomNav";
 import LoadError from "@/components/LoadError";
 import type { IndexQuote } from "@/lib/types";
+import { formatNumber, formatPercent } from "@/lib/numberFormat";
 
 // Full-size version of the home page's IndicesCarousel strip, split
 // into Indian/Global tabs by region (see main.py's INDEX_LIST) --
@@ -73,12 +74,11 @@ export default function IndicesPage() {
                     {idx.price !== null ? (
                       <div className="text-right">
                         <div className="font-mono text-sm text-text">
-                          {idx.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                          {formatNumber(idx.price, 2)}
                         </div>
                         {idx.change_pct !== null && (
                           <div className={`font-mono text-xs font-bold ${idx.change_pct >= 0 ? "text-accent" : "text-danger"}`}>
-                            {idx.change_pct >= 0 ? "+" : ""}
-                            {idx.change_pct.toFixed(2)}%
+                            {formatPercent(idx.change_pct, { signed: true })}
                           </div>
                         )}
                       </div>

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { currencySymbol } from "@/lib/currency";
 import { notifyPortfolioUpdated } from "@/lib/portfolioEvents";
+import { formatPrice } from "@/lib/numberFormat";
 
 // Sticky Buy/Sell bar, always visible on the stock detail page (unlike
 // OrderTicket's own collapsed-behind-a-toggle form on the home page) --
@@ -33,7 +34,7 @@ export default function TradeBar({ ticker, currency }: { ticker: string; currenc
         setMessage(body.message || "Couldn't place that order.");
         return;
       }
-      setMessage(`${side} ${q} ${ticker} filled at ${currencySymbol(currency)}${body.execution_price?.toFixed(2) ?? "?"} (simulated).`);
+      setMessage(`${side} ${q} ${ticker} filled at ${formatPrice(body.execution_price, currencySymbol(currency), "?")} (simulated).`);
       setQuantity("");
       notifyPortfolioUpdated();
     } finally {

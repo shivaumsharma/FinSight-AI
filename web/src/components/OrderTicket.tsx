@@ -5,6 +5,7 @@ import SectionSkeleton from "./SectionSkeleton";
 import { currencySymbol } from "@/lib/currency";
 import { PORTFOLIO_UPDATED_EVENT, notifyPortfolioUpdated } from "@/lib/portfolioEvents";
 import type { CompanySuggestion, Order } from "@/lib/types";
+import { formatPrice, formatQuantity } from "@/lib/numberFormat";
 
 type Side = "BUY" | "SELL";
 
@@ -204,11 +205,10 @@ export default function OrderTicket() {
               <div className="flex items-center justify-between">
                 <span className="font-mono text-[11px] text-text">
                   <span className={`font-bold ${o.side === "BUY" ? "text-accent" : "text-danger"}`}>{o.side}</span>{" "}
-                  {o.quantity} {o.ticker}
+                  {formatQuantity(o.quantity)} {o.ticker}
                 </span>
                 <span className="font-mono text-[10px] text-dim">
-                  {currencySymbol(o.currency)}
-                  {o.execution_price.toFixed(2)}
+                  {formatPrice(o.execution_price, currencySymbol(o.currency))}
                 </span>
               </div>
               {o.rationale && <p className="font-mono text-[9.5px] text-dim">{o.rationale}</p>}

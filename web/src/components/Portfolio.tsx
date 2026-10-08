@@ -9,9 +9,10 @@ import PortfolioRiskCard from "./PortfolioRiskCard";
 import { currencySymbol } from "@/lib/currency";
 import { PORTFOLIO_UPDATED_EVENT, notifyPortfolioUpdated } from "@/lib/portfolioEvents";
 import type { CompanySuggestion, PortfolioAnalysis, PortfolioHolding, PortfolioSummary } from "@/lib/types";
+import { formatNumber, formatPercent } from "@/lib/numberFormat";
 
 function fmt(n: number): string {
-  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return formatNumber(n, 2);
 }
 
 function todayIso(): string {
@@ -223,7 +224,7 @@ export default function Portfolio() {
                   {summary.total_unrealized_pnl >= 0 ? "+" : ""}
                   {currencySymbol(summary.currency)}
                   {fmt(summary.total_unrealized_pnl)}
-                  {summary.total_unrealized_pnl_pct !== null && ` (${summary.total_unrealized_pnl_pct.toFixed(2)}%)`}
+                  {summary.total_unrealized_pnl_pct !== null && ` (${formatPercent(summary.total_unrealized_pnl_pct)})`}
                 </span>
               </div>
             )}
@@ -245,7 +246,7 @@ export default function Portfolio() {
                   {summary.total_today_pnl >= 0 ? "+" : ""}
                   {currencySymbol(summary.currency)}
                   {fmt(summary.total_today_pnl)}
-                  {summary.total_today_pnl_pct !== null && ` (${summary.total_today_pnl_pct.toFixed(2)}%)`}
+                  {summary.total_today_pnl_pct !== null && ` (${formatPercent(summary.total_today_pnl_pct)})`}
                 </span>
               </div>
             )}
@@ -266,9 +267,9 @@ export default function Portfolio() {
             </span>
             {analysis.value_weighted_pct && (
               <span className="font-bold">
-                <span className="text-accent">{analysis.value_weighted_pct.Buy.toFixed(0)}% Buy</span>
+                <span className="text-accent">{formatPercent(analysis.value_weighted_pct.Buy, { decimals: 0 })} Buy</span>
                 {" · "}
-                <span className="text-danger">{analysis.value_weighted_pct.Sell.toFixed(0)}% Sell</span>
+                <span className="text-danger">{formatPercent(analysis.value_weighted_pct.Sell, { decimals: 0 })} Sell</span>
                 <span className="text-dim"> (by value)</span>
               </span>
             )}
@@ -320,7 +321,7 @@ export default function Portfolio() {
                       {h.unrealized_pnl >= 0 ? "+" : ""}
                       {currencySymbol(h.currency)}
                       {fmt(h.unrealized_pnl)}
-                      {h.unrealized_pnl_pct !== null && ` (${h.unrealized_pnl_pct.toFixed(1)}%)`}
+                      {h.unrealized_pnl_pct !== null && ` (${formatPercent(h.unrealized_pnl_pct, { decimals: 1 })})`}
                     </div>
                   </div>
                 ) : (
