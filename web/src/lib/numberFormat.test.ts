@@ -7,7 +7,9 @@ import {
   formatPrice,
   formatQuantity,
   formatRatio,
+  formatSignedNumber,
   formatSignedPrice,
+  formatTrimmed,
 } from "./numberFormat";
 
 const BAD = [null, undefined, NaN, Infinity, -Infinity];
@@ -22,6 +24,8 @@ describe("missing and non-finite input", () => {
     expect(formatQuantity(v)).toBe("N/A");
     expect(formatCompact(v)).toBe("N/A");
     expect(formatCompactMoney(v)).toBe("N/A");
+    expect(formatSignedNumber(v)).toBe("N/A");
+    expect(formatTrimmed(v)).toBe("N/A");
   });
 
   it("uses the caller's fallback when given", () => {
@@ -147,5 +151,26 @@ describe("formatRatio", () => {
   it("formats with suffix", () => {
     expect(formatRatio(21.456)).toBe("21.46x");
     expect(formatRatio(-1.2, "%", 1)).toBe("-1.2%");
+  });
+});
+
+describe("formatSignedNumber", () => {
+  it("always shows the sign except at zero", () => {
+    expect(formatSignedNumber(1.234)).toBe("+1.2");
+    expect(formatSignedNumber(-1.234)).toBe("-1.2");
+    expect(formatSignedNumber(0)).toBe("0.0");
+    expect(formatSignedNumber(-0.04)).toBe("0.0");
+    expect(formatPercent(-0.004, { signed: true })).toBe("0.00%");
+    expect(formatSignedNumber(12, 0)).toBe("+12");
+  });
+});
+
+describe("formatTrimmed", () => {
+  it("groups and drops trailing zeros", () => {
+    expect(formatTrimmed(1234.5)).toBe("1,234.5");
+    expect(formatTrimmed(5)).toBe("5");
+    expect(formatTrimmed(1234567.891)).toBe("1,234,567.89");
+    expect(formatTrimmed(2.5, 0)).toBe("3");
+    expect(formatTrimmed(-0.001)).toBe("0");
   });
 });

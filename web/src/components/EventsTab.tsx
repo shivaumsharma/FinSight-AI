@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { currencySymbol } from "@/lib/currency";
 import { formatShortDate } from "@/lib/format";
+import { formatNumber, formatPrice } from "@/lib/numberFormat";
 
 interface EventsData {
   next_earnings_date: string | null;
@@ -52,10 +53,10 @@ export default function EventsTab({ ticker, currency }: { ticker: string; curren
     rows.push({ date: data.next_ex_dividend_date, label: "Upcoming Ex-Dividend", detail: "Next ex-dividend date" });
   }
   for (const d of data.dividends.slice().reverse()) {
-    rows.push({ date: d.date, label: "Dividend", detail: `${symbol}${d.amount.toFixed(2)} per share` });
+    rows.push({ date: d.date, label: "Dividend", detail: `${formatPrice(d.amount, symbol)} per share` });
   }
   for (const s of data.splits.slice().reverse()) {
-    rows.push({ date: s.date, label: "Stock Split", detail: `${s.ratio.toFixed(2)}:1` });
+    rows.push({ date: s.date, label: "Stock Split", detail: `${formatNumber(s.ratio, 2)}:1` });
   }
 
   if (rows.length === 0) {

@@ -7,6 +7,7 @@ import RatingBadge, { ratingColorClass } from "./RatingBadge";
 import Tabs from "./Tabs";
 import WhatIfPanel from "./WhatIfPanel";
 import type { CalibratedConfidence, DataQuality, NewsSources, ResearchResult, RiskRange, SignalQuality, TrackRecord } from "@/lib/types";
+import { formatCompactMoney, formatNumber, formatPercent, formatPrice, formatQuantity, formatRatio, formatSignedNumber, formatTrimmed } from "@/lib/numberFormat";
 
 function ShareButton({ jobId }: { jobId: string }) {
   const [state, setState] = useState<"idle" | "sharing" | "copied" | "error">("idle");
@@ -273,10 +274,8 @@ const DOLLAR_LARGE_KEYS = new Set(["Revenue", "EBIT", "Net Income", "Free Cash F
 const DOLLAR_SMALL_KEYS = new Set(["Current Price", "Intrinsic Value (per share)", "EPS"]);
 
 function fmtLargeDollar(v: number, symbol: string): string {
-  const abs = Math.abs(v);
-  if (abs >= 1e9) return `${symbol}${(v / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `${symbol}${(v / 1e6).toFixed(2)}M`;
-  return `${symbol}${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  if (Math.abs(v) >= 1e6) return formatCompactMoney(v, symbol);
+  return `${v < 0 ? "-" : ""}${symbol}${formatTrimmed(Math.abs(v), 2)}`;
 }
 
 // "P/E vs Own History"/"P/B vs Own History" (app/analysis/alpha_factors.py)
@@ -298,16 +297,16 @@ function formatFieldValue(key: string, value: unknown, symbol: string): string {
   if (value === null || value === undefined) return "N/A";
   if (isVsHistoryValue(value)) {
     const pct = value.vs_history_pct ?? 0;
-    return `${value.current}x vs ${value.historical_avg}x ${value.years_used}yr avg (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%, ${value.signal})`;
+    return `${value.current}x vs ${value.historical_avg}x ${value.years_used}yr avg (${formatPercent(pct, { decimals: 1, signed: true })}, ${value.signal})`;
   }
   if (typeof value !== "number") return String(value);
 
-  if (FRACTION_KEYS.has(key)) return `${(value * 100).toFixed(2)}%`;
-  if (key.endsWith("(%)")) return `${value.toFixed(2)}%`;
+  if (FRACTION_KEYS.has(key)) return formatPercent(value, { fraction: true });
+  if (key.endsWith("(%)")) return formatPercent(value);
   if (DOLLAR_LARGE_KEYS.has(key)) return fmtLargeDollar(value, symbol);
-  if (DOLLAR_SMALL_KEYS.has(key)) return `${symbol}${value.toFixed(2)}`;
-  if (key === "Debt to Equity") return `${value.toFixed(2)}x`;
-  return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (DOLLAR_SMALL_KEYS.has(key)) return formatPrice(value, symbol);
+  if (key === "Debt to Equity") return formatRatio(value);
+  return formatTrimmed(value, 2);
 }
 
 // Underscore-prefixed keys (e.g. alpha_factors' "_market_note"/
@@ -354,13 +353,11 @@ function FactorCategory({ label, data, symbol }: { label: string; data: Record<s
 }
 
 function fmtScore(n: number | null | undefined): string {
-  if (n === null || n === undefined) return "N/A";
-  return `${n >= 0 ? "+" : ""}${n.toFixed(1)}`;
+  return formatSignedNumber(n, 1);
 }
 
 function fmtMoney(n: number | null | undefined, symbol: string): string {
-  if (n === null || n === undefined) return "N/A";
-  return `${symbol}${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatPrice(n, symbol);
 }
 
 const NARRATIVE_SECTIONS = [
@@ -451,8 +448,7 @@ export default function ReportView({
           <div className="text-right">
             <div className="font-mono text-[10px] text-muted">UPSIDE</div>
             <div className={`font-mono text-lg font-bold ${upsideNum >= 0 ? "text-accent" : "text-danger"}`}>
-              {upsideNum >= 0 ? "+" : ""}
-              {upsideNum.toFixed(1)}%
+              {formatPercent(upsideNum, { decimals: 1, signed: true })}
             </div>
           </div>
         )}
@@ -481,7 +477,7 @@ export default function ReportView({
         </div>
       )}
       {latencySeconds !== null && (
-        <div className="mt-2 text-right text-[10px] font-mono text-dim">generated in {latencySeconds.toFixed(1)}s</div>
+        <div className="mt-2 text-right text-[10px] font-mono text-dim">generated in {formatNumber(latencySeconds, 1)}s</div>
       )}
 
       {/* Tabs */}
@@ -545,12 +541,12 @@ export default function ReportView({
                   {monteCarlo && (
                     <div>
                       <div className="mb-2 font-mono text-[11px] font-bold tracking-wide text-muted">
-                        MONTE CARLO ({monteCarlo.n_samples.toLocaleString()} samples)
+                        MONTE CARLO ({formatQuantity(monteCarlo.n_samples)} samples)
                       </div>
                       <div className="flex gap-2">
                         <StatTile label="MEAN" value={fmtMoney(monteCarlo.mean, symbol)} />
                         <StatTile label="MEDIAN" value={fmtMoney(monteCarlo.median, symbol)} />
-                        <StatTile label="P(UNDERVALUED)" value={`${(monteCarlo.prob_undervalued * 100).toFixed(1)}%`} />
+                        <StatTile label="P(UNDERVALUED)" value={formatPercent(monteCarlo.prob_undervalued, { fraction: true, decimals: 1 })} />
                       </div>
                       <p className="mt-2 text-[11px] text-muted">
                         90% CI: {fmtMoney(monteCarlo.ci_lower, symbol)} - {fmtMoney(monteCarlo.ci_upper, symbol)}
@@ -567,7 +563,7 @@ export default function ReportView({
                         <StatTile label="VERDICT" value={mlClassifier.verdict} />
                         <StatTile
                           label="CONFIDENCE"
-                          value={`${((mlClassifier.probabilities[mlClassifier.verdict] || 0) * 100).toFixed(1)}%`}
+                          value={formatPercent(mlClassifier.probabilities[mlClassifier.verdict] || 0, { fraction: true, decimals: 1 })}
                         />
                       </div>
                     </div>
@@ -580,7 +576,7 @@ export default function ReportView({
                       </div>
                       <div className="flex gap-2">
                         <StatTile label="DDM VALUE" value={fmtMoney(ddm.intrinsic_value, symbol)} />
-                        <StatTile label="UPSIDE VS. PRICE" value={`${ddm.upside_pct >= 0 ? "+" : ""}${ddm.upside_pct.toFixed(1)}%`} />
+                        <StatTile label="UPSIDE VS. PRICE" value={formatPercent(ddm.upside_pct, { decimals: 1, signed: true })} />
                         <StatTile label="SIGNAL" value={ddm.signal} />
                       </div>
                       <p className="mt-2 text-[11px] text-dim">

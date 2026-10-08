@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import AuthGate from "@/components/AuthGate";
 import BottomNav from "@/components/BottomNav";
 import type { AccuracyTearsheetResponse } from "@/lib/types";
+import { formatNumber, formatPercent } from "@/lib/numberFormat";
 
 export default function AccuracyTearsheetPage() {
   return (
@@ -70,16 +71,16 @@ function HeadlineCard({ canonical }: { canonical: NonNullable<AccuracyTearsheetR
       <p className="font-mono text-[10px] tracking-wide text-dim">{canonical.metric.toUpperCase()}</p>
       <div className="mt-3 grid grid-cols-2 gap-2 text-center">
         <div>
-          <p className={`font-mono text-2xl font-bold ${modelColor}`}>{canonical.model_accuracy_pct.toFixed(1)}%</p>
+          <p className={`font-mono text-2xl font-bold ${modelColor}`}>{formatPercent(canonical.model_accuracy_pct, { decimals: 1 })}</p>
           <p className="font-mono text-[9px] tracking-wide text-dim">
-            MODEL (95% CI {canonical.model_ci_95[0].toFixed(1)}-{canonical.model_ci_95[1].toFixed(1)}%)
+            MODEL (95% CI {formatNumber(canonical.model_ci_95[0], 1)}-{formatPercent(canonical.model_ci_95[1], { decimals: 1 })})
           </p>
         </div>
         <div>
-          <p className="font-mono text-2xl font-bold text-muted">{canonical.always_buy_baseline_pct.toFixed(1)}%</p>
+          <p className="font-mono text-2xl font-bold text-muted">{formatPercent(canonical.always_buy_baseline_pct, { decimals: 1 })}</p>
           <p className="font-mono text-[9px] tracking-wide text-dim">
-            ALWAYS-BUY BASELINE (95% CI {canonical.always_buy_ci_95[0].toFixed(1)}-
-            {canonical.always_buy_ci_95[1].toFixed(1)}%)
+            ALWAYS-BUY BASELINE (95% CI {formatNumber(canonical.always_buy_ci_95[0], 1)}-
+            {formatPercent(canonical.always_buy_ci_95[1], { decimals: 1 })})
           </p>
         </div>
       </div>

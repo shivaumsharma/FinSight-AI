@@ -820,12 +820,10 @@ def get_conversation_listen_token(current_user: str = Depends(auth.get_current_u
     backend half of a real-time main-loop STT path is built and unit-
     tested here, but the frontend doesn't call this yet -- the current
     batch-record voice session (VoiceInputButton.tsx) stays the live
-    production default until this is wired up behind a flag, since a
-    WebSocket connection to this backend doesn't work in production
-    at all yet (see infra/api_gateway.tf's own comment: the current
-    stopgap API Gateway is HTTP-only and can't carry a WebSocket
-    upgrade -- this endpoint is real, tested, and only blocked from
-    prod browser use by that separate infra gap).
+    production default until this is wired up behind a flag. A browser
+    must reach this socket through CloudFront or the backend directly,
+    not the HTTP-only API Gateway (checked 2026-10-09: CloudFront
+    answers a WebSocket handshake with 101).
     """
     return {
         "token": auth.sign_realtime_voice_token(current_user, auth.PURPOSE_CONVERSATION),

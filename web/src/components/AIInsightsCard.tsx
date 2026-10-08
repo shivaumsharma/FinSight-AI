@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import RatingBadge from "./RatingBadge";
 import { currencySymbol } from "@/lib/currency";
 import { fmtPrice } from "@/lib/stockFormat";
+import { formatPercent } from "@/lib/numberFormat";
 
 interface StockInsights {
   rating: string;
@@ -56,7 +57,7 @@ export default function AIInsightsCard({ ticker, currency }: { ticker: string; c
               {data.upside_percent !== null && (
                 <div className={`font-mono text-[10px] font-bold ${data.upside_percent >= 0 ? "text-accent" : "text-danger"}`}>
                   {data.upside_percent >= 0 ? "+" : ""}
-                  {data.upside_percent.toFixed(1)}% vs current price
+                  {formatPercent(data.upside_percent, { decimals: 1 })} vs current price
                 </div>
               )}
             </div>

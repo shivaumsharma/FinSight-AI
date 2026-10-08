@@ -258,7 +258,7 @@ curl -X POST https://<your-cloud-run-url>/v1/research \
 cd web
 npx vercel@latest link
 ```
-Then set `FINSIGHT_API_URL` (the Cloud Run URL above) and `FINSIGHT_API_KEY` (matching `API_KEY` on the backend) as Environment Variables in the Vercel dashboard. For the live price feed, set `PRICE_STREAM_WS_URL` to the backend's WebSocket address (for example `wss://<cloudfront-domain>/v1/prices/stream`); if unset it is derived from `FINSIGHT_API_URL`. It must reach the backend itself, because the API Gateway in front of the HTTP API cannot carry WebSocket connections. This has not been verified against the deployed CloudFront distribution yet.
+Then set `FINSIGHT_API_URL` (the Cloud Run URL above) and `FINSIGHT_API_KEY` (matching `API_KEY` on the backend) as Environment Variables in the Vercel dashboard. For the live price feed, set `PRICE_STREAM_WS_URL` to the backend's WebSocket address (for example `wss://<cloudfront-domain>/v1/prices/stream`); if unset it is derived from `FINSIGHT_API_URL`. It must reach the backend itself, because the API Gateway in front of the HTTP API cannot carry WebSocket connections. Checked on 2026-10-09: a WebSocket handshake to the deployed CloudFront domain is answered `101 Switching Protocols` by the Elastic Beanstalk nginx, so no extra proxy configuration is needed; CloudFront's default 30 s origin timeout is covered by the feed's 15 s heartbeat. Because the frontend's `FINSIGHT_API_URL` already points at CloudFront, the derived address works without setting `PRICE_STREAM_WS_URL`. The price endpoint itself goes live with the next backend deploy.
 
 **Redeploy the frontend:**
 ```bash

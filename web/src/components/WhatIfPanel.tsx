@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import RatingBadge from "./RatingBadge";
 import type { WhatIfResponse, WhatIfResult } from "@/lib/types";
+import { formatNumber, formatPercent, formatPrice, formatSignedNumber } from "@/lib/numberFormat";
 
 // "What-If: Adjust DCF Assumptions" sliders panel (app/valuation/what_if_dcf.py).
 // Unlike ModelCompare.tsx (a single button click), this is
@@ -130,7 +131,7 @@ export default function WhatIfPanel({ endpoint, symbol }: { endpoint: string; sy
 
       {result.wacc_floored && (
         <p className="mt-3 text-[10px] text-warn">
-          Note: WACC floored to {result.wacc_used.toFixed(2)}% at this slider position to avoid
+          Note: WACC floored to {formatPercent(result.wacc_used)} at this slider position to avoid
           terminal-value instability (same floor the real DCF uses).
         </p>
       )}
@@ -138,12 +139,9 @@ export default function WhatIfPanel({ endpoint, symbol }: { endpoint: string; sy
       <div className="mt-4 flex flex-wrap gap-2">
         <StatTile
           label="INTRINSIC VALUE"
-          value={`${symbol}${result.intrinsic_value.toLocaleString(undefined, {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}`}
+          value={formatPrice(result.intrinsic_value, symbol)}
         />
-        <StatTile label="UPSIDE" value={`${result.upside_percent >= 0 ? "+" : ""}${result.upside_percent.toFixed(1)}%`} />
+        <StatTile label="UPSIDE" value={formatPercent(result.upside_percent, { decimals: 1, signed: true })} />
       </div>
 
       <div className="mt-3">
@@ -188,8 +186,7 @@ function CompositeScoreBreakdown({
       <div className="flex items-center justify-between">
         <p className="font-mono text-[10px] tracking-wide text-dim">COMPOSITE SCORE BREAKDOWN</p>
         <span className={`font-mono text-sm font-bold ${zoneColor}`}>
-          {composite_score >= 0 ? "+" : ""}
-          {composite_score.toFixed(1)}
+          {formatSignedNumber(composite_score)}
         </span>
       </div>
 
@@ -206,28 +203,28 @@ function CompositeScoreBreakdown({
         />
       </div>
       <div className="mt-1 flex justify-between font-mono text-[9px] text-dim">
-        <span>SELL (&le;{sell_threshold.toFixed(1)})</span>
+        <span>SELL (&le;{formatNumber(sell_threshold, 1)})</span>
         <span>HOLD</span>
-        <span>BUY (&ge;{buy_threshold.toFixed(1)})</span>
+        <span>BUY (&ge;{formatNumber(buy_threshold, 1)})</span>
       </div>
 
       <div className="mt-3 flex flex-col gap-1 border-t border-border-subtle pt-2">
         <div className="flex items-center justify-between font-mono text-[11px]">
           <span className="text-muted">
-            DCF ({dcf_score >= 0 ? "+" : ""}
-            {dcf_score.toFixed(1)}) &times; {relative_score !== null ? `${(dcf_weight * 100).toFixed(0)}%` : "100%"}
+            DCF ({formatSignedNumber(dcf_score)}) &times;{" "}
+            {relative_score !== null ? formatPercent(dcf_weight, { fraction: true, decimals: 0 }) : "100%"}
           </span>
           <span className="text-text">
-            {((relative_score !== null ? dcf_weight : 1) * dcf_score).toFixed(1)}
+            {formatNumber((relative_score !== null ? dcf_weight : 1) * dcf_score, 1)}
           </span>
         </div>
         {relative_score !== null ? (
           <div className="flex items-center justify-between font-mono text-[11px]">
             <span className="text-muted">
-              Relative ({relative_score >= 0 ? "+" : ""}
-              {relative_score.toFixed(1)}) &times; {(relative_weight * 100).toFixed(0)}%
+              Relative ({formatSignedNumber(relative_score)}) &times;{" "}
+              {formatPercent(relative_weight, { fraction: true, decimals: 0 })}
             </span>
-            <span className="text-text">{(relative_weight * relative_score).toFixed(1)}</span>
+            <span className="text-text">{formatNumber(relative_weight * relative_score, 1)}</span>
           </div>
         ) : (
           <p className="font-mono text-[10px] text-dim">Relative valuation unavailable for this company -- DCF weighted at 100%.</p>
@@ -265,7 +262,7 @@ function SliderRow({
     <div>
       <div className="mb-1 flex items-baseline justify-between">
         <label className="font-mono text-[11px] text-muted">{label}</label>
-        <span className="font-mono text-xs font-bold text-accent">{value.toFixed(2)}%</span>
+        <span className="font-mono text-xs font-bold text-accent">{formatPercent(value)}</span>
       </div>
       <input
         type="range"

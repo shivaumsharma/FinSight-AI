@@ -27,8 +27,22 @@ export function formatNumber(n: number | null | undefined, decimals = 2, fallbac
   return nf({ minimumFractionDigits: decimals, maximumFractionDigits: decimals, signDisplay: "negative" }).format(n);
 }
 
+// A value that rounds to zero prints unsigned ("0.0"), never "+0.0" or "-0.0".
 function signed(n: number, decimals: number): string {
-  return nf({ minimumFractionDigits: decimals, maximumFractionDigits: decimals, signDisplay: "exceptZero" }).format(n);
+  const text = formatNumber(Math.abs(n), decimals);
+  if (Number(text.replace(/,/g, "")) === 0) return text;
+  return `${n < 0 ? "-" : "+"}${text}`;
+}
+
+// "+1.2" / "-1.2" / "0.0" for scores and other unit-less figures.
+export function formatSignedNumber(n: number | null | undefined, decimals = 1, fallback = NA): string {
+  return isNum(n) ? signed(n, decimals) : fallback;
+}
+
+// Grouped, up to maxDecimals places and no trailing zeros: 1234.5 -> "1,234.5", 5 -> "5".
+export function formatTrimmed(n: number | null | undefined, maxDecimals = 2, fallback = NA): string {
+  if (!isNum(n)) return fallback;
+  return nf({ minimumFractionDigits: 0, maximumFractionDigits: maxDecimals, signDisplay: "negative" }).format(n);
 }
 
 // Sub-cent prices keep three significant digits (0.00001234 -> 0.0000123) instead of collapsing to 0.00.

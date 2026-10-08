@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { AccuracyTearsheetResponse } from "@/lib/types";
+import { formatPercent } from "@/lib/numberFormat";
 
 // Same "compact summary card on Home, driving into the full page"
 // pattern as ScoreboardHomeCard -- see that component's own comment.
@@ -43,8 +44,8 @@ export default function AccuracyTearsheetHomeCard() {
         <p className="mt-1.5 font-mono text-xs text-dim">Backtest not yet run for this deployment.</p>
       ) : canonical ? (
         <p className="mt-1.5 font-mono text-xs text-text">
-          <span className={`font-bold ${modelColor}`}>{canonical.model_accuracy_pct.toFixed(1)}%</span> model vs{" "}
-          <span className="text-muted">{canonical.always_buy_baseline_pct.toFixed(1)}%</span> Always-Buy baseline
+          <span className={`font-bold ${modelColor}`}>{formatPercent(canonical.model_accuracy_pct, { decimals: 1 })}</span> model vs{" "}
+          <span className="text-muted">{formatPercent(canonical.always_buy_baseline_pct, { decimals: 1 })}</span> Always-Buy baseline
           (n={canonical.n})
         </p>
       ) : null}

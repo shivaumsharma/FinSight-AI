@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { ScoreboardResponse } from "@/lib/types";
+import { formatPercent } from "@/lib/numberFormat";
 
 // Prominent, not buried -- this is the app's core credibility feature
 // (does the model actually beat doing nothing?), so it gets a card at
@@ -48,8 +49,8 @@ export default function ScoreboardHomeCard() {
         <p className="mt-1.5 font-mono text-xs text-danger">Couldn&apos;t load the scoreboard. Try again.</p>
       ) : hasData ? (
         <p className="mt-1.5 font-mono text-xs text-text">
-          30-day: <span className={`font-bold ${modelColor}`}>{window30!.model_accuracy_pct!.toFixed(1)}%</span> model
-          vs <span className="text-muted">{bestBaseline!.toFixed(1)}%</span> best naive baseline (n=
+          30-day: <span className={`font-bold ${modelColor}`}>{formatPercent(window30!.model_accuracy_pct, { decimals: 1 })}</span> model
+          vs <span className="text-muted">{formatPercent(bestBaseline, { decimals: 1 })}</span> best naive baseline (n=
           {window30!.sample_size})
         </p>
       ) : (

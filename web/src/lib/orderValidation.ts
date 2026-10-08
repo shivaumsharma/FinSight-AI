@@ -1,5 +1,7 @@
 // Order-ticket input rules and error wording, kept out of the component so they can be tested on their own.
 
+import { formatQuantity } from "./numberFormat";
+
 export const MAX_QUANTITY = 1_000_000;
 export const MAX_QUANTITY_DECIMALS = 6;
 
@@ -34,7 +36,7 @@ export function validateOrder({ ticker, quantity }: OrderInput): OrderValidation
     const decimals = q.includes(".") ? q.split(".")[1].length : 0;
     if (!Number.isFinite(n) || n <= 0) errors.quantity = "Quantity must be greater than zero.";
     else if (decimals > MAX_QUANTITY_DECIMALS) errors.quantity = `Use at most ${MAX_QUANTITY_DECIMALS} decimal places.`;
-    else if (n > MAX_QUANTITY) errors.quantity = `Quantity can't exceed ${MAX_QUANTITY.toLocaleString("en-US")}.`;
+    else if (n > MAX_QUANTITY) errors.quantity = `Quantity can't exceed ${formatQuantity(MAX_QUANTITY)}.`;
     else parsed = n;
   }
 
